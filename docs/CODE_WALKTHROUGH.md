@@ -1,26 +1,23 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current 0.1.x foundation from the public Flutter API down to redb, including the native watch path.
+This walkthrough describes the current 0.1.x native foundation from the Flutter API down to redb, including native watch fan-out and persisted encrypted boxes.
 
 ## 1. Package boundary
-
-The package is intentionally split into three layers:
 
 ```text
 Flutter app
   -> Dart public API (DxtrBox / Box)
-  -> NativeDxtrApi seam / generated flutter_rust_bridge bindings
+  -> NativeDxtrApi seam
+  -> generated flutter_rust_bridge bindings
   -> Rust API functions
   -> redb storage engine
 ```
 
-The Dart layer owns API ergonomics, dynamic-value encoding, cached key metadata, and the public `BoxEvent` stream facade. Rust owns durable storage, transactions, and native event fan-out. The application does not generate model adapters or serializers.
+The Dart layer owns API ergonomics, dynamic-value encoding, cached key metadata, and the public `BoxEvent` facade. Rust owns durable storage, transactions, encryption, handle lifetime, and native event fan-out.
 
 ## 2. Public entry point
 
-`lib/dxtr_box.dart` exports the supported package API. Internal bridge and codec details remain under `lib/src/`.
-
-Typical usage is:
+`lib/dxtr_box.dart` exports the supported package API. Internal bridge, codec, and generated binding details stay under `lib/src/`.
 
 ```dart
 await DxtrBox.init();
@@ -30,7 +27,16 @@ final theme = await box.get('theme');
 await box.close();
 ```
 
-Storage-backed reads are asynchronous by design. Unlike Hive's in-memory boxes, dxtr_box does not retain every value in the Dart heap.
+Encrypted boxes use the same public API:
+
+```dart
+final secure = await DxtrBox.open(
+  'secrets',
+  encryptionKey: 'correct horse battery staple',
+);
+```
+
+Storage-backed reads are asynchronous by design. dxtr_box does not retain every value in the Dart heap to imitate Hive's synchronous in-memory model.
 
 ## 3. `DxtrBox`
 
@@ -39,22 +45,20 @@ File: `lib/src/dxtr_box.dart`
 `DxtrBox` owns package-level lifecycle operations:
 
 - `init()` resolves the database directory and initializes the native engine.
-- `open()` validates the box name, opens the redb file, registers a native watcher, then hydrates key metadata.
-- `deleteBox()` removes a box file through Rust when no handles are live.
+- `open()` validates the box name, opens the native box, registers a native watcher, then hydrates key metadata.
+- `deleteBox()` removes a box file only when no native handles are live.
 - `boxExists()` checks whether the corresponding `.dxtr` file exists.
-- `bindNativeApi()` is the test/alternate-engine seam.
+- `bindNativeApi()` remains the test/alternate-engine seam.
 
-Each open handle receives a random 128-bit watcher id. Watch registration happens before key hydration so mutations that occur during startup are either included in the refreshed metadata snapshot or delivered by the native stream.
+Each open handle receives a random 128-bit watcher id. Watch registration happens before key hydration so startup mutations are either reflected in the refreshed metadata snapshot or delivered through the native stream.
 
-`lazy: true` is rejected until a distinct lazy-box contract is implemented. Normal reads already fetch values from native storage on demand rather than retaining full box contents in Dart RAM.
+`lazy: true` is rejected until a distinct lazy-box contract exists. Normal values are already read on demand from Rust/redb.
 
 ## 4. `Box`
 
 File: `lib/src/box.dart`
 
-`Box` is the Hive-shaped object used by application code.
-
-It stores only lightweight state in Dart:
+A `Box` keeps only lightweight Dart-side state:
 
 ```text
 name
@@ -64,19 +68,19 @@ closed/closing state
 public BoxEvent controller
 ```
 
-Values stay in redb and are fetched on demand.
+Values stay in native storage.
 
-### Write path
-
-For `put('age', 42)`:
+### Plain write path
 
 ```text
 Box.put
-  -> DxtrCodec.encode(42)
-  -> NativeDxtrApi.put(box, key, bytes)
+  -> DxtrCodec.encode
+  -> NativeDxtrApi.put
   -> FRB
   -> api::put
   -> db::put
+  -> MessagePack validation
+  -> optional value encryption
   -> redb write transaction
   -> commit
   -> Rust emit NativeBoxEvent::Put
@@ -85,20 +89,20 @@ Box.put
   -> Dart metadata/event update
 ```
 
-The initiating `Box` also updates its shared key metadata after the native call succeeds, so `keys`/`length` are immediately coherent after `await put(...)`. Public events are not emitted locally; they come only from the Rust stream, avoiding duplicate notifications.
+The public event is emitted only after a successful redb commit. Local Dart code does not emit a duplicate event.
 
 ### Read path
 
-For `get('age')`:
-
 ```text
 Box.get
-  -> NativeDxtrApi.get(box, key)
+  -> NativeDxtrApi.get
   -> FRB
   -> api::get
   -> db::get
   -> redb read transaction
-  -> Vec<u8>
+  -> optional AEAD decrypt/authenticate
+  -> MessagePack validation
+  -> bytes back through FRB
   -> DxtrCodec.decode
   -> dynamic Dart value
 ```
@@ -107,37 +111,37 @@ A missing key returns `defaultValue`.
 
 ### `putAll`
 
-Dart encodes every value before invoking native code. Rust validates every MessagePack payload before opening the redb write transaction, then inserts all entries in one transaction and commits once. After the commit, Rust emits one native `put` event per committed entry.
+Dart encodes all values first. Rust validates every MessagePack payload and prepares encrypted payloads before opening the redb write transaction. All entries are then inserted and committed atomically. One native `put` event is emitted per committed entry.
 
 ### `where`
 
-The current `where()` API is intentionally a linear client-side scan. It reads each persisted value and applies the Dart predicate. It is not the planned query engine and does not use indexes.
+The current `where()` is a linear client-side scan over persisted values. It is intentionally not the future indexed query engine.
 
 ### `watch`
 
-`Box.watch()` is backed by native Rust fan-out.
+`Box.watch()` is backed by Rust fan-out:
 
 ```text
-Rust WATCHERS
+WATCHERS
   box name
     -> watcher id A -> StreamSink
     -> watcher id B -> StreamSink
     -> ...
 ```
 
-A mutation performed by any handle is emitted after the redb commit succeeds and is delivered to every registered handle for that box. `watch(key:)` filters by key in Dart but still forwards `clear`, preserving existing public semantics.
+Mutations performed by any handle are delivered to every registered handle after commit. `watch(key:)` filters in Dart while still forwarding `clear`.
 
-When a sink send fails, Rust removes that watcher entry. Normal `Box.close()` explicitly unregisters its watcher.
+Failed sink sends are removed from the native watcher registry. `Box.close()` unregisters its watcher explicitly.
 
 ### Close path
 
 ```text
 Box.close
-  -> unregister watcher in Rust / drop StreamSink
+  -> unregister native watcher
   -> cancel Dart native stream subscription
   -> NativeDxtrApi.closeBox
-  -> native handle refcount decrement
-  -> close public BoxEvent controller
+  -> decrement native handle refcount
+  -> close public Dart event controller
 ```
 
 Concurrent calls to `close()` share one in-flight Future.
@@ -146,7 +150,7 @@ Concurrent calls to `close()` share one in-flight Future.
 
 File: `lib/src/codec.dart`
 
-The Dart/Rust wire format is MessagePack. Supported values are:
+The Dart/Rust wire format is MessagePack. Supported values include:
 
 - null
 - bool
@@ -158,31 +162,31 @@ The Dart/Rust wire format is MessagePack. Supported values are:
 - `Uint8List`
 - `DateTime`
 
-DateTime and byte arrays use tagged representations so their Dart types survive round trips. Maps reject non-string keys to keep the storage format deterministic and queryable later.
+DateTime and byte arrays use tagged representations. Maps reject non-string keys so the persisted format remains deterministic.
 
-Rust's codec validation checks incoming MessagePack before a transaction is written. Rust does not deserialize application models in the MVP; it stores opaque validated MessagePack bytes.
+Rust validates MessagePack before values are accepted into storage. Application models are not deserialized in Rust.
 
 ## 6. Native seam and Flutter Rust Bridge
 
 File: `lib/src/native_api.dart`
 
-`NativeDxtrApi` isolates package logic from generated FRB symbols. This allows Dart behavior to be unit-tested with an in-memory fake and contains FRB-generated naming/layout changes in one adapter.
+`NativeDxtrApi` prevents generated FRB symbols from leaking through the rest of the package. Unit tests can replace it with an in-memory fake, while production uses `FrbNativeDxtrApi`.
 
-The production `FrbNativeDxtrApi` initializes `RustLib` once, delegates CRUD/lifecycle calls, and maps generated `NativeBoxEvent` values into the package-internal `NativeWatchEvent` representation.
+The production adapter initializes `RustLib` once, delegates lifecycle/CRUD calls, and maps generated native watch events into package-internal watch events.
 
-Generated bindings are checked in under `lib/src/rust/` and `rust/src/frb_generated.rs`. Native build ownership belongs to the checked-in Cargokit package under `rust_builder/`; the root package does not own duplicate platform FFI scaffolds.
+Generated bindings live under `lib/src/rust/` and `rust/src/frb_generated.rs`. Native build ownership is the checked-in Cargokit package under `rust_builder/`.
 
 ## 7. Rust API boundary
 
 File: `rust/src/api.rs`
 
-This module exposes functions for flutter_rust_bridge and delegates storage work to `db.rs`.
+Small lifecycle functions are `#[frb(sync)]`; value I/O remains asynchronous from Dart's perspective.
 
-Small lifecycle calls are marked `#[frb(sync)]`; value I/O remains asynchronous from Dart's perspective.
+`open_box(name, encryption_key)` now forwards the optional key directly into `db::open`. The FRB signature did not change, so no binding regeneration was required for the encryption milestone.
 
-Native watch registration uses FRB 2.8 `StreamSink<NativeBoxEvent>`. The watcher registry is keyed by box name and watcher id. `put`, `put_all`, `delete`, and `clear` emit only after the corresponding `db` function has returned successfully, so the event describes a committed mutation.
+Native watch registration uses FRB 2.8 `StreamSink<NativeBoxEvent>`. `put`, `put_all`, `delete`, and `clear` emit only after the storage function returns successfully.
 
-Encryption keys are still rejected until persisted encryption metadata and value-path integration are implemented.
+For encrypted boxes, watch events still carry the original plaintext MessagePack bytes after commit. Encryption is a storage concern, not a public event-format change.
 
 ## 8. redb engine
 
@@ -194,74 +198,123 @@ Each box maps to one file:
 {base_path}/{box_name}.dxtr
 ```
 
-The engine uses:
+Two redb tables are used:
 
-```rust
-TableDefinition<&str, &[u8]>
+```text
+data: key -> stored value bytes
+meta: storage format + encryption metadata
 ```
-
-Keys are UTF-8 strings. Values are MessagePack byte slices.
 
 ### Database cache and handles
 
-Open databases are cached with per-box handle counts. The global lock protects cache lookup/mutation only; operations clone the database handle and release the cache lock before starting redb work.
+Open databases are cached with per-box handle counts. Each cached entry also owns the resolved encryption state for that open box.
 
-Closing one `Box` therefore does not invalidate another handle for the same box. `deleteBox` is rejected while live handles remain.
+```text
+OpenDatabase
+  db: Arc<Database>
+  handles: usize
+  encryption: Arc<EncryptionState>
+```
+
+Opening a second handle to an already-open encrypted box must provide the same password. Rust derives a candidate key using the persisted salt and rejects mismatches before incrementing the handle count.
 
 ### Transactions
 
 - `get`, `all_keys`, and `len` use read transactions.
 - `put`, `put_all`, `delete`, and `clear` use write transactions.
 - Writes become visible only after `commit()` succeeds.
+- `put_all` validates and prepares all values before the write transaction, preventing partial writes caused by a later malformed value.
 
-`put_all` validates all payloads before starting its write, preventing a malformed later entry from leaving an earlier subset committed.
+## 9. Persisted encryption
 
-## 9. Encryption foundation
+Files:
 
-File: `rust/src/crypto.rs`
+- `rust/src/crypto.rs`
+- `rust/src/db.rs`
+- `rust/Cargo.toml`
 
-The optional `encryption` Cargo feature contains:
+The standard native build now enables the `encryption` Cargo feature by default.
 
-- random 16-byte salt generation
-- Argon2 key derivation to 32 bytes
-- ChaCha20Poly1305 authenticated encryption
-- random 12-byte nonce per encrypted value
-- nonce + ciphertext payload layout
+### Metadata contract
 
-This is deliberately not connected to redb yet. The next encryption milestone must add persisted box encryption metadata, key verification, decrypt-on-read, encrypt-on-write, and migration/version rules before the public `encryptionKey` option is considered implemented.
+The `meta` table stores:
+
+```text
+format_version   = "dxtr_box/1"
+encryption_mode  = "none" | "chacha20poly1305"
+encryption_salt  = 16 random bytes          # encrypted boxes only
+key_check         = encrypted sentinel       # encrypted boxes only
+```
+
+Each encrypted box gets a unique random salt. Argon2 derives a 32-byte key from the caller's password and that salt.
+
+The key itself is never persisted. Instead, dxtr_box stores an encrypted known sentinel. Reopen derives the candidate key and decrypts/authenticates that sentinel. Missing or incorrect passwords fail before the box is registered as open.
+
+### Value layout
+
+`crypto::encrypt` generates a fresh 12-byte nonce for every value and stores:
+
+```text
+nonce || ChaCha20Poly1305 ciphertext+tag
+```
+
+On reads, authentication failure is returned as an error. Tampered ciphertext is never passed to the Dart codec.
+
+### Plaintext compatibility
+
+Boxes created before the metadata table existed are treated as known plaintext boxes. On normal reopen they receive explicit `dxtr_box/1` + `none` metadata.
+
+Supplying an `encryptionKey` for an existing plaintext box is rejected. The project will add an explicit migration operation later rather than silently rewriting a box under a different storage contract.
+
+Likewise, reopening an encrypted box without a key is rejected.
 
 ## 10. Why keys are cached but values are not
 
-The Hive-like API expects cheap `length`, `isEmpty`, and `keys`. Keeping only keys in Dart provides those ergonomics without loading every stored value into RAM.
+Hive-like APIs expect cheap `length`, `isEmpty`, and `keys`. Keeping only key metadata in Dart preserves those ergonomics without loading every stored value into RAM.
 
-Multiple same-isolate handles share the same key metadata object. Native watch events also update that metadata, so changes from another handle remain coherent.
+Same-isolate handles share key metadata, and native watch events keep it coherent when another handle mutates the box.
 
-For very large key counts this still has a memory cost. A later API may expose native iterators/pagination.
+For extremely large key counts, a future native iterator/pagination API may replace full key caching.
 
 ## 11. Testing seams
 
-The suite is split by responsibility:
-
 ```text
 test/codec_test.dart
-  Dart dynamic-value serialization
+  Dart serialization
 
 test/box_test.dart
   Box/DxtrBox semantics using FakeNativeDxtrApi
-  native-watch fan-out / filtering / teardown semantics
+  native-watch fan-out/filtering/teardown semantics
 
 test/native_integration_test.dart
   real Dart -> FRB -> Rust -> redb persistence
   real cross-handle native watch delivery
+  encrypted close/reopen + wrong/missing-key rejection
 
 rust/src/db.rs tests
-  real redb files and transaction behavior
+  redb transactions
+  handle lifecycle
+  unique persisted salts
+  encrypted on-disk payloads
+  correct/wrong/missing password behavior
+  tamper rejection
+  plaintext/encrypted mode mismatch
 ```
 
-The Rust engine uses process-global state, so its unit tests take a test-only mutex before changing the base path/cache.
+Rust tests serialize mutations of process-global base-path/database state behind a test-only mutex.
 
-See `docs/TESTING.md` for the full test matrix and CI gates.
+CI also runs Rust fmt/clippy/tests on Ubuntu, macOS, and Windows plus the five-platform Flutter example build matrix.
 
 ## 12. Next architectural step
 
-With lifecycle hardening, five-platform native builds, and native watch fan-out in place, the next storage milestone is persisted encryption metadata and value-path encryption. After that come batch deletion/compaction, crash/reopen durability testing, benchmark work, Cargo feature splitting, and Dart 3.13 native tree-shaking/size hardening.
+After persisted encryption is merged, the next storage/parity work is:
+
+1. `deleteAll`
+2. `compact()`
+3. process-level crash/reopen durability testing
+4. benchmark harness against `hive_ce`
+5. explicit plaintext -> encrypted migration design
+6. Cargo feature splitting before binary-size tuning
+7. Dart 3.13 native tree-shaking / `record_use` hardening
+
+The 1.0 functional-replacement claim remains gated by `docs/HIVE_FUNCTIONAL_PARITY.md`.

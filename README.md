@@ -6,11 +6,11 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.1.0 native MVP hardening / active development**. Public API and storage format are not stable yet.
+> Status: **0.1.x native foundation / active development**. Public API and storage format are not stable yet.
 
 ## Why
 
-Hive's original project is no longer a suitable foundation for new production work, while Dart-only box databases generally keep their hot data in Dart memory. `dxtr_box` targets Hive-like ergonomics while moving persistence, transactions, and heavy work into Rust.
+`dxtr_box` targets Hive-like ergonomics while moving persistence, transactions, encryption, and native event fan-out into Rust. Values are not retained wholesale in the Dart heap just to imitate Hive's synchronous read model.
 
 ## Design goals
 
@@ -20,7 +20,8 @@ Hive's original project is no longer a suitable foundation for new production wo
 - One file per box: `{base_path}/{box_name}.dxtr`.
 - Thin Dart wrapper over Rust through Flutter Rust Bridge v2.
 - MessagePack value encoding.
-- Optional encryption with Argon2 + ChaCha20Poly1305.
+- Per-box encryption with Argon2 + ChaCha20Poly1305.
+- Native cross-handle `watch()` fan-out through FRB streams.
 - Android, iOS, macOS, Linux, Windows first; Web fallback later.
 - No `build_runner` for normal usage.
 - Avoid loading an entire box into Dart RAM.
@@ -39,9 +40,23 @@ await box.delete('theme');
 await box.close();
 ```
 
+Encrypted boxes use the same API with an `encryptionKey`:
+
+```dart
+final secure = await DxtrBox.open(
+  'secrets',
+  encryptionKey: 'correct horse battery staple',
+);
+
+await secure.put('token', 'secret');
+await secure.close();
+```
+
+An encrypted box must be reopened with the same key. Missing or incorrect keys are rejected. A plaintext box is never silently reinterpreted as encrypted; explicit migration will be required for that transition.
+
 Native reads are asynchronous by design: unlike Hive's in-memory read model, `dxtr_box` may perform real storage I/O and should not block Flutter's UI isolate.
 
-Values are already fetched from native storage on demand rather than cached wholesale in Dart. Hive-style `lazy: true` semantics are not implemented yet, so `DxtrBox.open(..., lazy: true)` currently throws `UnsupportedError` instead of pretending to support a distinct lazy mode.
+Values are fetched from native storage on demand rather than cached wholesale in Dart. Hive-style `lazy: true` semantics are not implemented yet, so `DxtrBox.open(..., lazy: true)` currently throws `UnsupportedError` instead of pretending to support a distinct lazy mode.
 
 ## Engine
 
@@ -50,13 +65,27 @@ Values are already fetched from native storage on demand rather than cached whol
 - `flutter_rust_bridge = 2.8`
 - `rmp-serde`
 - `once_cell` + `parking_lot`
-- optional `argon2` + `chacha20poly1305`
+- `argon2`
+- `chacha20poly1305`
 
 Native build ownership lives in the checked-in `rust_builder/` Cargokit plugin. The root package is the Dart-facing facade and intentionally has no duplicate platform plugin scaffolds.
 
+### Encryption storage contract
+
+Encrypted boxes persist metadata in a dedicated redb `meta` table:
+
+- storage format marker: `dxtr_box/1`
+- encryption mode: `none` or `chacha20poly1305`
+- unique random 16-byte salt per encrypted box
+- encrypted key-check sentinel for early wrong-key rejection
+
+Values are validated as MessagePack before storage, encrypted with a fresh random nonce per value, and authenticated by ChaCha20Poly1305. Reads decrypt and authenticate before returning bytes to Dart.
+
+Legacy boxes without metadata are treated as known plaintext boxes and gain explicit plaintext metadata when normally reopened. Existing plaintext data is never encrypted in place implicitly.
+
 ## Engineering docs
 
-- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction flow.
+- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, and encryption flow.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, local commands, CI gates, and deferred integration tiers.
 - [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
@@ -70,31 +99,36 @@ Current coverage includes:
 - Dart dynamic codec round trips and invalid-map validation.
 - `Box`/`DxtrBox` behavior through an in-memory native API fake.
 - multi-handle lifecycle, concurrent close serialization, delete-while-open policy, base-path switching, and Windows-safe box-name validation.
+- native cross-handle watch fan-out and watcher teardown semantics.
 - real Dart -> FRB -> Rust -> redb Linux round-trip with close/reopen persistence.
+- real encrypted Dart -> FRB -> Rust -> redb close/reopen round-trip with wrong/missing-key rejection.
 - real redb CRUD, clear, persistence-after-reopen, malformed `putAll`, unsafe box names, and delete-box behavior.
-- Rust default and `encryption` feature test runs in CI on Ubuntu, macOS, and Windows.
+- encryption tests for unique persisted salts, authenticated value round-trip, on-disk ciphertext, wrong keys, tampering, and plaintext/encrypted mode mismatch.
+- Rust fmt/clippy/tests on Ubuntu, macOS, and Windows.
 - example compilation on Android, iOS without code signing, macOS, Linux, and Windows.
 
 ## Roadmap
 
-### 0.1.0 — MVP
+### 0.1.x — Native foundation
 
 - init / open
 - put / get / delete / clear
+- putAll
 - length / keys / values
+- deleteBox / boxExists
 - Android / iOS / macOS / Linux / Windows
-- FRB code generation
-- Rust + Flutter tests
+- FRB code generation + Cargokit integration
 - lifecycle and multi-handle hardening
+- native `watch()` stream
+- persisted per-box encryption metadata + encrypted value path
 
 ### 0.2.0 — Hive parity foundation
 
-- putAll / deleteAll
-- deleteBox / boxExists
-- encryption
-- native `watch()` stream
+- deleteAll
 - compact
 - benchmark against `hive_ce`
+- crash/reopen durability tests
+- explicit plaintext -> encrypted migration path
 - Cargo feature splitting for optional functionality
 
 ### 0.3.0 — Query & migration
@@ -106,7 +140,6 @@ Current coverage includes:
 
 ### 0.4.0 — Production hardening
 
-- ACID crash tests
 - binary-size regression checks
 - Dart 3.13 native tree-shaking investigation using `record_use` + link hooks
 - target minimal native binary under 1 MB where technically achievable

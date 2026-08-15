@@ -12,7 +12,7 @@ crate-type = ["cdylib", "staticlib"]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 
 [features]
-default = []
+default = ["encryption"]
 encryption = ["dep:argon2", "dep:chacha20poly1305", "dep:rand_core"]
 
 [dependencies]

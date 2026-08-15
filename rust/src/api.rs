@@ -81,12 +81,7 @@ pub fn init_db(path: String) -> Result<(), String> {
 
 #[frb(sync)]
 pub fn open_box(name: String, encryption_key: Option<String>) -> Result<(), String> {
-    if encryption_key.is_some() {
-        return Err(
-            "encryption is reserved for milestone 0.2.0; enable feature wiring first".into(),
-        );
-    }
-    db::open(&name)
+    db::open(&name, encryption_key.as_deref())
 }
 
 #[frb(sync)]

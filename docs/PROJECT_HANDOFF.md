@@ -6,98 +6,71 @@
 
 Target: a Hive-simple Flutter API backed by redb, with durable storage outside the Dart heap and no app-level model code generation.
 
-The 1.0 product claim is explicitly defined as **functional replacement for practical Hive/Hive CE local-database workloads**, not source-level/drop-in API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` is a release gate: any practical capability classified as `Gap` blocks the 1.0 functional-replacement claim.
+The 1.0 product claim is **functional replacement for practical Hive/Hive CE local-database workloads**, not source-level/drop-in API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` is a release gate: any practical capability classified as `Gap` blocks the 1.0 claim.
 
-## Current snapshot — 0.1.0 native MVP hardening
+## Current snapshot — 0.1.x native foundation
 
-Implemented and validated:
+Implemented and validated or currently under PR validation:
 
 - Public Dart facade: `DxtrBox`, `Box`, `BoxEvent`.
 - MessagePack wire codec for null/bool/int/double/String/List/Map<String,dynamic>/Uint8List/DateTime.
 - Rust `redb = 2.1.0` engine with one `{box}.dxtr` file per box.
 - Transactional put, putAll, get, contains, delete, clear, keys, length, close, deleteBox, boxExists.
-- Optional encryption primitives using Argon2 + ChaCha20Poly1305 behind Cargo feature `encryption`.
-- Generated flutter_rust_bridge 2.8 Dart/Rust bindings checked in.
+- Generated flutter_rust_bridge 2.8 bindings checked in.
 - Cargokit `rust_builder` integration checked in and used as the sole native build owner.
 - Production `FrbNativeDxtrApi`; `DxtrBox` uses the Rust engine by default.
-- Real Linux native integration test: Dart -> FRB -> Rust -> redb -> close/reopen persistence -> Dart.
-- Five-platform example compilation is green on Android, iOS without code signing, macOS, Linux, and Windows.
-- Native per-box handle refcounts: closing one handle does not invalidate other handles.
-- Shared same-isolate Dart key metadata across handles for the same box.
-- Concurrent calls to `Box.close()` share one in-flight native teardown.
-- `deleteBox` rejects boxes with live handles.
-- Repeated init to the same canonical path is idempotent; the native engine rejects path switches while boxes are open.
-- Cross-platform Windows-safe box-name validation, including reserved device names.
-- Root Android/iOS/macOS/Linux/Windows plugin scaffolds are removed; `rust_builder/` is the sole native build owner.
-- `tool/scaffold_platforms.sh` is a binding-refresh helper and cannot recreate duplicate root native ownership.
-- `lazy: true` is explicitly rejected until a real Hive-style lazy contract exists. Normal dxtr_box reads already fetch values from native storage on demand instead of retaining whole-box values in Dart RAM.
-- Native Rust event fan-out for `put`, `putAll`, `delete`, and `clear` using FRB 2.8 `StreamSink`.
-- Every open `Box` handle registers a unique native watcher id and receives committed mutations from other handles through FRB.
-- Public `Box.watch()` uses the native stream as its sole event source; local Dart writes do not emit a duplicate second event.
-- Watcher teardown drops the Rust watcher before cancelling the Dart subscription, then closes the native box handle.
-- Failed native stream sends are pruned from the Rust watcher registry.
-- Dart unit coverage includes cross-handle watch fan-out, key filtering, no duplicate events, and per-handle watcher cleanup.
-- Native Linux integration coverage includes a real cross-handle watch assertion through Dart -> FRB -> Rust -> redb -> FRB -> Dart.
-- GitHub Actions: Flutter format/analyze/test, Linux native FRB round trip, Rust fmt/clippy/default+encryption tests on Ubuntu/macOS/Windows, and five-platform example builds.
+- Five-platform example compilation on Android, iOS without code signing, macOS, Linux, and Windows.
+- Native per-box handle refcounts and multi-handle lifecycle hardening.
+- Shared same-isolate Dart key metadata across handles.
+- Concurrent `Box.close()` calls share one teardown future.
+- `deleteBox` rejects live handles.
+- Repeated init to the same canonical path is idempotent; path switching is rejected while boxes are open.
+- Windows-safe box-name validation.
+- `lazy: true` is explicitly rejected until a distinct lazy contract exists.
+- Native Rust event fan-out for `put`, `putAll`, `delete`, and `clear` through FRB `StreamSink`.
+- Every open `Box` handle registers a unique native watcher id.
+- Public `Box.watch()` uses native events as its sole event source.
+- Native Linux integration coverage includes real cross-handle watch delivery.
+- Persisted box metadata table with storage format marker `dxtr_box/1`.
+- Persisted encryption mode: `none` or `chacha20poly1305`.
+- Unique random 16-byte salt per encrypted box.
+- Argon2-derived 32-byte key; key material itself is never persisted.
+- Encrypted key-check sentinel for early missing/wrong-key rejection.
+- ChaCha20Poly1305 value encryption with fresh random nonce per value.
+- Decrypt/authenticate before MessagePack bytes are returned to Dart.
+- Existing plaintext boxes cannot be silently reopened as encrypted; explicit migration will be required.
+- Legacy boxes without metadata are migrated to explicit plaintext metadata on normal reopen.
+- Standard native Cargo build enables the `encryption` feature by default.
+- Rust encryption coverage: on-disk ciphertext, reopen with same key, missing/wrong key rejection, unique persisted salts, tamper rejection, plaintext/encrypted mode mismatch.
+- Native Linux Dart -> FRB -> Rust -> redb encrypted close/reopen integration coverage.
 
 ## Native naming invariant
 
-FRB 2.8 and Cargokit must agree on one native artifact name across build and runtime loading.
-
-Canonical name:
+FRB 2.8 and Cargokit must agree on one native artifact name:
 
 ```text
 rust_lib_dxtr_box
 ```
 
-Therefore:
-
-- Cargo package name: `rust_lib_dxtr_box`
-- Cargo `[lib]` name: `rust_lib_dxtr_box`
-- Cargokit plugin package: `rust_lib_dxtr_box`
-- generated FRB loader stem: `rust_lib_dxtr_box`
-
-Do not rename only one of these fields. Linux/macOS validation demonstrated that mismatched names can compile Rust successfully but fail when Flutter packages or loads the native library.
-
-## Documentation map
-
-- `docs/CODE_WALKTHROUGH.md` — API-to-storage execution flow and architectural rationale.
-- `docs/TESTING.md` — current tests, CI gates, deferred integration tiers, and local commands.
-- `docs/HIVE_FUNCTIONAL_PARITY.md` — capability matrix and 1.0 functional-replacement release gate.
-- `.github/workflows/ci.yml` — baseline Flutter/Rust/native integration CI.
-- `.github/workflows/platform_builds.yml` — Android/iOS/macOS/Linux/Windows example compile matrix.
-
-## Deliberate API corrections
-
-The initial Hive-shaped proposal used synchronous `get()` / `containsKey()` / `values`. A redb-backed database does not keep every value in Dart RAM, so native storage reads should not block Flutter's UI isolate. The foundation therefore exposes storage reads asynchronously.
-
-`length` and `keys` are cached metadata in the Dart `Box`; values are fetched from redb on demand.
-
-The initial proposal also exposed `lazy: true` before a distinct lazy contract existed. Until that contract is designed and tested, `DxtrBox.open(..., lazy: true)` must throw `UnsupportedError`; a flag with no behavioral effect is not acceptable.
-
-Functional parity explicitly allows API shape to differ where the architecture demands it. Do not reintroduce whole-box Dart caching merely to imitate synchronous Hive reads.
+Therefore Cargo package name, Cargo `[lib]` name, Cargokit package, and generated FRB loader stem must stay aligned.
 
 ## Native integration architecture
 
-The root `dxtr_box` package is the Dart-facing facade. It is **not** a second FFI plugin.
+The root `dxtr_box` package is the Dart-facing facade, not a second FFI plugin.
 
-Native build ownership belongs exclusively to the nested `rust_lib_dxtr_box` package under `rust_builder/`, generated by FRB 2.8/Cargokit. Duplicate root FFI plugin metadata/scaffolds previously caused stale native paths and are intentionally removed.
+Native build ownership belongs exclusively to the nested `rust_lib_dxtr_box` package under `rust_builder/`, generated by FRB 2.8/Cargokit.
 
-The checked-in generated bindings are under `lib/src/rust/`. `FrbNativeDxtrApi` initializes `RustLib` once and delegates public database operations and native watch streams to those bindings.
+Checked-in generated bindings live under `lib/src/rust/`. `FrbNativeDxtrApi` initializes `RustLib` once and delegates CRUD/lifecycle/watch calls.
 
-`tool/scaffold_platforms.sh` is now a binding refresh helper: it verifies the checked-in `rust_builder/`, runs `flutter pub get`, and runs FRB `generate`. It must not run `flutter create --template=plugin_ffi` or normal-workflow `integrate` calls that recreate duplicate root platform ownership.
+`tool/scaffold_platforms.sh` is a binding-refresh helper. It must not recreate duplicate root FFI ownership.
 
 ## Native watch architecture
-
-`rust/src/api.rs` owns a per-box watcher registry:
 
 ```text
 box name -> watcher id -> StreamSink<NativeBoxEvent>
 ```
 
-Each `DxtrBox.open()` creates a random 128-bit watcher id, registers its stream before hydrating key metadata, and keeps the resulting Dart subscription for the lifetime of that `Box` handle.
-
-Mutation ordering is:
+Mutation ordering:
 
 ```text
 Dart mutation
@@ -110,72 +83,135 @@ Dart mutation
   -> cached key metadata update + public BoxEvent
 ```
 
-The public event is therefore tied to a successful committed mutation. `putAll` emits one `put` event per committed entry.
+For encrypted boxes, watch events still contain the original plaintext MessagePack payload after the storage commit. Encryption is deliberately confined to the storage layer.
 
-`Box.close()` tears down in this order:
+## Encryption architecture
+
+`rust/src/db.rs` uses two tables:
 
 ```text
-unregister native watcher / drop Rust StreamSink
-  -> cancel Dart subscription
-  -> close native box handle
-  -> close public Dart event controller
+data: key -> stored value bytes
+meta: storage format + encryption metadata
 ```
 
-This ordering avoids retaining a native stream producer while Dart waits for subscription cancellation.
+Encrypted metadata:
+
+```text
+format_version   = "dxtr_box/1"
+encryption_mode  = "chacha20poly1305"
+encryption_salt  = 16 random bytes
+key_check         = encrypted known sentinel
+```
+
+Plain boxes store:
+
+```text
+format_version   = "dxtr_box/1"
+encryption_mode  = "none"
+```
+
+`DxtrBox.open(name, encryptionKey: ...)` reaches the same FRB signature as before. Rust resolves or creates the box encryption state during `db::open`.
+
+Encrypted open sequence:
+
+```text
+read persisted salt
+  -> Argon2(password, salt)
+  -> derive 32-byte key
+  -> decrypt/authenticate key_check
+  -> reject if authentication fails
+  -> cache EncryptionState with open database handle
+```
+
+Encrypted value write:
+
+```text
+MessagePack bytes
+  -> validate
+  -> random 12-byte nonce
+  -> ChaCha20Poly1305 encrypt
+  -> store nonce || ciphertext+tag
+  -> commit
+```
+
+Encrypted value read:
+
+```text
+stored nonce || ciphertext+tag
+  -> ChaCha20Poly1305 authenticate/decrypt
+  -> reject tampering
+  -> validate MessagePack
+  -> return plaintext bytes through FRB
+```
+
+The current milestone does not silently encrypt an existing plaintext box. That transition must become an explicit migration operation with failure/recovery semantics.
 
 ## Current validation state
 
-Required green gates:
+Required green gates for PR #6:
 
 ```text
 Flutter / Ubuntu
   format -> analyze -> unit tests
 
 Native / Linux
-  cargo release build -> Dart/FRB/Rust/redb round-trip test
+  cargo release build -> plaintext + encrypted Dart/FRB/Rust/redb round trips
   including cross-handle native watch delivery
 
 Rust / Ubuntu + macOS + Windows
-  rustfmt -> clippy -D warnings -> default tests -> encryption-feature tests
+  rustfmt -> clippy -D warnings -> default tests -> encryption tests
 
 Example compilation
   Android -> Linux -> Windows -> macOS -> iOS --no-codesign
 ```
 
+Latest validation progress:
+
+- Flutter format/analyze/tests passed on PR #6.
+- Linux native plaintext + encrypted FRB round-trip passed on PR #6.
+- Rust fmt + clippy passed on Ubuntu/macOS/Windows.
+- One encryption unit test exposed a test-only retained `Arc<Database>` file lock during reopen; the test was corrected to release inspection handles before close/reopen and a new CI run was triggered.
+
 ## Next implementation sequence
 
-1. Merge native `watch()` fan-out after CI + five-platform validation is green.
-2. Implement persisted encryption metadata: format/version marker, unique random salt per encrypted box, key verification, encrypt/decrypt in the value path.
-3. Add `deleteAll`, `compact()`, and benchmark harness against `hive_ce`.
+1. Finish PR #6 persisted-encryption CI + five-platform validation, update docs, then merge.
+2. Add `deleteAll`.
+3. Add `compact()` with explicit semantics and tests.
 4. Add process-level crash/reopen ACID tests.
-5. Split optional Rust functionality into Cargo features before binary-size tuning.
-6. Add Dart 3.13 native tree-shaking hardening using build/link hooks and `package:record_use` where the FRB/native-symbol mapping permits it.
-7. Add binary-size regression CI with separate measurements for minimal CRUD, CRUD+encryption, and full-feature builds.
-8. Only after the storage/bridge path is stable, start 0.3 query/index work.
-9. Before 1.0 RC, execute the full Hive Functional Parity Audit against the latest Hive CE release and close every practical `Gap`.
+5. Add benchmark harness against `hive_ce`.
+6. Design explicit plaintext -> encrypted migration and recovery semantics.
+7. Split optional Rust functionality into Cargo features before binary-size tuning.
+8. Add Dart 3.13 native tree-shaking hardening using build/link hooks and `package:record_use` where FRB/native-symbol mapping permits it.
+9. Add binary-size regression CI for minimal CRUD, CRUD+encryption, and full-feature builds.
+10. Only after storage/bridge hardening, begin 0.3 query/index work.
+11. Before 1.0 RC, execute the full Hive Functional Parity Audit against the latest Hive CE release and close every practical `Gap`.
 
 ## Hive Functional Parity release policy
 
-The audit uses these classifications:
+Classifications:
 
-- `Exact` — equivalent user-visible capability and semantics.
-- `Compatible` — same practical capability with a different API or implementation model.
-- `Superseded` — dxtr_box uses a different mechanism that fully covers the practical use case.
-- `Not applicable` — Hive-specific implementation detail with no capability loss.
-- `Gap` — missing practical capability; blocks 1.0.
+- `Exact`
+- `Compatible`
+- `Superseded`
+- `Not applicable`
+- `Gap`
 
-The audit must cover at minimum CRUD/batch operations, lazy behavior, events, encryption, compaction, custom objects/schema evolution, isolate access, lifecycle semantics, crash durability, migration, Web/IndexedDB behavior, and practical Flutter integration.
-
-Immediately before 1.0 RC, refresh the matrix against the latest Hive CE public API and add/refresh automated tests and real Hive CE migration fixtures for all practical parity claims.
+The audit must cover CRUD/batch operations, lazy behavior, events, encryption, compaction, custom objects/schema evolution, isolate access, lifecycle semantics, crash durability, migration, Web/IndexedDB behavior, and practical Flutter integration.
 
 ## Dart 3.13 native tree-shaking policy
 
-Native tree-shaking is a production-hardening priority, not an MVP blocker. The intended order is:
+Order:
 
-`functional FRB/redb core -> Cargo feature splitting -> record_use/link-hook integration -> size measurement -> further symbol/linker tuning`.
+`functional FRB/redb core -> Cargo feature splitting -> record_use/link-hook integration -> size measurement -> linker tuning`.
 
-Do not claim a `<1MB` binary until measured per target architecture and build mode. Track the minimal CRUD binary separately from encryption-enabled and full-feature variants.
+Do not claim a `<1MB` binary until measured per target architecture/build mode. Track minimal CRUD, CRUD+encryption, and full-feature builds separately.
 
-## Security rule for 0.2 encryption
+## Security rules
 
-Never derive a key from a fixed global salt. Persist a unique random salt per encrypted box and derive a 32-byte key with Argon2id. Store nonce+ciphertext for each encrypted value. ChaCha20Poly1305 authentication failure must reject modified payloads and wrong keys.
+- Never derive a key from a fixed global salt.
+- Persist a unique random salt per encrypted box.
+- Use Argon2 to derive the 32-byte key.
+- Use a unique random nonce for every encrypted value.
+- ChaCha20Poly1305 authentication failure must reject wrong keys and modified payloads.
+- Never persist the derived key or plaintext password.
+- Never silently reinterpret plaintext data as encrypted data.
