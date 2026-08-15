@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current 0.1.x native foundation from the Flutter API down to redb, including native watch fan-out, persisted encrypted boxes, bulk deletion, and explicit compaction.
+This walkthrough describes the current 0.1.x native foundation from the Flutter API down to redb, including native watch fan-out, persisted encryption, explicit plaintext -> encrypted migration, bulk deletion, compaction, crash durability, and the benchmark seam.
 
 ## 1. Package boundary
 
@@ -8,12 +8,13 @@ This walkthrough describes the current 0.1.x native foundation from the Flutter 
 Flutter app
   -> Dart public API (DxtrBox / Box)
   -> NativeDxtrApi seam
+  -> optional NativeEncryptionMigrationApi maintenance capability
   -> generated flutter_rust_bridge bindings
   -> Rust API functions
   -> redb storage engine
 ```
 
-The Dart layer owns API ergonomics, dynamic-value encoding, cached key metadata, and the public `BoxEvent` facade. Rust owns durable storage, transactions, encryption, handle lifetime, native event fan-out, and storage maintenance operations.
+The Dart layer owns API ergonomics, dynamic-value encoding, cached key metadata, lifecycle guards, and the public `BoxEvent` facade. Rust owns durable storage, transactions, encryption, handle lifetime, native event fan-out, migration, and storage maintenance operations.
 
 ## 2. Public entry point
 
@@ -27,11 +28,21 @@ final theme = await box.get('theme');
 await box.close();
 ```
 
-Encrypted boxes use the same public API:
+Encrypted boxes use the same open API:
 
 ```dart
 final secure = await DxtrBox.open(
   'secrets',
+  encryptionKey: 'correct horse battery staple',
+);
+```
+
+Existing plaintext boxes are never reinterpreted as encrypted during `open()`. Migration is explicit:
+
+```dart
+await box.close();
+await DxtrBox.encryptBox(
+  'settings',
   encryptionKey: 'correct horse battery staple',
 );
 ```
@@ -46,9 +57,24 @@ File: `lib/src/dxtr_box.dart`
 
 - `init()` resolves the database directory and initializes the native engine.
 - `open()` validates the box name, opens the native box, registers a native watcher, then hydrates key metadata.
-- `deleteBox()` removes a box file only when no native handles are live.
+- `deleteBox()` removes a box file only when no Dart handles are live.
+- `encryptBox()` explicitly converts a closed plaintext box to encrypted storage.
 - `boxExists()` checks whether the corresponding `.dxtr` file exists.
 - `bindNativeApi()` remains the test/alternate-engine seam.
+
+`encryptBox()` performs early Dart guards before crossing FFI:
+
+```text
+initialized?
+  -> valid box name?
+  -> non-empty encryption key?
+  -> no live Dart handles for this name?
+  -> configured engine implements NativeEncryptionMigrationApi?
+  -> native migration
+  -> clear cached key metadata for the closed box
+```
+
+The native layer repeats the critical persisted-state checks and remains the authority for storage correctness.
 
 Each open handle receives a random 128-bit watcher id. Watch registration happens before key hydration so startup mutations are either reflected in the refreshed metadata snapshot or delivered through the native stream.
 
@@ -131,7 +157,7 @@ Box.deleteAll(keys)
   -> Dart shared key metadata removes committed deletions
 ```
 
-Missing keys do not produce synthetic delete events. This keeps watch semantics tied to actual committed mutations rather than requested mutations.
+Missing keys do not produce synthetic delete events.
 
 ### `compact`
 
@@ -149,9 +175,7 @@ Box.compact
   -> bool result back to Dart
 ```
 
-The native layer tracks boxes currently being compacted separately. Access that races with compaction fails explicitly with a retryable “box is compacting” error instead of silently using a stale handle.
-
-The boolean result is redb's compaction result and is intentionally surfaced to the caller. dxtr_box does not currently auto-compact on close or according to a size threshold.
+Access that races with compaction fails explicitly rather than silently using a stale handle. dxtr_box does not currently auto-compact on close or according to a size threshold.
 
 ### `where`
 
@@ -210,25 +234,25 @@ Rust validates MessagePack before values are accepted into storage. Application 
 
 File: `lib/src/native_api.dart`
 
-`NativeDxtrApi` prevents generated FRB symbols from leaking through the rest of the package. Unit tests can replace it with an in-memory fake, while production uses `FrbNativeDxtrApi`.
+`NativeDxtrApi` prevents generated FRB symbols from leaking through the rest of the package. Unit tests and alternate engines can implement the normal lifecycle/CRUD/watch seam without claiming they can rewrite encrypted storage.
 
-The production adapter initializes `RustLib` once, delegates lifecycle/CRUD/watch/maintenance calls, and maps generated native watch events into package-internal watch events.
+Migration is separated as `NativeEncryptionMigrationApi`. Production `FrbNativeDxtrApi` implements both interfaces. This keeps encryption migration an explicit optional maintenance capability while preserving a clean primary test seam.
 
-Generated bindings live under `lib/src/rust/` and `rust/src/frb_generated.rs`. Native build ownership is the checked-in Cargokit package under `rust_builder/`.
+Generated bindings live under `lib/src/rust/` and `rust/src/frb_generated.rs`. CI regenerates them with `flutter_rust_bridge_codegen 2.8.0` and fails if committed generated files drift from `rust/src/api.rs`.
 
-The PR #7 API expansion added generated bindings for `deleteAll` and `compact`; when this boundary changes, `make frb-generate` is the preferred regeneration path.
+Native build ownership is the checked-in Cargokit package under `rust_builder/`.
 
 ## 7. Rust API boundary
 
 File: `rust/src/api.rs`
 
-Small lifecycle functions are `#[frb(sync)]`; value I/O remains asynchronous from Dart's perspective.
+Small lifecycle and maintenance functions are exposed through FRB; value I/O remains asynchronous from Dart's perspective.
 
 `open_box(name, encryption_key)` forwards the optional key into `db::open`.
 
-Native watch registration uses FRB 2.8 `StreamSink<NativeBoxEvent>`. `put`, `put_all`, `delete`, `delete_all`, and `clear` emit only after the storage function returns successfully.
+`encrypt_box(name, encryption_key)` takes the existing per-box mutation lock and delegates to `db::encrypt_box`, preventing in-process races with other mutation/maintenance paths.
 
-`delete_all` returns the exact set of keys removed by the committed transaction so event emission and Dart metadata can remain precise.
+Native watch registration uses FRB 2.8 `StreamSink<NativeBoxEvent>`. `put`, `put_all`, `delete`, `delete_all`, and `clear` emit only after the storage function returns successfully.
 
 For encrypted boxes, watch events still carry the original plaintext MessagePack bytes after commit. Encryption is a storage concern, not a public event-format change.
 
@@ -249,9 +273,9 @@ data: key -> stored value bytes
 meta: storage format + encryption metadata
 ```
 
-### Database cache and handles
+### Database cache and maintenance state
 
-Open databases are cached with per-box handle counts. Each cached entry also owns the resolved encryption state for that open box.
+Open databases are cached with per-box handle counts and resolved encryption state:
 
 ```text
 OpenDatabase
@@ -260,23 +284,15 @@ OpenDatabase
   encryption: Arc<EncryptionState>
 ```
 
-Opening a second handle to an already-open encrypted box must provide the same password. Rust derives a candidate key using the persisted salt and rejects mismatches before incrementing the handle count.
-
-A separate `COMPACTING` set protects the maintenance boundary. A box is not treated as normally open while the exclusive compaction operation is in progress.
+Separate maintenance sets track compaction and migration so normal open/delete/access paths can reject conflicts explicitly.
 
 ### Transactions
 
 - `get`, `all_keys`, and `len` use read transactions.
 - `put`, `put_all`, `delete`, `delete_all`, and `clear` use write transactions.
-- Writes become visible only after `commit()` succeeds.
-- `put_all` validates and prepares all values before the write transaction, preventing partial writes caused by a later malformed value.
-- `delete_all` performs requested removals in one write transaction and returns only successfully removed existing keys.
-
-### Compaction
-
-Compaction requires exclusive access to the database object. dxtr_box therefore coordinates compaction through the native registry rather than exposing a raw redb handle to Dart.
-
-The operation is explicit because compaction has workload and latency implications. Policy such as “compact after N deletes” or “compact when wasted bytes exceed X%” must be designed and measured separately.
+- writes become visible only after `commit()` succeeds.
+- `put_all` validates and prepares all values before the write transaction.
+- `delete_all` performs requested removals in one write transaction and returns only existing keys actually removed.
 
 ## 9. Persisted encryption
 
@@ -286,11 +302,9 @@ Files:
 - `rust/src/db.rs`
 - `rust/Cargo.toml`
 
-The standard native build enables the `encryption` Cargo feature by default.
+The standard native build currently enables the `encryption` Cargo feature by default.
 
 ### Metadata contract
-
-The `meta` table stores:
 
 ```text
 format_version   = "dxtr_box/1"
@@ -299,17 +313,11 @@ encryption_salt  = 16 random bytes          # encrypted boxes only
 key_check         = encrypted sentinel       # encrypted boxes only
 ```
 
-Each encrypted box gets a unique random salt. Argon2 derives a 32-byte key from the caller's password and that salt.
-
-The key itself is never persisted. Instead, dxtr_box stores an encrypted known sentinel. Reopen derives the candidate key and decrypts/authenticates that sentinel. Missing or incorrect passwords fail before the box is registered as open.
+Each encrypted box gets a unique random salt. Argon2 derives a 32-byte key from the caller's password and that salt. The key itself is never persisted.
 
 ### Value layout
 
-`crypto::encrypt` generates a fresh 12-byte nonce for every value and stores:
-
-```text
-nonce || ChaCha20Poly1305 ciphertext+tag
-```
+Encryption uses a fresh 12-byte nonce for every value and stores authenticated ChaCha20Poly1305 ciphertext. Record keys are used as AAD for stored values so swapping encrypted payloads between keys is rejected.
 
 On reads, authentication failure is returned as an error. Tampered ciphertext is never passed to the Dart codec.
 
@@ -317,19 +325,51 @@ On reads, authentication failure is returned as an error. Tampered ciphertext is
 
 Boxes created before the metadata table existed are treated as known plaintext boxes. On normal reopen they receive explicit `dxtr_box/1` + `none` metadata.
 
-Supplying an `encryptionKey` for an existing plaintext box is rejected. The project will add an explicit migration operation later rather than silently rewriting a box under a different storage contract.
+Supplying an `encryptionKey` for an existing plaintext box is rejected. The only supported transition is the explicit migration API.
 
-Likewise, reopening an encrypted box without a key is rejected.
+## 10. Plaintext -> encrypted migration
 
-## 10. Why keys are cached but values are not
+Files:
 
-Hive-like APIs expect cheap `length`, `isEmpty`, and `keys`. Keeping only key metadata in Dart preserves those ergonomics without loading every stored value into RAM.
+- `lib/src/dxtr_box.dart`
+- `lib/src/native_api.dart`
+- `rust/src/api.rs`
+- `rust/src/db.rs`
+- `docs/PLAINTEXT_ENCRYPTION_MIGRATION.md`
 
-Same-isolate handles share key metadata, and native watch events keep it coherent when another handle mutates the box.
+Migration requires the box to be closed in the current process. Rust opens the persisted file for maintenance, verifies plaintext state, derives a new key from a fresh salt, validates every stored MessagePack payload, encrypts every value with a fresh nonce and record-key AAD, then updates the encryption metadata.
 
-For extremely large key counts, a future native iterator/pagination API may replace full key caching.
+The value rewrites and final encryption metadata transition share one redb write transaction:
 
-## 11. Testing seams
+```text
+before commit
+  data = plaintext
+  encryption_mode = none
+
+single redb write transaction
+  validate all values
+  encrypt all values
+  replace stored payloads
+  set mode = chacha20poly1305
+  persist salt + key_check
+  commit
+
+after successful return
+  data = authenticated ciphertext
+  encryption_mode = chacha20poly1305
+```
+
+If validation/encryption/redb work fails before commit, the transaction is not committed and the original plaintext state remains readable. Already-encrypted, missing, open, unsupported-format, or empty-key cases are rejected.
+
+Migration does not emit `BoxEvent`s because live box handles are forbidden during the maintenance operation.
+
+## 11. Crash durability and benchmarks
+
+`rust/tests/process_crash.rs` kills a writer process after acknowledged commits and verifies a fresh process can reopen committed plaintext and encrypted data. The project makes no durability claim for an operation that had not returned successfully before termination.
+
+The separate `benchmark/` package compares equal logical workloads against current Hive CE without raising the root package's Dart/Flutter compatibility floor. Shared-runner timing is informational; CI checks harness execution, not performance thresholds.
+
+## 12. Testing seams
 
 ```text
 test/codec_test.dart
@@ -342,29 +382,24 @@ test/box_test.dart
 
 test/native_integration_test.dart
   real Dart -> FRB -> Rust -> redb persistence
-  real cross-handle native watch delivery
   encrypted close/reopen + wrong/missing-key rejection
-  deleteAll + compact native round trip
+  public plaintext -> encrypted migration
+  live-handle migration rejection
+  post-migration data parity
 
 rust/src/db.rs tests
-  redb transactions
-  handle lifecycle
-  deleteAll atomicity/results
-  compaction lifecycle/exclusivity
-  unique persisted salts
-  encrypted on-disk payloads
-  correct/wrong/missing password behavior
-  tamper rejection
-  plaintext/encrypted mode mismatch
+  transactions + lifecycle
+  compaction
+  persisted encryption
+  explicit migration success/rejection/failure safety
+
+rust/tests/process_crash.rs
+  acknowledged-commit process-kill recovery
 ```
 
-Rust tests serialize mutations of process-global base-path/database state behind a test-only mutex.
+CI also runs generated-FRB drift detection, Rust fmt/clippy/tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, and the five-platform Flutter example build matrix.
 
-CI also runs Rust fmt/clippy/tests on Ubuntu, macOS, and Windows plus the five-platform Flutter example build matrix.
-
-The next reliability layer deliberately moves beyond same-process close/reopen testing: a child process will commit data, be terminated without graceful close, and a fresh process will verify recovery of committed state.
-
-## 12. Developer entry points
+## 13. Developer entry points
 
 The root `Makefile` centralizes the normal developer path:
 
@@ -372,6 +407,9 @@ The root `Makefile` centralizes the normal developer path:
 make preflight
 make frb-generate
 make native-test
+make process-crash
+make benchmark-smoke
+make benchmark-full
 make rust-check
 make example-android
 make example-linux
@@ -380,18 +418,14 @@ make example-macos
 make example-ios
 ```
 
-New crash/reopen and benchmark targets should extend this file rather than adding one-off undocumented shell commands.
+## 14. Next architectural step
 
-## 13. Next architectural step
+After the public migration completion lands, the active sequence is:
 
-The active milestone is now:
+1. split optional Rust functionality into Cargo features with a clear minimal CRUD profile;
+2. establish reproducible binary-size baselines for minimal CRUD, CRUD+encryption, and full-feature builds;
+3. add binary-size regression CI only after the measurements are stable enough to be meaningful;
+4. begin 0.3 query/index work after storage/bridge hardening;
+5. before 1.0 RC, execute the full Hive Functional Parity Audit and close every practical `Gap`.
 
-1. process-level crash/reopen durability testing
-2. benchmark harness against `hive_ce`
-3. explicit plaintext -> encrypted migration design
-4. Cargo feature splitting before binary-size tuning
-5. Dart 3.13 native tree-shaking / `record_use` hardening
-6. binary-size regression CI
-7. query/index work only after storage/bridge hardening
-
-The 1.0 functional-replacement claim remains gated by `docs/HIVE_FUNCTIONAL_PARITY.md`.
+Dart 3.13 recorded-use/native tree shaking remains future-only and must not raise the Dart 3.4 / Flutter 3.22 compatibility floor. See `docs/FUTURE_NATIVE_TREE_SHAKING.md`.
