@@ -27,9 +27,7 @@ class DxtrBoxExample extends StatelessWidget {
                 });
               }
               sw.stop();
-              debugPrint(
-                'dxtr_box: 1000 puts in ${sw.elapsedMilliseconds} ms',
-              );
+              debugPrint('dxtr_box: 1000 puts in ${sw.elapsedMilliseconds} ms');
             },
             child: const Text('Run dxtr_box smoke benchmark'),
           ),
