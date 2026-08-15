@@ -248,6 +248,9 @@ make benchmark-smoke
 make benchmark-full
 make rust-check
 make frb-generate
+make native-build-minimal
+make native-build-encryption
+make native-size-baseline
 make example-android
 make example-linux
 make example-windows
@@ -255,7 +258,7 @@ make example-macos
 make example-ios
 ```
 
-Generated FRB bindings stay checked in whenever native APIs change.
+Generated FRB bindings stay checked in whenever native APIs change. `make native-size-baseline` is the canonical local entry point for the same minimal/encryption/full release-size measurement contract used by CI.
 
 ## Current validation state
 
@@ -283,10 +286,19 @@ Native / Linux
   deleteAll + compact integration
   benchmark smoke harness
 
+Native size / Linux x86_64
+  isolated minimal release build
+  isolated encryption release build
+  isolated full release build
+  retain native-size-baseline.tsv only
+
 Rust / Ubuntu + macOS + Windows
-  rustfmt -> clippy -D warnings -> tests
-  process-kill crash/reopen integration
-  migration unit/failure-safety tests
+  rustfmt -> clippy -D warnings
+  minimal profile tests
+  encryption profile tests
+  full/default profile tests
+  process-kill crash/reopen coverage appropriate to enabled features
+  migration unit/failure-safety tests in feature-capable profiles
 
 Example compilation
   Android -> Linux -> Windows -> macOS -> iOS --no-codesign
@@ -334,8 +346,11 @@ Current policy:
 Dart 3.4 / Flutter 3.22 baseline compatibility
   -> required now
 
-Cargo feature splitting + size baselines
-  -> next
+Cargo feature profiles + first Linux x86_64 size baseline
+  -> validated in PR #12
+
+Repeated controlled size measurements + regression policy
+  -> next size-hardening step
 
 Dart 3.13+ record-use/link-hook optimization
   -> future progressive optimization only
