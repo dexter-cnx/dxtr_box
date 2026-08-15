@@ -118,7 +118,8 @@ void main() {
     await expectLater(box.get('key'), throwsStateError);
   });
 
-  test('changing base path is blocked by the native engine while open', () async {
+  test('changing base path is blocked by the native engine while open',
+      () async {
     final box = await DxtrBox.open('active');
 
     await expectLater(
@@ -196,7 +197,9 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
 
   @override
   Future<void> initDb(String path) async {
-    if (lastInitPath != null && lastInitPath != path && _openCounts.isNotEmpty) {
+    if (lastInitPath != null &&
+        lastInitPath != path &&
+        _openCounts.isNotEmpty) {
       throw StateError('cannot change base path while boxes are open');
     }
     lastInitPath = path;
