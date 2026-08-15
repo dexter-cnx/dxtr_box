@@ -4,9 +4,9 @@ use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 
-use crate::{db, frb_generated::StreamSink};
 #[cfg(feature = "query")]
 use crate::query;
+use crate::{db, frb_generated::StreamSink};
 
 #[derive(Clone)]
 pub enum NativeBoxEventType {
