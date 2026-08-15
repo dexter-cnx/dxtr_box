@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MANIFEST="$ROOT_DIR/rust/Cargo.toml"
 RUNS="${DXTR_BOX_SIZE_RUNS:-3}"
 OUT_DIR="${DXTR_BOX_SIZE_STABILITY_OUT_DIR:-$ROOT_DIR/build/native-size-stability}"
 SUMMARY="$OUT_DIR/native-size-stability.tsv"
@@ -10,6 +11,15 @@ if ! [[ "$RUNS" =~ ^[1-9][0-9]*$ ]]; then
   echo "DXTR_BOX_SIZE_RUNS must be a positive integer" >&2
   exit 2
 fi
+
+case "$(uname -s)" in
+  Linux*) artifact_name="librust_lib_dxtr_box.so" ;;
+  Darwin*) artifact_name="librust_lib_dxtr_box.dylib" ;;
+  *)
+    echo "native size stability harness currently supports Linux and macOS shell environments" >&2
+    exit 2
+    ;;
+esac
 
 mkdir -p "$OUT_DIR"
 : > "$SUMMARY"
@@ -22,27 +32,38 @@ printf '# cargo=%s\n' "$(cargo --version)" >> "$SUMMARY"
 printf '# runs=%s\n' "$RUNS" >> "$SUMMARY"
 printf 'profile\truns\tmin_bytes\tmax_bytes\tspread_bytes\tstable\n' >> "$SUMMARY"
 
-profiles=(minimal encryption full)
-for profile in "${profiles[@]}"; do
+build_profile() {
+  local profile="$1"
+  local target_dir="$2"
+  case "$profile" in
+    minimal)
+      CARGO_TARGET_DIR="$target_dir" cargo build --manifest-path "$MANIFEST" --release --no-default-features
+      ;;
+    encryption)
+      CARGO_TARGET_DIR="$target_dir" cargo build --manifest-path "$MANIFEST" --release --no-default-features --features encryption
+      ;;
+    full)
+      CARGO_TARGET_DIR="$target_dir" cargo build --manifest-path "$MANIFEST" --release
+      ;;
+    *)
+      echo "unknown profile: $profile" >&2
+      exit 3
+      ;;
+  esac
+}
+
+for profile in minimal encryption full; do
   values=()
   for run in $(seq 1 "$RUNS"); do
-    run_dir="$OUT_DIR/$profile/run-$run"
-    rm -rf "$run_dir"
-    case "$profile" in
-      minimal)
-        DXTR_BOX_SIZE_OUT_DIR="$run_dir" bash "$ROOT_DIR/tool/native_size_baseline.sh" >/dev/null
-        ;;
-      encryption|full)
-        # One baseline invocation builds all profiles; reuse only the requested row.
-        DXTR_BOX_SIZE_OUT_DIR="$run_dir" bash "$ROOT_DIR/tool/native_size_baseline.sh" >/dev/null
-        ;;
-    esac
-    bytes="$(awk -F '\t' -v p="$profile" '$1 == p {print $2}' "$run_dir/native-size-baseline.tsv")"
-    if [[ -z "$bytes" ]]; then
-      echo "missing $profile measurement in run $run" >&2
+    target_dir="$OUT_DIR/$profile/run-$run/target"
+    rm -rf "$target_dir"
+    build_profile "$profile" "$target_dir" >/dev/null
+    artifact="$target_dir/release/$artifact_name"
+    if [[ ! -f "$artifact" ]]; then
+      echo "missing $profile artifact in run $run: $artifact" >&2
       exit 3
     fi
-    values+=("$bytes")
+    values+=("$(wc -c < "$artifact" | tr -d ' ')")
   done
 
   min="${values[0]}"
@@ -53,9 +74,7 @@ for profile in "${profiles[@]}"; do
   done
   spread=$((max - min))
   stable=true
-  if (( spread != 0 )); then
-    stable=false
-  fi
+  (( spread != 0 )) && stable=false
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$profile" "$RUNS" "$min" "$max" "$spread" "$stable" >> "$SUMMARY"
 done
 
