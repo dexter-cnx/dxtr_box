@@ -15,6 +15,7 @@ Hive's original project is no longer a suitable foundation for new production wo
 ## Design goals
 
 - Hive-simple API.
+- Functional replacement for practical Hive/Hive CE local-database workloads by 1.0.
 - `redb` ACID storage engine.
 - One file per box: `{base_path}/{box_name}.dxtr`.
 - Thin Dart wrapper over Rust through Flutter Rust Bridge v2.
@@ -53,6 +54,7 @@ Native reads are asynchronous by design: unlike Hive's in-memory read model, `dx
 
 - [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction flow.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, local commands, CI gates, and deferred integration tiers.
+- [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
 - [CI workflow](.github/workflows/ci.yml) — Flutter analyze/test plus Rust host-matrix checks.
 
@@ -78,7 +80,7 @@ The CI is intentionally not yet claiming five-platform Flutter builds: generated
 - FRB code generation
 - Rust + Flutter tests
 
-### 0.2.0 — Hive parity
+### 0.2.0 — Hive parity foundation
 
 - putAll / deleteAll
 - deleteBox / boxExists
@@ -88,7 +90,7 @@ The CI is intentionally not yet claiming five-platform Flutter builds: generated
 - benchmark against `hive_ce`
 - Cargo feature splitting for optional functionality
 
-### 0.3.0 — Query engine
+### 0.3.0 — Query & migration
 
 - whereEquals / whereGreaterThan
 - sortBy / limit
@@ -105,8 +107,22 @@ The CI is intentionally not yet claiming five-platform Flutter builds: generated
 - README comparison vs hive_ce / isar_community / objectbox / drift
 - package-quality hardening
 
-### 1.0.0
+### 0.9.0 — Hive Functional Parity Audit
 
+- refresh the audit against the latest Hive CE release
+- verify normal/lazy box workloads
+- verify isolate and lifecycle semantics
+- verify custom-object/schema-evolution replacement strategy
+- verify encryption, compaction, watch/events, migration, and Web behavior
+- add real Hive CE fixture migration tests
+- close every practical capability marked `Gap`
+- publish intentional API differences
+
+See [`docs/HIVE_FUNCTIONAL_PARITY.md`](docs/HIVE_FUNCTIONAL_PARITY.md). **Any practical parity `Gap` blocks the 1.0 functional-replacement claim.**
+
+### 1.0.0 — Stable
+
+- Hive Functional Parity Audit passes with no practical `Gap`
 - stable storage/API contract
 - IndexedDB Web fallback
 - pub.dev release
