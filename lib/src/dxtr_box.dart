@@ -139,9 +139,7 @@ abstract final class DxtrBox {
 
   static String _newWatcherId() {
     final bytes = List<int>.generate(16, (_) => _watcherRandom.nextInt(256));
-    return bytes
-        .map((value) => value.toRadixString(16).padLeft(2, '0'))
-        .join();
+    return bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
   }
 
   static void _ensureInitialized() {
