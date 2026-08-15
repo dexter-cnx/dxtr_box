@@ -73,6 +73,14 @@ jobs:
       - name: Test
         run: flutter test --reporter expanded
 
+      - name: Install benchmark dependencies
+        working-directory: benchmark
+        run: flutter pub get
+
+      - name: Analyze benchmark package
+        working-directory: benchmark
+        run: flutter analyze
+
   native-linux:
     name: Native / Linux FRB round trip
     runs-on: ubuntu-latest
