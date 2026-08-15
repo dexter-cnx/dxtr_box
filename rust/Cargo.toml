@@ -17,8 +17,7 @@ default = ["full"]
 # public Dart Box lifecycle depends on native watch registration.
 encryption = ["dep:argon2", "dep:chacha20poly1305", "dep:rand_core"]
 maintenance = []
-query = ["dep:rmpv"]
-full = ["encryption", "maintenance", "query"]
+full = ["encryption", "maintenance", "dep:rmpv"]
 
 [dependencies]
 redb = "=2.1.0"
