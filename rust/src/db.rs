@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -94,6 +94,7 @@ struct OpenDatabase {
 static BASE_PATH: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
 static DATABASES: Lazy<RwLock<HashMap<String, OpenDatabase>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static COMPACTING: Lazy<RwLock<HashSet<String>>> = Lazy::new(|| RwLock::new(HashSet::new()));
 
 fn base_path() -> Result<PathBuf, String> {
     BASE_PATH
@@ -156,11 +157,13 @@ fn file_path(name: &str) -> Result<PathBuf, String> {
 }
 
 fn database(name: &str) -> Result<(Arc<Database>, Arc<EncryptionState>), String> {
-    DATABASES
-        .read()
-        .get(name)
-        .map(|entry| (Arc::clone(&entry.db), Arc::clone(&entry.encryption)))
-        .ok_or_else(|| format!("box '{name}' is not open"))
+    if let Some(entry) = DATABASES.read().get(name) {
+        return Ok((Arc::clone(&entry.db), Arc::clone(&entry.encryption)));
+    }
+    if COMPACTING.read().contains(name) {
+        return Err(format!("box '{name}' is compacting; retry later"));
+    }
+    Err(format!("box '{name}' is not open"))
 }
 
 fn read_meta(db: &Database, key: &str) -> Result<Option<Vec<u8>>, String> {
@@ -333,6 +336,10 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
     let existed = path.exists();
     let mut databases = DATABASES.write();
 
+    if COMPACTING.read().contains(name) {
+        return Err(format!("box '{name}' is compacting; retry later"));
+    }
+
     if let Some(entry) = databases.get_mut(name) {
         entry.encryption.validate_requested_key(encryption_key)?;
         entry.handles += 1;
@@ -490,6 +497,26 @@ pub fn delete(name: &str, key: &str) -> Result<(), String> {
     write.commit().map_err(|e| e.to_string())
 }
 
+pub fn delete_all(name: &str, keys: &[String]) -> Result<Vec<String>, String> {
+    let (db, _) = database(name)?;
+    let write = db.begin_write().map_err(|e| e.to_string())?;
+    let mut deleted = Vec::new();
+    {
+        let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
+        for key in keys {
+            if table
+                .remove(key.as_str())
+                .map_err(|e| e.to_string())?
+                .is_some()
+            {
+                deleted.push(key.clone());
+            }
+        }
+    }
+    write.commit().map_err(|e| e.to_string())?;
+    Ok(deleted)
+}
+
 pub fn clear(name: &str) -> Result<(), String> {
     let (db, _) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
@@ -508,6 +535,67 @@ pub fn clear(name: &str) -> Result<(), String> {
         }
     }
     write.commit().map_err(|e| e.to_string())
+}
+
+pub fn compact(name: &str) -> Result<bool, String> {
+    let entry = {
+        let mut databases = DATABASES.write();
+        let current = databases
+            .get(name)
+            .ok_or_else(|| format!("box '{name}' is not open"))?;
+        if current.handles != 1 {
+            return Err("compact requires exactly one open box handle".to_string());
+        }
+        if Arc::strong_count(&current.db) != 1 {
+            return Err("box is busy; retry compact when no operations are in flight".to_string());
+        }
+        COMPACTING.write().insert(name.to_string());
+        databases
+            .remove(name)
+            .expect("entry checked immediately before removal")
+    };
+
+    let OpenDatabase {
+        db,
+        handles,
+        encryption,
+    } = entry;
+    let mut database = match Arc::try_unwrap(db) {
+        Ok(database) => database,
+        Err(db) => {
+            let mut databases = DATABASES.write();
+            databases.insert(
+                name.to_string(),
+                OpenDatabase {
+                    db,
+                    handles,
+                    encryption,
+                },
+            );
+            COMPACTING.write().remove(name);
+            return Err("box is busy; retry compact when no operations are in flight".to_string());
+        }
+    };
+
+    let result = (|| {
+        let mut compacted = false;
+        while database.compact().map_err(|e| e.to_string())? {
+            compacted = true;
+        }
+        Ok(compacted)
+    })();
+
+    let mut databases = DATABASES.write();
+    databases.insert(
+        name.to_string(),
+        OpenDatabase {
+            db: Arc::new(database),
+            handles,
+            encryption,
+        },
+    );
+    COMPACTING.write().remove(name);
+    result
 }
 
 pub fn all_keys(name: &str) -> Result<Vec<String>, String> {
@@ -560,6 +648,54 @@ mod tests {
         assert!(!contains_key("people", "alice").unwrap());
         assert_eq!(len("people").unwrap(), 0);
         close("people");
+    }
+
+    #[test]
+    fn delete_all_is_atomic_and_reports_existing_keys() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("batch-delete", None).unwrap();
+        put_all(
+            "batch-delete",
+            &[
+                ("a".into(), pack(&1_i64)),
+                ("b".into(), pack(&2_i64)),
+                ("c".into(), pack(&3_i64)),
+            ],
+        )
+        .unwrap();
+
+        let deleted = delete_all(
+            "batch-delete",
+            &["a".to_string(), "missing".to_string(), "c".to_string()],
+        )
+        .unwrap();
+        assert_eq!(deleted, vec!["a".to_string(), "c".to_string()]);
+        assert_eq!(all_keys("batch-delete").unwrap(), vec!["b".to_string()]);
+        close("batch-delete");
+    }
+
+    #[test]
+    fn compact_requires_a_single_idle_handle() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("compact", None).unwrap();
+        put_all(
+            "compact",
+            &(0..128)
+                .map(|index| (format!("key-{index}"), pack(&vec![index as u8; 1024])))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        clear("compact").unwrap();
+
+        assert!(compact("compact").is_ok());
+        open("compact", None).unwrap();
+        assert!(compact("compact").is_err());
+        close("compact");
+        close("compact");
     }
 
     #[test]

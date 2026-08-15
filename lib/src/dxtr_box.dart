@@ -40,8 +40,9 @@ abstract final class DxtrBox {
     'LPT9',
   };
 
-  static final RegExp _unsafeWindowsNameCharacters =
-      RegExp(r'[<>:"/\\|?*\x00-\x1F]');
+  static final RegExp _unsafeWindowsNameCharacters = RegExp(
+    r'[<>:"/\\|?*\x00-\x1F]',
+  );
 
   static bool get isInitialized => _basePath != null;
 

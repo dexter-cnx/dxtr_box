@@ -176,12 +176,35 @@ final class _HydrationRaceNativeApi implements NativeDxtrApi {
   }
 
   @override
+  Future<List<String>> deleteAll(String boxName, List<String> keys) async {
+    _requireOpen(boxName);
+    final deleted = <String>[];
+    for (final key in keys) {
+      if (_box(boxName).remove(key) != null) {
+        deleted.add(key);
+        _emit(
+          NativeWatchEvent(
+            boxName: boxName,
+            type: NativeWatchEventType.delete,
+            key: key,
+          ),
+        );
+      }
+    }
+    return deleted;
+  }
+
+  @override
   Future<void> clear(String boxName) async {
     _requireOpen(boxName);
     _box(boxName).clear();
-    _emit(
-      NativeWatchEvent(boxName: boxName, type: NativeWatchEventType.clear),
-    );
+    _emit(NativeWatchEvent(boxName: boxName, type: NativeWatchEventType.clear));
+  }
+
+  @override
+  Future<bool> compact(String boxName) async {
+    _requireOpen(boxName);
+    return false;
   }
 
   @override

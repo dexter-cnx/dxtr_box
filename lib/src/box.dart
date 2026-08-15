@@ -145,10 +145,33 @@ final class Box {
     );
   }
 
+  Future<void> deleteAll(Iterable<String> keys) async {
+    _ensureOpen();
+    final unique = <String>[];
+    final seen = <String>{};
+    for (final key in keys) {
+      _validateKey(key);
+      if (seen.add(key)) unique.add(key);
+    }
+    if (unique.isEmpty) return;
+
+    final deleted = await _api.deleteAll(name, unique);
+    if (deleted.isEmpty) return;
+    final deletedSet = deleted.toSet();
+    _metadata.keys = List<String>.unmodifiable(
+      _metadata.keys.where((item) => !deletedSet.contains(item)),
+    );
+  }
+
   Future<void> clear() async {
     _ensureOpen();
     await _api.clear(name);
     _metadata.keys = const <String>[];
+  }
+
+  Future<bool> compact() async {
+    _ensureOpen();
+    return _api.compact(name);
   }
 
   Future<void> close() {

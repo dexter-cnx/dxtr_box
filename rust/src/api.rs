@@ -81,11 +81,15 @@ pub fn init_db(path: String) -> Result<(), String> {
 
 #[frb(sync)]
 pub fn open_box(name: String, encryption_key: Option<String>) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&name);
+    let _mutation_guard = mutation_lock.lock();
     db::open(&name, encryption_key.as_deref())
 }
 
 #[frb(sync)]
 pub fn close_box(name: String) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&name);
+    let _mutation_guard = mutation_lock.lock();
     db::close(&name);
     Ok(())
 }
@@ -195,6 +199,21 @@ pub fn delete(box_name: String, key: String) -> Result<(), String> {
     Ok(())
 }
 
+pub fn delete_all(box_name: String, keys: Vec<String>) -> Result<Vec<String>, String> {
+    let mutation_lock = mutation_lock(&box_name);
+    let _mutation_guard = mutation_lock.lock();
+    let deleted = db::delete_all(&box_name, &keys)?;
+    for key in &deleted {
+        emit_event(NativeBoxEvent {
+            box_name: box_name.clone(),
+            event_type: NativeBoxEventType::Delete,
+            key: Some(key.clone()),
+            value: None,
+        });
+    }
+    Ok(deleted)
+}
+
 pub fn clear(box_name: String) -> Result<(), String> {
     let mutation_lock = mutation_lock(&box_name);
     let _mutation_guard = mutation_lock.lock();
@@ -206,6 +225,12 @@ pub fn clear(box_name: String) -> Result<(), String> {
         value: None,
     });
     Ok(())
+}
+
+pub fn compact(box_name: String) -> Result<bool, String> {
+    let mutation_lock = mutation_lock(&box_name);
+    let _mutation_guard = mutation_lock.lock();
+    db::compact(&box_name)
 }
 
 pub fn get_all_keys(box_name: String) -> Result<Vec<String>, String> {
