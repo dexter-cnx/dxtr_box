@@ -81,6 +81,50 @@ jobs:
         working-directory: benchmark
         run: flutter analyze
 
+  frb-bindings:
+    name: FRB / generated bindings current
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install flutter_rust_bridge_codegen 2.8.0
+        run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
+
+      - name: Regenerate FRB bindings
+        run: flutter_rust_bridge_codegen generate
+
+      - name: Upload regenerated bindings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frb-generated-bindings
+          path: |
+            lib/src/rust
+            rust/src/frb_generated.rs
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Verify generated bindings are committed
+        run: git diff --exit-code -- lib/src/rust rust/src/frb_generated.rs
+
   native-linux:
     name: Native / Linux FRB round trip
     runs-on: ubuntu-latest
