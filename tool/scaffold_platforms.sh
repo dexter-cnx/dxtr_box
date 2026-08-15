@@ -12,6 +12,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 flutter create --template=plugin_ffi \
+  --org com.dxtr \
   --platforms=android,ios,macos,linux,windows \
   "$tmp/dxtr_box"
 
@@ -21,7 +22,14 @@ for platform in android ios macos linux windows; do
 done
 
 cd "$root"
-# flutter_rust_bridge_codegen 2.8 uses Cargokit as the default integration
-# backend and does not accept the newer --integration-backend option.
+# FRB 2.8 uses Cargokit as its default integration backend.
 flutter_rust_bridge_codegen integrate
+
+# `integrate` scaffolds a demo API/application. dxtr_box already owns its API
+# and example, so remove only those generated demo files before codegen.
+rm -rf "$root/rust/src/api"
+rm -f "$root/lib/main.dart"
+rm -rf "$root/integration_test" "$root/test_driver"
+
+# Generate bindings from the real `crate::api` implementation in rust/src/api.rs.
 flutter_rust_bridge_codegen generate
