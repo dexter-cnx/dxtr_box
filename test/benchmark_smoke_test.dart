@@ -85,10 +85,20 @@ Map<String, Object> _result(
 }
 
 Future<List<int>> _measureDxtr(String scenario, int operations) async {
-  await _runDxtrScenario('warmup_$scenario', scenario, math.max(10, operations ~/ 10));
+  await _runDxtrScenario(
+    'warmup_$scenario',
+    scenario,
+    math.max(10, operations ~/ 10),
+  );
   final samples = <int>[];
   for (var sample = 0; sample < _samples; sample++) {
-    samples.add(await _runDxtrScenario('sample_${sample}_$scenario', scenario, operations));
+    samples.add(
+      await _runDxtrScenario(
+        'sample_${sample}_$scenario',
+        scenario,
+        operations,
+      ),
+    );
   }
   return samples;
 }
@@ -124,25 +134,33 @@ Future<int> _runDxtrScenario(
       for (var i = 0; i < operations; i++) {
         await box.put('k$i', _payload(i));
       }
+      break;
     case 'batch_put':
       await box.putAll(<String, dynamic>{
         for (var i = 0; i < operations; i++) 'k$i': _payload(i),
       });
+      break;
     case 'point_get':
       for (var i = 0; i < operations; i++) {
         await box.get('k$i');
       }
+      break;
     case 'contains':
       for (var i = 0; i < operations; i++) {
         await box.containsKey('k$i');
       }
+      break;
     case 'delete_all':
-      await box.deleteAll(<String>[for (var i = 0; i < operations; i++) 'k$i']);
+      await box.deleteAll(<String>[
+        for (var i = 0; i < operations; i++) 'k$i',
+      ]);
+      break;
     case 'reopen_read':
       box = await DxtrBox.open(boxName);
       for (var i = 0; i < operations; i++) {
         await box.get('k$i');
       }
+      break;
     default:
       throw ArgumentError.value(scenario, 'scenario');
   }
@@ -154,10 +172,20 @@ Future<int> _runDxtrScenario(
 }
 
 Future<List<int>> _measureHive(String scenario, int operations) async {
-  await _runHiveScenario('warmup_$scenario', scenario, math.max(10, operations ~/ 10));
+  await _runHiveScenario(
+    'warmup_$scenario',
+    scenario,
+    math.max(10, operations ~/ 10),
+  );
   final samples = <int>[];
   for (var sample = 0; sample < _samples; sample++) {
-    samples.add(await _runHiveScenario('sample_${sample}_$scenario', scenario, operations));
+    samples.add(
+      await _runHiveScenario(
+        'sample_${sample}_$scenario',
+        scenario,
+        operations,
+      ),
+    );
   }
   return samples;
 }
@@ -193,25 +221,33 @@ Future<int> _runHiveScenario(
       for (var i = 0; i < operations; i++) {
         await box.put('k$i', _payload(i));
       }
+      break;
     case 'batch_put':
       await box.putAll(<String, dynamic>{
         for (var i = 0; i < operations; i++) 'k$i': _payload(i),
       });
+      break;
     case 'point_get':
       for (var i = 0; i < operations; i++) {
         box.get('k$i');
       }
+      break;
     case 'contains':
       for (var i = 0; i < operations; i++) {
         box.containsKey('k$i');
       }
+      break;
     case 'delete_all':
-      await box.deleteAll(<String>[for (var i = 0; i < operations; i++) 'k$i']);
+      await box.deleteAll(<String>[
+        for (var i = 0; i < operations; i++) 'k$i',
+      ]);
+      break;
     case 'reopen_read':
       box = await Hive.openBox<dynamic>(boxName);
       for (var i = 0; i < operations; i++) {
         box.get('k$i');
       }
+      break;
     default:
       throw ArgumentError.value(scenario, 'scenario');
   }
