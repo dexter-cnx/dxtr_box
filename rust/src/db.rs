@@ -717,11 +717,13 @@ mod tests {
         open("secure-a", Some("password")).unwrap();
         let (db_a, _) = database("secure-a").unwrap();
         let salt_a = read_meta(&db_a, META_ENCRYPTION_SALT).unwrap().unwrap();
+        drop(db_a);
         close("secure-a");
 
         open("secure-b", Some("password")).unwrap();
         let (db_b, _) = database("secure-b").unwrap();
         let salt_b = read_meta(&db_b, META_ENCRYPTION_SALT).unwrap().unwrap();
+        drop(db_b);
         close("secure-b");
 
         assert_eq!(salt_a.len(), crypto::SALT_LEN);
@@ -736,6 +738,7 @@ mod tests {
                 .unwrap(),
             salt_a
         );
+        drop(db_a_reopened);
         close("secure-a");
     }
 
