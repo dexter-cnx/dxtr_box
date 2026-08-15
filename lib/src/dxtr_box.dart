@@ -155,7 +155,8 @@ abstract final class DxtrBox {
         'The configured dxtr_box native engine does not support encryption migration.',
       );
     }
-    await api.encryptBox(name, encryptionKey);
+    final migrationApi = api as NativeEncryptionMigrationApi;
+    await migrationApi.encryptBox(name, encryptionKey);
     _metadataByName.remove(name);
   }
 
