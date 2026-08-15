@@ -28,6 +28,9 @@ void main() {
   });
 
   test('rejects non-string map keys', () {
-    expect(() => DxtrCodec.encode(<dynamic, dynamic>{1: 'bad'}), throwsArgumentError);
+    expect(
+      () => DxtrCodec.encode(<dynamic, dynamic>{1: 'bad'}),
+      throwsArgumentError,
+    );
   });
 }
