@@ -96,10 +96,11 @@ pub(crate) fn drop_index(db: &Database, name: &str) -> Result<bool, String> {
         let mut definitions = write
             .open_table(INDEX_DEFINITIONS)
             .map_err(|e| e.to_string())?;
-        definitions
+        let removed = definitions
             .remove(name)
             .map_err(|e| e.to_string())?
-            .is_some()
+            .is_some();
+        removed
     };
     if !removed {
         return Ok(false);
