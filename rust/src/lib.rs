@@ -4,7 +4,7 @@ mod codec;
 pub mod crypto;
 mod db;
 mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. */
-#[cfg(feature = "query")]
+#[cfg(feature = "full")]
 mod query;
 
 pub use api::*;
