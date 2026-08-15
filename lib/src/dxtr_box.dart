@@ -59,16 +59,10 @@ abstract final class DxtrBox {
       ),
     );
 
-    if (_basePath != null &&
-        _basePath != resolvedPath &&
-        _openHandleCount > 0) {
-      throw StateError(
-        'Cannot change the dxtr_box base path while boxes are open.',
-      );
-    }
-
+    // The native engine canonicalizes filesystem paths and is the authority for
+    // deciding whether this is an idempotent init or an unsafe path switch.
     await _api.initDb(resolvedPath);
-    if (_basePath != resolvedPath) {
+    if (_basePath != resolvedPath && _openHandleCount == 0) {
       _metadataByName.clear();
     }
     _basePath = resolvedPath;
