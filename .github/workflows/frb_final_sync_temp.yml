@@ -1,0 +1,53 @@
+name: Temporary FRB Final Sync
+
+on:
+  push:
+    branches:
+      - feature/0.3-query-index-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-query-index-foundation
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          cache: true
+          cache-workspaces: rust
+      - run: flutter pub get
+      - run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
+      - name: Regenerate FRB bindings
+        run: |
+          flutter_rust_bridge_codegen generate
+          dart format lib/src/rust
+          cargo fmt --manifest-path rust/Cargo.toml
+      - name: Validate query index integration
+        run: cargo test --manifest-path rust/Cargo.toml --test query_index
+      - name: Validate native round trip
+        env:
+          DXTR_BOX_NATIVE_TEST: '1'
+        run: |
+          cargo build --manifest-path rust/Cargo.toml --release
+          flutter test test/native_integration_test.dart --reporter expanded
+      - name: Remove temporary workflow
+        run: git rm .github/workflows/frb_final_sync_temp.yml
+      - name: Commit synchronized bindings
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add rust/src/frb_generated.rs lib/src/rust
+          git add -u .github/workflows
+          git commit -m 'fix: sync final FRB bindings'
+          git push origin HEAD:feature/0.3-query-index-foundation
