@@ -25,7 +25,6 @@ abstract interface class NativeDxtrApi {
   Future<void> openBox(String name, {String? encryptionKey});
   Future<void> closeBox(String name);
   Future<void> deleteBox(String name);
-  Future<void> encryptBox(String name, String encryptionKey);
   Future<bool> boxExists(String name);
   Future<Stream<NativeWatchEvent>> watchBox(String boxName, String watcherId);
   Future<void> unwatchBox(String boxName, String watcherId);
@@ -41,8 +40,15 @@ abstract interface class NativeDxtrApi {
   Future<int> length(String boxName);
 }
 
+/// Optional maintenance capability for engines that can migrate plaintext
+/// storage into the encrypted dxtr_box format.
+abstract interface class NativeEncryptionMigrationApi {
+  Future<void> encryptBox(String name, String encryptionKey);
+}
+
 /// Production adapter backed by generated flutter_rust_bridge bindings.
-final class FrbNativeDxtrApi implements NativeDxtrApi {
+final class FrbNativeDxtrApi
+    implements NativeDxtrApi, NativeEncryptionMigrationApi {
   const FrbNativeDxtrApi();
 
   static Future<void>? _initializing;
@@ -187,7 +193,8 @@ final class FrbNativeDxtrApi implements NativeDxtrApi {
 }
 
 /// Test/failure adapter retained so callers can explicitly disable native IO.
-final class UnavailableNativeDxtrApi implements NativeDxtrApi {
+final class UnavailableNativeDxtrApi
+    implements NativeDxtrApi, NativeEncryptionMigrationApi {
   const UnavailableNativeDxtrApi();
 
   Never _missing() =>
