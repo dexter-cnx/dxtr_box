@@ -1,5 +1,7 @@
 # dxtr_box
 
+[![CI](https://github.com/dexter-cnx/dxtr_box/actions/workflows/ci.yml/badge.svg)](https://github.com/dexter-cnx/dxtr_box/actions/workflows/ci.yml)
+
 **The Hive replacement, forged in Rust. By Dxtr.**
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
@@ -47,6 +49,24 @@ Native reads are asynchronous by design: unlike Hive's in-memory read model, `dx
 - `once_cell` + `parking_lot`
 - optional `argon2` + `chacha20poly1305`
 
+## Engineering docs
+
+- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction flow.
+- [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, local commands, CI gates, and deferred integration tiers.
+- [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
+- [CI workflow](.github/workflows/ci.yml) — Flutter analyze/test plus Rust host-matrix checks.
+
+## Test suite
+
+Current foundation coverage includes:
+
+- Dart dynamic codec round trips and invalid-map validation.
+- `Box`/`DxtrBox` behavior through an in-memory native API fake.
+- real redb CRUD, clear, persistence-after-reopen, malformed `putAll`, unsafe box names, and delete-box behavior.
+- Rust default and `encryption` feature test runs in CI.
+
+The CI is intentionally not yet claiming five-platform Flutter builds: generated FRB bindings and native plugin scaffolds must be checked in and validated first.
+
 ## Roadmap
 
 ### 0.1.0 — MVP
@@ -90,8 +110,6 @@ Native reads are asynchronous by design: unlike Hive's in-memory read model, `dx
 - stable storage/API contract
 - IndexedDB Web fallback
 - pub.dev release
-
-See [`docs/PROJECT_HANDOFF.md`](docs/PROJECT_HANDOFF.md) for engineering status and sequencing.
 
 ## License
 
