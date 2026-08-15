@@ -72,7 +72,7 @@ jobs:
 
   windows:
     name: Windows example
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -90,7 +90,7 @@ jobs:
         run: |
           flutter pub get
           flutter config --enable-windows-desktop
-          flutter build windows --debug
+          flutter build windows --debug --verbose
 
   macos:
     name: macOS example
