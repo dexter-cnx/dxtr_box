@@ -27,10 +27,13 @@ flutter_rust_bridge_codegen integrate
 
 # `integrate` scaffolds a demo API/application. dxtr_box already owns its API
 # and example, so remove only those generated demo files before codegen.
+# Keep lib/src/rust itself: FRB canonicalizes dart_output before generation.
 rm -rf "$root/rust/src/api"
 rm -f "$root/lib/main.dart"
-rm -rf "$root/lib/src/rust"
+rm -f "$root/lib/src/rust/api/simple.dart"
+rm -f "$root/lib/src/rust/api/simple.freezed.dart"
 rm -rf "$root/integration_test" "$root/test_driver"
+mkdir -p "$root/lib/src/rust"
 
 # Generate bindings from the real `crate::api` implementation in rust/src/api.rs.
 flutter_rust_bridge_codegen generate
