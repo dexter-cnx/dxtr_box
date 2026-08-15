@@ -1,6 +1,6 @@
 # dxtr_box Testing Strategy
 
-The test suite is layered so failures identify whether the problem is in Dart behavior, serialization, native storage, cross-platform compilation, process-boundary durability, or benchmark harness execution.
+The test suite is layered so failures identify whether the problem is in Dart behavior, serialization, native storage, cross-platform compilation, minimum-SDK compatibility, process-boundary durability, or benchmark harness execution.
 
 ## Local commands
 
@@ -30,6 +30,29 @@ cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path rust/Cargo.toml --all-targets
 cargo test --manifest-path rust/Cargo.toml --all-targets --features encryption
 ```
+
+## Minimum SDK compatibility
+
+Declared package floor:
+
+```text
+Dart >= 3.4.0 < 4.0.0
+Flutter >= 3.22.0
+```
+
+Flutter 3.22.0 ships Dart 3.4.0. CI therefore tests that exact pair rather than merely lowering the Dart constraint while continuing to run a newer Flutter SDK.
+
+The minimum-SDK lane must run at least:
+
+- `flutter pub get`
+- `flutter analyze`
+- `flutter test`
+
+This lane exists to catch accidental use of newer language features, SDK APIs, or dependency upgrades that silently raise the real compatibility floor.
+
+Dev dependencies are part of this check. For example, `flutter_lints 5.x` requires Flutter 3.24 / Dart 3.5, so the project uses a compatible 4.x line while Flutter 3.22 / Dart 3.4 remains the declared minimum.
+
+A future minimum-SDK increase should be intentional, documented in the handoff/changelog, and accompanied by a CI update. Dart 3.13 native tree shaking is explicitly not a reason to raise the floor today; see `docs/FUTURE_NATIVE_TREE_SHAKING.md`.
 
 ## Dart codec tests
 
@@ -196,10 +219,18 @@ Future benchmark work should add file-size reporting, more payload sizes, delete
 
 Workflow: `.github/workflows/ci.yml`
 
-### Flutter job — Ubuntu
+### Minimum SDK job — Ubuntu
 
-- checkout
-- install stable Flutter
+- install Flutter 3.22.0 / Dart 3.4.0
+- `flutter pub get`
+- `flutter analyze`
+- `flutter test`
+
+This job is the compatibility contract for the declared lower bound.
+
+### Current Flutter job — Ubuntu
+
+- install current stable Flutter
 - `flutter pub get`
 - formatting check
 - `flutter analyze`
@@ -243,7 +274,7 @@ The following remain future hardening work:
 - benchmark absolute performance thresholds
 - long-duration benchmark trend regression policy
 - release binary-size regression measurement
-- Dart 3.13 native symbol tree-shaking verification
+- Dart 3.13 native symbol tree-shaking verification (future-only; do not implement now)
 - explicit plaintext -> encrypted migration interruption/recovery tests
 
 Performance CI should remain trend-oriented rather than a brittle absolute timing gate on shared GitHub runners.
