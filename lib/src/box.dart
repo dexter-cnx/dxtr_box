@@ -5,32 +5,42 @@ import 'box_event.dart';
 import 'codec.dart';
 import 'native_api.dart';
 
+final class BoxMetadata {
+  List<String> keys = const <String>[];
+}
+
 final class Box {
   Box.internal({
     required this.name,
     required NativeDxtrApi api,
     required bool lazy,
+    required BoxMetadata metadata,
+    required void Function() onClose,
   })  : _api = api,
-        _lazy = lazy;
+        _lazy = lazy,
+        _metadata = metadata,
+        _onClose = onClose;
 
   final String name;
   final NativeDxtrApi _api;
   final bool _lazy;
+  final BoxMetadata _metadata;
+  final void Function() _onClose;
   final StreamController<BoxEvent> _events =
       StreamController<BoxEvent>.broadcast(sync: true);
 
-  List<String> _keys = const <String>[];
   bool _closed = false;
+  Future<void>? _closeFuture;
 
-  int get length => _keys.length;
-  bool get isEmpty => _keys.isEmpty;
-  Iterable<String> get keys => _keys;
+  int get length => _metadata.keys.length;
+  bool get isEmpty => _metadata.keys.isEmpty;
+  Iterable<String> get keys => _metadata.keys;
 
   /// Values are fetched from redb; the box contents are never retained wholesale in Dart RAM.
   Future<List<dynamic>> get values async {
     _ensureOpen();
     final result = <dynamic>[];
-    for (final key in _keys) {
+    for (final key in _metadata.keys) {
       result.add(await get(key));
     }
     return result;
@@ -38,15 +48,18 @@ final class Box {
 
   Future<void> refreshMetadata() async {
     _ensureOpen();
-    _keys = List<String>.unmodifiable(await _api.getAllKeys(name));
+    _metadata.keys = List<String>.unmodifiable(await _api.getAllKeys(name));
   }
 
   Future<void> put(String key, dynamic value) async {
     _ensureOpen();
     _validateKey(key);
     await _api.put(name, key, DxtrCodec.encode(value));
-    if (!_keys.contains(key)) {
-      _keys = List<String>.unmodifiable(<String>[..._keys, key]);
+    if (!_metadata.keys.contains(key)) {
+      _metadata.keys = List<String>.unmodifiable(<String>[
+        ..._metadata.keys,
+        key,
+      ]);
     }
     _events.add(
       BoxEvent(boxName: name, type: BoxEventType.put, key: key, value: value),
@@ -61,8 +74,8 @@ final class Box {
       encoded[entry.key] = DxtrCodec.encode(entry.value);
     }
     await _api.putAll(name, encoded);
-    final set = <String>{..._keys, ...entries.keys};
-    _keys = List<String>.unmodifiable(set);
+    final set = <String>{..._metadata.keys, ...entries.keys};
+    _metadata.keys = List<String>.unmodifiable(set);
     for (final entry in entries.entries) {
       _events.add(
         BoxEvent(
@@ -92,22 +105,39 @@ final class Box {
     _ensureOpen();
     _validateKey(key);
     await _api.delete(name, key);
-    _keys = List<String>.unmodifiable(_keys.where((item) => item != key));
+    _metadata.keys = List<String>.unmodifiable(
+      _metadata.keys.where((item) => item != key),
+    );
     _events.add(BoxEvent(boxName: name, type: BoxEventType.delete, key: key));
   }
 
   Future<void> clear() async {
     _ensureOpen();
     await _api.clear(name);
-    _keys = const <String>[];
+    _metadata.keys = const <String>[];
     _events.add(BoxEvent(boxName: name, type: BoxEventType.clear));
   }
 
-  Future<void> close() async {
-    if (_closed) return;
-    await _api.closeBox(name);
-    _closed = true;
-    await _events.close();
+  Future<void> close() {
+    if (_closed) return Future<void>.value();
+    final inFlight = _closeFuture;
+    if (inFlight != null) return inFlight;
+
+    final future = _performClose();
+    _closeFuture = future;
+    return future;
+  }
+
+  Future<void> _performClose() async {
+    try {
+      await _api.closeBox(name);
+      _closed = true;
+      _onClose();
+      await _events.close();
+    } catch (_) {
+      _closeFuture = null;
+      rethrow;
+    }
   }
 
   Future<List<MapEntry<String, dynamic>>> where(
@@ -115,7 +145,7 @@ final class Box {
   ) async {
     _ensureOpen();
     final result = <MapEntry<String, dynamic>>[];
-    for (final key in _keys) {
+    for (final key in _metadata.keys) {
       final value = await get(key);
       if (test(value)) result.add(MapEntry<String, dynamic>(key, value));
     }
