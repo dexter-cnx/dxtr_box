@@ -32,6 +32,7 @@ The minimum is verified in CI using Flutter 3.22.0 / Dart 3.4.0, while the norma
 - Thin Dart wrapper over Rust through Flutter Rust Bridge v2.
 - MessagePack value encoding.
 - Per-box encryption with Argon2 + ChaCha20Poly1305.
+- Explicit plaintext -> encrypted migration with transactional recovery semantics.
 - Native cross-handle `watch()` fan-out through FRB streams.
 - Explicit native `deleteAll()` and `compact()` maintenance paths.
 - Android, iOS, macOS, Linux, Windows first; Web fallback later.
@@ -67,7 +68,25 @@ await secure.put('token', 'secret');
 await secure.close();
 ```
 
-An encrypted box must be reopened with the same key. Missing or incorrect keys are rejected. A plaintext box is never silently reinterpreted as encrypted; explicit migration is the next storage-hardening milestone.
+An encrypted box must be reopened with the same key. Missing or incorrect keys are rejected. A plaintext box is never silently reinterpreted as encrypted. Existing plaintext boxes are converted only through the explicit maintenance API after all handles are closed:
+
+```dart
+final legacy = await DxtrBox.open('legacy');
+await legacy.put('theme', 'dark');
+await legacy.close();
+
+await DxtrBox.encryptBox(
+  'legacy',
+  encryptionKey: 'correct horse battery staple',
+);
+
+final encrypted = await DxtrBox.open(
+  'legacy',
+  encryptionKey: 'correct horse battery staple',
+);
+```
+
+The migration rewrites values and switches encryption metadata in one redb write transaction. Before the commit the durable box remains plaintext; after a successful return it is fully encrypted. Migration rejects live handles, empty keys, missing boxes, already-encrypted boxes, and unsupported storage formats.
 
 Native reads are asynchronous by design: unlike Hive's in-memory read model, `dxtr_box` may perform real storage I/O and should not block Flutter's UI isolate.
 
@@ -96,7 +115,7 @@ Encrypted boxes persist metadata in a dedicated redb `meta` table:
 
 Values are validated as MessagePack before storage, encrypted with a fresh random nonce per value, and authenticated by ChaCha20Poly1305. Reads decrypt and authenticate before returning bytes to Dart.
 
-Legacy boxes without metadata are treated as known plaintext boxes and gain explicit plaintext metadata when normally reopened. Existing plaintext data is never encrypted in place implicitly.
+Legacy boxes without metadata are treated as known plaintext boxes and gain explicit plaintext metadata when normally reopened. Existing plaintext data is never encrypted implicitly.
 
 ## Developer workflow
 
@@ -113,12 +132,13 @@ Additional targets cover FRB regeneration, Rust-only checks, a larger local benc
 
 ## Engineering docs
 
-- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, encryption, deleteAll, and compaction flow.
+- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, encryption, deleteAll, compaction, and migration flow.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmark methodology, local commands, and CI gates.
+- [Plaintext -> encrypted migration](docs/PLAINTEXT_ENCRYPTION_MIGRATION.md) — explicit API, atomicity, lifecycle, and recovery contract.
 - [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
 - [Future native tree shaking](docs/FUTURE_NATIVE_TREE_SHAKING.md) — why Dart 3.13 native tree shaking is useful later, why it is deferred now, and the compatibility gate for revisiting it.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
-- [CI workflow](.github/workflows/ci.yml) — minimum-SDK compatibility, current Flutter analyze/test, native Linux round-trip + benchmark smoke, and Rust host-matrix checks.
+- [CI workflow](.github/workflows/ci.yml) — minimum-SDK compatibility, current Flutter analyze/test, native Linux round-trip + benchmark smoke, FRB drift detection, and Rust host-matrix checks.
 - [Platform builds](.github/workflows/platform_builds.yml) — Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Test suite
@@ -132,11 +152,13 @@ Current coverage includes:
 - native cross-handle watch fan-out and watcher teardown semantics.
 - real Dart -> FRB -> Rust -> redb Linux round-trip with close/reopen persistence.
 - real encrypted Dart -> FRB -> Rust -> redb close/reopen round-trip with wrong/missing-key rejection.
+- real public `DxtrBox.encryptBox()` -> FRB -> Rust plaintext-to-encrypted migration with live-handle rejection and post-migration data parity.
 - transactional `deleteAll()` with exact removed-key event behavior.
 - explicit redb-backed `compact()` lifecycle coverage.
 - process-kill crash/reopen recovery for acknowledged plaintext and encrypted commits.
 - a `hive_ce` benchmark smoke harness for equal logical workloads; timing is informational, not a CI pass/fail threshold.
-- encryption tests for unique persisted salts, authenticated value round-trip, on-disk ciphertext, wrong keys, tampering, and plaintext/encrypted mode mismatch.
+- encryption tests for unique persisted salts, authenticated value round-trip, on-disk ciphertext, wrong keys, tampering, plaintext/encrypted mode mismatch, and migration failure safety.
+- generated FRB binding drift detection in CI.
 - Rust fmt/clippy/tests on Ubuntu, macOS, and Windows.
 - example compilation on Android, iOS without code signing, macOS, Linux, and Windows.
 
@@ -155,13 +177,13 @@ Current coverage includes:
 - lifecycle and multi-handle hardening
 - native `watch()` stream
 - persisted per-box encryption metadata + encrypted value path
+- explicit plaintext -> encrypted migration path
 - process crash/reopen durability foundation
 - Hive CE benchmark foundation
 - developer Makefile
 
 ### 0.2.0 — Hive parity foundation
 
-- explicit plaintext -> encrypted migration path with recovery semantics
 - Cargo feature splitting for optional functionality
 - retained benchmark result format and file-size reporting
 - binary-size baselines for minimal CRUD, CRUD+encryption, and full feature builds
