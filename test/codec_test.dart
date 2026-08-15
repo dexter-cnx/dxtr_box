@@ -12,7 +12,9 @@ void main() {
       3.14,
       'Dxtr',
       <dynamic>[1, 'two', false],
-      <String, dynamic>{'nested': <dynamic>[1, 2]},
+      <String, dynamic>{
+        'nested': <dynamic>[1, 2]
+      },
       Uint8List.fromList(<int>[1, 2, 3]),
       DateTime.utc(2026, 8, 15, 1, 2, 3),
     ];
