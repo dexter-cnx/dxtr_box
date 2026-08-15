@@ -60,6 +60,51 @@ void main() {
     expect(second.length, 3);
   });
 
+  test('native watch fans out once to every open handle', () async {
+    final first = await DxtrBox.open('fanout');
+    final second = await DxtrBox.open('fanout');
+    final firstEvents = <BoxEvent>[];
+    final secondEvents = <BoxEvent>[];
+    final firstSubscription = first.watch().listen(firstEvents.add);
+    final secondSubscription = second.watch().listen(secondEvents.add);
+
+    await first.put('one', 1);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(firstEvents, hasLength(1));
+    expect(secondEvents, hasLength(1));
+    expect(firstEvents.single.type, BoxEventType.put);
+    expect(firstEvents.single.key, 'one');
+    expect(firstEvents.single.value, 1);
+    expect(secondEvents.single.value, 1);
+
+    await firstSubscription.cancel();
+    await secondSubscription.cancel();
+    await first.close();
+    await second.close();
+  });
+
+  test('close unregisters only its native watcher', () async {
+    final first = await DxtrBox.open('watch-close');
+    final second = await DxtrBox.open('watch-close');
+    expect(api.watcherCount('watch-close'), 2);
+
+    await first.close();
+    expect(api.watcherCount('watch-close'), 1);
+
+    final events = <BoxEvent>[];
+    final subscription = second.watch().listen(events.add);
+    await second.put('still-watched', 7);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(events, hasLength(1));
+    expect(events.single.key, 'still-watched');
+
+    await subscription.cancel();
+    await second.close();
+    expect(api.watcherCount('watch-close'), 0);
+  });
+
   test('concurrent close calls share one native teardown', () async {
     final first = await DxtrBox.open('shared-close');
     final second = await DxtrBox.open('shared-close');
@@ -177,6 +222,8 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   final Map<String, Map<String, Uint8List>> _boxes =
       <String, Map<String, Uint8List>>{};
   final Map<String, int> _openCounts = <String, int>{};
+  final Map<String, Map<String, StreamController<NativeWatchEvent>>> _watchers =
+      <String, Map<String, StreamController<NativeWatchEvent>>>{};
   int closeCalls = 0;
   String? lastInitPath;
   Completer<void>? _closeBarrier;
@@ -184,6 +231,8 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   void seed(String boxName, Map<String, Uint8List> values) {
     _boxes[boxName] = Map<String, Uint8List>.from(values);
   }
+
+  int watcherCount(String boxName) => _watchers[boxName]?.length ?? 0;
 
   void pauseClose() {
     _closeBarrier = Completer<void>();
@@ -200,6 +249,16 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   void _requireOpen(String name) {
     if ((_openCounts[name] ?? 0) == 0) {
       throw StateError('box is not open: $name');
+    }
+  }
+
+  void _emit(NativeWatchEvent event) {
+    for (final controller
+        in _watchers[event.boxName]?.values.toList(growable: false) ??
+            const <StreamController<NativeWatchEvent>>[]) {
+      if (!controller.isClosed) {
+        controller.add(event);
+      }
     }
   }
 
@@ -245,20 +304,62 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   Future<bool> boxExists(String name) async => _boxes.containsKey(name);
 
   @override
+  Future<Stream<NativeWatchEvent>> watchBox(
+    String boxName,
+    String watcherId,
+  ) async {
+    _requireOpen(boxName);
+    final controller = StreamController<NativeWatchEvent>.broadcast(sync: true);
+    _watchers
+        .putIfAbsent(
+          boxName,
+          () => <String, StreamController<NativeWatchEvent>>{},
+        )[watcherId] = controller;
+    return controller.stream;
+  }
+
+  @override
+  Future<void> unwatchBox(String boxName, String watcherId) async {
+    final watchers = _watchers[boxName];
+    final controller = watchers?.remove(watcherId);
+    if (controller != null) {
+      await controller.close();
+    }
+    if (watchers != null && watchers.isEmpty) {
+      _watchers.remove(boxName);
+    }
+  }
+
+  @override
   Future<void> put(String boxName, String key, Uint8List value) async {
     _requireOpen(boxName);
-    _box(boxName)[key] = Uint8List.fromList(value);
+    final copied = Uint8List.fromList(value);
+    _box(boxName)[key] = copied;
+    _emit(
+      NativeWatchEvent(
+        boxName: boxName,
+        type: NativeWatchEventType.put,
+        key: key,
+        value: Uint8List.fromList(copied),
+      ),
+    );
   }
 
   @override
   Future<void> putAll(String boxName, Map<String, Uint8List> values) async {
     _requireOpen(boxName);
-    _box(boxName).addAll(
-      values.map(
-        (key, value) =>
-            MapEntry<String, Uint8List>(key, Uint8List.fromList(value)),
-      ),
-    );
+    for (final entry in values.entries) {
+      final copied = Uint8List.fromList(entry.value);
+      _box(boxName)[entry.key] = copied;
+      _emit(
+        NativeWatchEvent(
+          boxName: boxName,
+          type: NativeWatchEventType.put,
+          key: entry.key,
+          value: Uint8List.fromList(copied),
+        ),
+      );
+    }
   }
 
   @override
@@ -278,12 +379,22 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   Future<void> delete(String boxName, String key) async {
     _requireOpen(boxName);
     _box(boxName).remove(key);
+    _emit(
+      NativeWatchEvent(
+        boxName: boxName,
+        type: NativeWatchEventType.delete,
+        key: key,
+      ),
+    );
   }
 
   @override
   Future<void> clear(String boxName) async {
     _requireOpen(boxName);
     _box(boxName).clear();
+    _emit(
+      NativeWatchEvent(boxName: boxName, type: NativeWatchEventType.clear),
+    );
   }
 
   @override
