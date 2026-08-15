@@ -29,8 +29,9 @@ void main() {
 
       final observedIntPut = observer.watch(key: 'int').first;
       await box.put('int', 42);
-      final nativeWatchEvent =
-          await observedIntPut.timeout(const Duration(seconds: 5));
+      final nativeWatchEvent = await observedIntPut.timeout(
+        const Duration(seconds: 5),
+      );
       expect(nativeWatchEvent.type, BoxEventType.put);
       expect(nativeWatchEvent.key, 'int');
       expect(nativeWatchEvent.value, 42);
@@ -86,8 +87,9 @@ void main() {
       await DxtrBox.deleteBox('native');
       expect(await DxtrBox.boxExists('native'), isFalse);
     },
-    skip:
-        nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
+    skip: nativeEnabled
+        ? false
+        : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
   );
 
   test(
@@ -105,20 +107,14 @@ void main() {
         'secure',
         encryptionKey: 'correct horse battery staple',
       );
-      await box.put('token', <String, dynamic>{
+      await box.put('token', <String, dynamic>{'value': 'secret', 'count': 7});
+      expect(await box.get('token'), <String, dynamic>{
         'value': 'secret',
         'count': 7,
       });
-      expect(
-        await box.get('token'),
-        <String, dynamic>{'value': 'secret', 'count': 7},
-      );
       await box.close();
 
-      await expectLater(
-        DxtrBox.open('secure'),
-        throwsA(isA<Object>()),
-      );
+      await expectLater(DxtrBox.open('secure'), throwsA(isA<Object>()));
       await expectLater(
         DxtrBox.open('secure', encryptionKey: 'wrong key'),
         throwsA(isA<Object>()),
@@ -128,16 +124,17 @@ void main() {
         'secure',
         encryptionKey: 'correct horse battery staple',
       );
-      expect(
-        await box.get('token'),
-        <String, dynamic>{'value': 'secret', 'count': 7},
-      );
+      expect(await box.get('token'), <String, dynamic>{
+        'value': 'secret',
+        'count': 7,
+      });
       await box.close();
 
       await DxtrBox.deleteBox('secure');
       expect(await DxtrBox.boxExists('secure'), isFalse);
     },
-    skip:
-        nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
+    skip: nativeEnabled
+        ? false
+        : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
   );
 }

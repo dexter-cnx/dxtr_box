@@ -2,7 +2,7 @@ use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -94,6 +94,7 @@ struct OpenDatabase {
 static BASE_PATH: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
 static DATABASES: Lazy<RwLock<HashMap<String, OpenDatabase>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static COMPACTING: Lazy<RwLock<HashSet<String>>> = Lazy::new(|| RwLock::new(HashSet::new()));
 
 fn base_path() -> Result<PathBuf, String> {
     BASE_PATH
@@ -156,11 +157,13 @@ fn file_path(name: &str) -> Result<PathBuf, String> {
 }
 
 fn database(name: &str) -> Result<(Arc<Database>, Arc<EncryptionState>), String> {
-    DATABASES
-        .read()
-        .get(name)
-        .map(|entry| (Arc::clone(&entry.db), Arc::clone(&entry.encryption)))
-        .ok_or_else(|| format!("box '{name}' is not open"))
+    if let Some(entry) = DATABASES.read().get(name) {
+        return Ok((Arc::clone(&entry.db), Arc::clone(&entry.encryption)));
+    }
+    if COMPACTING.read().contains(name) {
+        return Err(format!("box '{name}' is compacting; retry later"));
+    }
+    Err(format!("box '{name}' is not open"))
 }
 
 fn read_meta(db: &Database, key: &str) -> Result<Option<Vec<u8>>, String> {
@@ -332,6 +335,10 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
     let path = file_path(name)?;
     let existed = path.exists();
     let mut databases = DATABASES.write();
+
+    if COMPACTING.read().contains(name) {
+        return Err(format!("box '{name}' is compacting; retry later"));
+    }
 
     if let Some(entry) = databases.get_mut(name) {
         entry.encryption.validate_requested_key(encryption_key)?;
@@ -531,21 +538,64 @@ pub fn clear(name: &str) -> Result<(), String> {
 }
 
 pub fn compact(name: &str) -> Result<bool, String> {
-    let mut databases = DATABASES.write();
-    let entry = databases
-        .get_mut(name)
-        .ok_or_else(|| format!("box '{name}' is not open"))?;
-    if entry.handles != 1 {
-        return Err("compact requires exactly one open box handle".to_string());
-    }
-    let db = Arc::get_mut(&mut entry.db)
-        .ok_or_else(|| "box is busy; retry compact when no operations are in flight".to_string())?;
+    let entry = {
+        let mut databases = DATABASES.write();
+        let current = databases
+            .get(name)
+            .ok_or_else(|| format!("box '{name}' is not open"))?;
+        if current.handles != 1 {
+            return Err("compact requires exactly one open box handle".to_string());
+        }
+        if Arc::strong_count(&current.db) != 1 {
+            return Err("box is busy; retry compact when no operations are in flight".to_string());
+        }
+        COMPACTING.write().insert(name.to_string());
+        databases
+            .remove(name)
+            .expect("entry checked immediately before removal")
+    };
 
-    let mut compacted = false;
-    while db.compact().map_err(|e| e.to_string())? {
-        compacted = true;
-    }
-    Ok(compacted)
+    let OpenDatabase {
+        db,
+        handles,
+        encryption,
+    } = entry;
+    let mut database = match Arc::try_unwrap(db) {
+        Ok(database) => database,
+        Err(db) => {
+            let mut databases = DATABASES.write();
+            databases.insert(
+                name.to_string(),
+                OpenDatabase {
+                    db,
+                    handles,
+                    encryption,
+                },
+            );
+            COMPACTING.write().remove(name);
+            return Err("box is busy; retry compact when no operations are in flight".to_string());
+        }
+    };
+
+    let result = (|| {
+        let mut compacted = false;
+        while database.compact().map_err(|e| e.to_string())? {
+            compacted = true;
+        }
+        Ok(compacted)
+    })();
+
+    let mut databases = DATABASES.write();
+    databases.insert(
+        name.to_string(),
+        OpenDatabase {
+            db: Arc::new(database),
+            handles,
+            encryption,
+        },
+    );
+    COMPACTING.write().remove(name);
+    result
 }
 
 pub fn all_keys(name: &str) -> Result<Vec<String>, String> {

@@ -81,11 +81,15 @@ pub fn init_db(path: String) -> Result<(), String> {
 
 #[frb(sync)]
 pub fn open_box(name: String, encryption_key: Option<String>) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&name);
+    let _mutation_guard = mutation_lock.lock();
     db::open(&name, encryption_key.as_deref())
 }
 
 #[frb(sync)]
 pub fn close_box(name: String) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&name);
+    let _mutation_guard = mutation_lock.lock();
     db::close(&name);
     Ok(())
 }

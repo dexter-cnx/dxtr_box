@@ -28,10 +28,7 @@ abstract final class DxtrCodec {
       return <dynamic>['@dxtr:bytes', value];
     }
     if (value is DateTime) {
-      return <dynamic>[
-        '@dxtr:datetime',
-        value.toUtc().microsecondsSinceEpoch,
-      ];
+      return <dynamic>['@dxtr:datetime', value.toUtc().microsecondsSinceEpoch];
     }
     if (value is List) {
       return <dynamic>[

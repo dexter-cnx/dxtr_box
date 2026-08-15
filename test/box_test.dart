@@ -136,10 +136,7 @@ void main() {
       matches.map((entry) => entry.key),
       orderedEquals(<String>['b', 'c']),
     );
-    expect(
-      matches.map((entry) => entry.value),
-      orderedEquals(<int>[20, 30]),
-    );
+    expect(matches.map((entry) => entry.value), orderedEquals(<int>[20, 30]));
   });
 
   test('watch(key:) filters puts but still forwards clear', () async {
@@ -189,19 +186,21 @@ void main() {
     await expectLater(box.get('key'), throwsStateError);
   });
 
-  test('changing base path is blocked by the native engine while open',
-      () async {
-    final box = await DxtrBox.open('active');
+  test(
+    'changing base path is blocked by the native engine while open',
+    () async {
+      final box = await DxtrBox.open('active');
 
-    await expectLater(
-      DxtrBox.init(path: '/tmp/dxtr_box_other'),
-      throwsStateError,
-    );
+      await expectLater(
+        DxtrBox.init(path: '/tmp/dxtr_box_other'),
+        throwsStateError,
+      );
 
-    await box.close();
-    await DxtrBox.init(path: '/tmp/dxtr_box_other');
-    expect(api.lastInitPath, endsWith('/tmp/dxtr_box_other'));
-  });
+      await box.close();
+      await DxtrBox.init(path: '/tmp/dxtr_box_other');
+      expect(api.lastInitPath, endsWith('/tmp/dxtr_box_other'));
+    },
+  );
 
   test('DxtrBox rejects Windows-unsafe box names on every platform', () async {
     for (final name in <String>[
@@ -414,11 +413,13 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
     for (final key in keys) {
       if (box.remove(key) != null) {
         deleted.add(key);
-        _emit(NativeWatchEvent(
-          boxName: boxName,
-          type: NativeWatchEventType.delete,
-          key: key,
-        ));
+        _emit(
+          NativeWatchEvent(
+            boxName: boxName,
+            type: NativeWatchEventType.delete,
+            key: key,
+          ),
+        );
       }
     }
     return deleted;
@@ -428,9 +429,7 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   Future<void> clear(String boxName) async {
     _requireOpen(boxName);
     _box(boxName).clear();
-    _emit(
-      NativeWatchEvent(boxName: boxName, type: NativeWatchEventType.clear),
-    );
+    _emit(NativeWatchEvent(boxName: boxName, type: NativeWatchEventType.clear));
   }
 
   @override

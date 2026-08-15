@@ -40,8 +40,9 @@ abstract final class DxtrBox {
     'LPT9',
   };
 
-  static final RegExp _unsafeWindowsNameCharacters =
-      RegExp(r'[<>:"/\\|?*\x00-\x1F]');
+  static final RegExp _unsafeWindowsNameCharacters = RegExp(
+    r'[<>:"/\\|?*\x00-\x1F]',
+  );
 
   static bool get isInitialized => _basePath != null;
 
@@ -150,7 +151,8 @@ abstract final class DxtrBox {
 
   static void _validateBoxName(String name) {
     final windowsStem = name.split('.').first.toUpperCase();
-    final invalid = name.isEmpty ||
+    final invalid =
+        name.isEmpty ||
         name == '.' ||
         name == '..' ||
         name.endsWith('.') ||

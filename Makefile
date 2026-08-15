@@ -15,11 +15,11 @@ pub-get:
 	$(FLUTTER) pub get
 
 format:
-	dart format lib test
+	dart format lib test example
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
 format-check:
-	dart format --output=none --set-exit-if-changed lib test
+	dart format --output=none --set-exit-if-changed lib test example
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
 analyze: pub-get

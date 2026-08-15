@@ -113,10 +113,7 @@ final class FrbNativeDxtrApi implements NativeDxtrApi {
   }
 
   @override
-  Future<void> putAll(
-    String boxName,
-    Map<String, Uint8List> values,
-  ) async {
+  Future<void> putAll(String boxName, Map<String, Uint8List> values) async {
     await _ensureInitialized();
     await frb.putAll(
       boxName: boxName,
@@ -209,8 +206,7 @@ final class UnavailableNativeDxtrApi implements NativeDxtrApi {
   Future<Stream<NativeWatchEvent>> watchBox(
     String boxName,
     String watcherId,
-  ) async =>
-      _missing();
+  ) async => _missing();
 
   @override
   Future<void> unwatchBox(String boxName, String watcherId) async => _missing();
@@ -220,10 +216,7 @@ final class UnavailableNativeDxtrApi implements NativeDxtrApi {
       _missing();
 
   @override
-  Future<void> putAll(
-    String boxName,
-    Map<String, Uint8List> values,
-  ) async =>
+  Future<void> putAll(String boxName, Map<String, Uint8List> values) async =>
       _missing();
 
   @override

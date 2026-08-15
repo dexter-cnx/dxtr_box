@@ -16,10 +16,10 @@ final class Box {
     required NativeDxtrApi api,
     required BoxMetadata metadata,
     required void Function() onClose,
-  })  : _watcherId = watcherId,
-        _api = api,
-        _metadata = metadata,
-        _onClose = onClose;
+  }) : _watcherId = watcherId,
+       _api = api,
+       _metadata = metadata,
+       _onClose = onClose;
 
   final String name;
   final String _watcherId;
