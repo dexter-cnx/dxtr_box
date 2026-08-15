@@ -75,13 +75,18 @@ abstract final class DxtrBox {
   }) async {
     _ensureInitialized();
     _validateBoxName(name);
+    if (lazy) {
+      throw UnsupportedError(
+        'lazy: true is not implemented. dxtr_box already fetches values from '
+        'native storage on demand instead of caching whole-box values in Dart.',
+      );
+    }
     await _api.openBox(name, encryptionKey: encryptionKey);
 
     final metadata = _metadataByName.putIfAbsent(name, BoxMetadata.new);
     final box = Box.internal(
       name: name,
       api: _api,
-      lazy: lazy,
       metadata: metadata,
       onClose: () {
         _openHandleCount -= 1;
