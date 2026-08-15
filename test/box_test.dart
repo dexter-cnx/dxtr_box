@@ -43,15 +43,17 @@ void main() {
 
   test('putAll and where operate over decoded values', () async {
     final box = await DxtrBox.open('scores');
-    await box.putAll(<String, dynamic>{
-      'a': 10,
-      'b': 20,
-      'c': 30,
-    });
+    await box.putAll(<String, dynamic>{'a': 10, 'b': 20, 'c': 30});
 
     final matches = await box.where((value) => value is int && value >= 20);
-    expect(matches.map((entry) => entry.key), orderedEquals(<String>['b', 'c']));
-    expect(matches.map((entry) => entry.value), orderedEquals(<int>[20, 30]));
+    expect(
+      matches.map((entry) => entry.key),
+      orderedEquals(<String>['b', 'c']),
+    );
+    expect(
+      matches.map((entry) => entry.value),
+      orderedEquals(<int>[20, 30]),
+    );
   });
 
   test('watch(key:) filters puts but still forwards clear', () async {
@@ -101,7 +103,8 @@ void main() {
 Uint8List _bytes(List<int> values) => Uint8List.fromList(values);
 
 final class _FakeNativeDxtrApi implements NativeDxtrApi {
-  final Map<String, Map<String, Uint8List>> _boxes = <String, Map<String, Uint8List>>{};
+  final Map<String, Map<String, Uint8List>> _boxes =
+      <String, Map<String, Uint8List>>{};
   int closeCalls = 0;
 
   void seed(String boxName, Map<String, Uint8List> values) {
@@ -141,7 +144,8 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   Future<void> putAll(String boxName, Map<String, Uint8List> values) async {
     _box(boxName).addAll(
       values.map(
-        (key, value) => MapEntry<String, Uint8List>(key, Uint8List.fromList(value)),
+        (key, value) =>
+            MapEntry<String, Uint8List>(key, Uint8List.fromList(value)),
       ),
     );
   }
@@ -153,7 +157,8 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   }
 
   @override
-  Future<bool> containsKey(String boxName, String key) async => _box(boxName).containsKey(key);
+  Future<bool> containsKey(String boxName, String key) async =>
+      _box(boxName).containsKey(key);
 
   @override
   Future<void> delete(String boxName, String key) async {
@@ -166,7 +171,8 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   }
 
   @override
-  Future<List<String>> getAllKeys(String boxName) async => _box(boxName).keys.toList(growable: false);
+  Future<List<String>> getAllKeys(String boxName) async =>
+      _box(boxName).keys.toList(growable: false);
 
   @override
   Future<int> length(String boxName) async => _box(boxName).length;
