@@ -21,4 +21,17 @@ for old, new in replacements.items():
         raise SystemExit(f'expected cfg cleanup pattern not found: {old!r}')
     text = text.replace(old, new, 1)
 
+# put() and delete() intentionally have the same retrieval shape. The first
+# replacement above updates put(); rename the remaining delete() binding too so
+# reduced profiles do not leave an unused local after the full-only maintenance
+# block is compiled out.
+delete_binding = '        let old = table\n            .get(key)'
+if delete_binding not in text:
+    raise SystemExit('expected delete cfg binding not found')
+text = text.replace(
+    delete_binding,
+    '        let _old = table\n            .get(key)',
+    1,
+)
+
 path.write_text(text)
