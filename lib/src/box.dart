@@ -187,6 +187,44 @@ final class Box {
         .toList(growable: false);
   }
 
+  Future<void> createIndex(IndexDefinition definition) async {
+    _ensureOpen();
+    if (_api is! NativeIndexApi) {
+      throw UnsupportedError(
+          'The configured native engine does not support persisted indexes.');
+    }
+    final indexApi = _api as NativeIndexApi;
+    await indexApi.createIndex(name, definition.name, definition.field);
+  }
+
+  Future<List<IndexDefinition>> listIndexes() async {
+    _ensureOpen();
+    if (_api is! NativeIndexApi) {
+      throw UnsupportedError(
+          'The configured native engine does not support persisted indexes.');
+    }
+    final indexApi = _api as NativeIndexApi;
+    final definitions = await indexApi.listIndexes(name);
+    return definitions
+        .map(
+          (definition) => IndexDefinition(
+            name: definition.name,
+            field: definition.field,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<bool> dropIndex(String indexName) async {
+    _ensureOpen();
+    if (_api is! NativeIndexApi) {
+      throw UnsupportedError(
+          'The configured native engine does not support persisted indexes.');
+    }
+    final indexApi = _api as NativeIndexApi;
+    return indexApi.dropIndex(name, indexName);
+  }
+
   Future<void> close() {
     if (_closed) return Future<void>.value();
     final inFlight = _closeFuture;
