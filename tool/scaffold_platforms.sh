@@ -21,5 +21,7 @@ for platform in android ios macos linux windows; do
 done
 
 cd "$root"
-flutter_rust_bridge_codegen integrate --integration-backend cargokit
+# flutter_rust_bridge_codegen 2.8 uses Cargokit as the default integration
+# backend and does not accept the newer --integration-backend option.
+flutter_rust_bridge_codegen integrate
 flutter_rust_bridge_codegen generate
