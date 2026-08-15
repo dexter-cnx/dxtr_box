@@ -135,4 +135,51 @@ void main() {
     skip:
         nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
   );
+
+  test(
+    'plaintext box migrates through public Dart API and preserves data',
+    () async {
+      final root = await Directory.systemTemp.createTemp('dxtr_box_migrate_');
+      addTearDown(() async {
+        if (root.existsSync()) {
+          await root.delete(recursive: true);
+        }
+      });
+
+      await DxtrBox.init(path: root.path);
+      var box = await DxtrBox.open('migrate');
+      await box.put('answer', 42);
+      await box.put('profile', <String, dynamic>{
+        'name': 'Dxtr',
+        'enabled': true,
+      });
+
+      await expectLater(
+        DxtrBox.encryptBox('migrate', encryptionKey: 'migration-key'),
+        throwsStateError,
+      );
+
+      await box.close();
+      await DxtrBox.encryptBox('migrate', encryptionKey: 'migration-key');
+
+      await expectLater(DxtrBox.open('migrate'), throwsA(isA<Object>()));
+      await expectLater(
+        DxtrBox.open('migrate', encryptionKey: 'wrong-key'),
+        throwsA(isA<Object>()),
+      );
+
+      box = await DxtrBox.open('migrate', encryptionKey: 'migration-key');
+      expect(await box.get('answer'), 42);
+      expect(await box.get('profile'), <String, dynamic>{
+        'name': 'Dxtr',
+        'enabled': true,
+      });
+      await box.close();
+
+      await DxtrBox.deleteBox('migrate');
+      expect(await DxtrBox.boxExists('migrate'), isFalse);
+    },
+    skip:
+        nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
+  );
 }

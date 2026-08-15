@@ -1,6 +1,6 @@
 # dxtr_box Testing Strategy
 
-The test suite is layered so failures identify whether the problem is in Dart behavior, serialization, native storage, cross-platform compilation, minimum-SDK compatibility, process-boundary durability, or benchmark harness execution.
+The test suite is layered so failures identify whether the problem is in Dart behavior, serialization, native storage, cross-platform compilation, minimum-SDK compatibility, process-boundary durability, generated bridge drift, or benchmark harness execution.
 
 ## Local commands
 
@@ -98,7 +98,7 @@ Coverage includes:
 - unsafe box-name rejection
 - deleteBox/boxExists delegation
 
-The fake is a test seam only. It does not replace native integration tests.
+The primary `NativeDxtrApi` seam remains usable by test/alternate engines that do not implement encryption migration. Migration is exposed as the optional `NativeEncryptionMigrationApi` capability so adding the maintenance feature does not force every non-production engine to pretend it can rewrite persisted encrypted storage.
 
 ## Native Dart -> FRB integration tests
 
@@ -118,6 +118,10 @@ Coverage includes real Dart -> FRB -> Rust -> redb behavior for:
 - cross-handle native watch delivery
 - encrypted close/reopen
 - wrong/missing encryption key rejection
+- public `DxtrBox.encryptBox()` plaintext -> encrypted migration
+- Dart-side live-handle migration rejection
+- correct-key reopen and wrong/missing-key rejection after migration
+- data parity before and after migration
 - deleteAll and compaction native paths
 
 These tests require the native release library and are gated with `DXTR_BOX_NATIVE_TEST=1`.
@@ -142,10 +146,32 @@ Coverage includes:
 - wrong/missing-key rejection
 - tamper rejection
 - plaintext/encrypted mode mismatch
+- explicit plaintext -> encrypted migration
+- migration rejection for missing/open/already-encrypted boxes and empty keys
+- pre-commit validation failure preserving the original plaintext state
 
 ### Global-state test isolation
 
-The engine has process-global base-path, database-cache, watcher, and mutation-lock state. Same-process tests must avoid racing global reinitialization. Test-only synchronization is allowed where needed as long as production synchronization semantics are not weakened.
+The engine has process-global base-path, database-cache, watcher, maintenance, and mutation-lock state. Same-process tests must avoid racing global reinitialization. Test-only synchronization is allowed where needed as long as production synchronization semantics are not weakened.
+
+## Migration atomicity coverage
+
+`rust/src/db.rs` validates the migration transaction contract directly. All plaintext values are validated and encrypted before the transaction commits the final `chacha20poly1305` metadata state. A failure before commit must leave the original plaintext box readable.
+
+`test/native_integration_test.dart` validates the public path:
+
+```text
+DxtrBox.encryptBox
+  -> NativeEncryptionMigrationApi
+  -> generated FRB binding
+  -> Rust api::encrypt_box
+  -> db::encrypt_box
+  -> redb transaction
+```
+
+The public API rejects migration while a Dart handle is live. After all handles close, a successful migration must reject missing/wrong keys and preserve the original decoded values when reopened with the new key.
+
+A dedicated process-kill test targeted specifically at killing a migration while its transaction is in-flight remains future hardening. The current durability claim is limited to redb transactional before/after semantics plus the existing acknowledged-commit process-crash suite.
 
 ## Process-kill durability test
 
@@ -242,10 +268,20 @@ This job is the compatibility contract for the declared lower bound. It intentio
 - `flutter analyze`
 - `flutter test`
 
+### FRB generated-bindings job
+
+- install Flutter + Rust
+- install `flutter_rust_bridge_codegen 2.8.0`
+- regenerate checked-in Dart/Rust bindings
+- upload regenerated files as a short-lived artifact for debugging
+- fail if `git diff` shows generated binding drift
+
+Native API source changes are therefore incomplete until generated bindings committed to the repository match FRB codegen output.
+
 ### Native Linux job
 
 - build the Rust release library
-- run Dart -> FRB -> Rust native integration tests from the root package
+- run Dart -> FRB -> Rust native integration tests from the root package, including explicit encryption migration
 - resolve the separate `benchmark/` package on current stable Flutter
 - run the `hive_ce` benchmark smoke harness with a deliberately small operation count
 
@@ -279,7 +315,7 @@ The following remain future hardening work:
 - benchmark absolute performance thresholds
 - long-duration benchmark trend regression policy
 - release binary-size regression measurement
+- dedicated process-kill interruption injection during plaintext -> encrypted migration
 - Dart 3.13 native symbol tree-shaking verification (future-only; do not implement now)
-- explicit plaintext -> encrypted migration interruption/recovery tests
 
 Performance CI should remain trend-oriented rather than a brittle absolute timing gate on shared GitHub runners.

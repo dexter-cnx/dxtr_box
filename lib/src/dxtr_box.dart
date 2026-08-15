@@ -63,8 +63,6 @@ abstract final class DxtrBox {
       ),
     );
 
-    // The native engine canonicalizes filesystem paths and is the authority for
-    // deciding whether this is an idempotent init or an unsafe path switch.
     await _api.initDb(resolvedPath);
     if (_basePath != resolvedPath && _openHandleCount == 0) {
       _metadataByName.clear();
@@ -105,10 +103,6 @@ abstract final class DxtrBox {
     );
 
     try {
-      // Register native events before metadata hydration. This closes the race
-      // where another handle mutates the box between initial key loading and
-      // watch registration; the following refresh then establishes a current
-      // metadata snapshot while future mutations arrive through the stream.
       await box.initializeNativeWatch();
       await box.refreshMetadata();
     } catch (_) {
@@ -129,6 +123,40 @@ abstract final class DxtrBox {
       throw StateError('Cannot delete box "$name" while it is open.');
     }
     await _api.deleteBox(name);
+    _metadataByName.remove(name);
+  }
+
+  /// Explicitly converts an existing plaintext box to encrypted storage.
+  ///
+  /// All handles for [name] must be closed before migration. The native engine
+  /// performs the value rewrite and encryption metadata transition in one redb
+  /// write transaction, so callers observe either the original plaintext state
+  /// or the fully encrypted state after a successful return.
+  static Future<void> encryptBox(
+    String name, {
+    required String encryptionKey,
+  }) async {
+    _ensureInitialized();
+    _validateBoxName(name);
+    if (encryptionKey.isEmpty) {
+      throw ArgumentError.value(
+        encryptionKey,
+        'encryptionKey',
+        'Encryption key cannot be empty',
+      );
+    }
+    if ((_openHandlesByName[name] ?? 0) > 0) {
+      throw StateError('Cannot encrypt box "$name" while it is open.');
+    }
+
+    final api = _api;
+    if (api is! NativeEncryptionMigrationApi) {
+      throw StateError(
+        'The configured dxtr_box native engine does not support encryption migration.',
+      );
+    }
+    final migrationApi = api as NativeEncryptionMigrationApi;
+    await migrationApi.encryptBox(name, encryptionKey);
     _metadataByName.remove(name);
   }
 
