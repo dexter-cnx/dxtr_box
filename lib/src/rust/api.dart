@@ -68,6 +68,11 @@ Future<void> clear({required String boxName}) =>
 Future<bool> compact({required String boxName}) =>
     RustLib.instance.api.crateApiCompact(boxName: boxName);
 
+Future<List<NativeQueryRecord>> scanQuery(
+        {required String boxName, required List<int> queryPayload}) =>
+    RustLib.instance.api
+        .crateApiScanQuery(boxName: boxName, queryPayload: queryPayload);
+
 Future<List<String>> getAllKeys({required String boxName}) =>
     RustLib.instance.api.crateApiGetAllKeys(boxName: boxName);
 
@@ -107,4 +112,25 @@ enum NativeBoxEventType {
   delete,
   clear,
   ;
+}
+
+class NativeQueryRecord {
+  final String key;
+  final Uint8List value;
+
+  const NativeQueryRecord({
+    required this.key,
+    required this.value,
+  });
+
+  @override
+  int get hashCode => key.hashCode ^ value.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NativeQueryRecord &&
+          runtimeType == other.runtimeType &&
+          key == other.key &&
+          value == other.value;
 }
