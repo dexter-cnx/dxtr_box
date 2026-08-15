@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'box_event.dart';
 import 'codec.dart';
 import 'native_api.dart';
+import 'query.dart';
 
 final class BoxMetadata {
   List<String> keys = const <String>[];
@@ -68,9 +69,6 @@ final class Box {
     final subscription = _nativeWatchSubscription;
     _nativeWatchSubscription = null;
 
-    // Drop the native StreamSink first so FRB can close the producer side
-    // before Dart tears down its subscription. Reversing this order can leave
-    // cancellation waiting on a producer that is still retained in Rust.
     if (_nativeWatchRegistered) {
       await _api.unwatchBox(name, _watcherId);
       _nativeWatchRegistered = false;
@@ -86,11 +84,6 @@ final class Box {
     final snapshot = await _api.getAllKeys(name);
     _metadata.keys = List<String>.unmodifiable(snapshot);
 
-    // Events can arrive after watch registration but before the metadata read
-    // completes. Replaying them after assigning the snapshot prevents a stale
-    // snapshot from overwriting a committed mutation. Key transformations are
-    // idempotent, so replay is correct whether the snapshot was taken before,
-    // during, or after any buffered event.
     _metadataHydrated = true;
     final pending = List<NativeWatchEvent>.of(_pendingWatchEvents);
     _pendingWatchEvents.clear();
@@ -174,6 +167,24 @@ final class Box {
     return _api.compact(name);
   }
 
+  /// Executes the complete declarative query in one native boundary crossing.
+  Future<List<MapEntry<String, dynamic>>> query(BoxQuery query) async {
+    _ensureOpen();
+    final api = _api;
+    if (api is! NativeQueryApi) {
+      throw UnsupportedError('The configured native engine does not support queries.');
+    }
+    final records = await api.scanQuery(name, DxtrCodec.encode(_queryWire(query)));
+    return records
+        .map(
+          (record) => MapEntry<String, dynamic>(
+            record.key,
+            DxtrCodec.decode(record.value),
+          ),
+        )
+        .toList(growable: false);
+  }
+
   Future<void> close() {
     if (_closed) return Future<void>.value();
     final inFlight = _closeFuture;
@@ -197,6 +208,7 @@ final class Box {
     }
   }
 
+  /// Legacy Dart-side predicate scan retained for compatibility and diagnostics.
   Future<List<MapEntry<String, dynamic>>> where(
     bool Function(dynamic) test,
   ) async {
@@ -286,4 +298,27 @@ final class Box {
       throw ArgumentError.value(key, 'key', 'Key cannot be empty');
     }
   }
+}
+
+Map<String, dynamic> _queryWire(BoxQuery query) => <String, dynamic>{
+      'where': _filterWire(query.where),
+      'limit': query.limit,
+      'offset': query.offset,
+    };
+
+Map<String, dynamic> _filterWire(QueryFilter filter) {
+  return switch (filter) {
+    QueryComparison comparison => <String, dynamic>{
+        'type': 'comparison',
+        'field': comparison.field,
+        'operator': comparison.operator.name,
+        'value': comparison.value,
+        'upperValue': comparison.upperValue,
+      },
+    QueryGroup group => <String, dynamic>{
+        'type': 'group',
+        'operator': group.operator.name,
+        'filters': group.filters.map(_filterWire).toList(growable: false),
+      },
+  };
 }
