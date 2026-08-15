@@ -15,6 +15,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  minimum-sdk:
+    name: Minimum SDK / Flutter 3.22.0 + Dart 3.4.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up minimum Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0'
+          channel: stable
+          cache: true
+
+      - name: Verify minimum toolchain
+        run: flutter --version
+
+      - name: Install dependencies at minimum SDK
+        run: flutter pub get
+
+      - name: Analyze at minimum SDK
+        run: flutter analyze
+
+      - name: Test at minimum SDK
+        run: flutter test --reporter expanded
+
   flutter:
     name: Flutter / analyze + test
     runs-on: ubuntu-latest
