@@ -1,0 +1,45 @@
+name: PR7 Review Fix
+
+on:
+  push:
+    branches: [feature/delete-all-compact]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/delete-all-compact
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          cache: false
+
+      - name: Apply review fixes
+        run: |
+          python3 tool/patch_pr7_review.py
+          cargo fmt --manifest-path rust/Cargo.toml
+          dart format lib test example
+          make preflight
+
+      - name: Commit review fixes
+        run: |
+          rm -f .github/workflows/pr7_review_fix.yml tool/patch_pr7_review.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: isolate compaction and align preflight formatting"
+          git push origin HEAD:feature/delete-all-compact
