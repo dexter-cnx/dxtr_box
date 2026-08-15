@@ -27,4 +27,3 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   integration_test:
     sdk: flutter
-  hive_ce: ^2.19.3
