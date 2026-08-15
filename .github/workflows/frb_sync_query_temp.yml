@@ -10,88 +10,45 @@ permissions:
 
 jobs:
   finalize:
-    if: github.repository == 'dexter-cnx/dxtr_box'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           ref: feature/0.3-query-index-foundation
           fetch-depth: 0
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           components: rustfmt, clippy
           cache: true
           cache-workspaces: rust
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Apply transactional index integration
-        run: python3 tool/apply_query_index_db_patch.py
-
-      - name: Fix list_indexes expression tail
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('rust/src/api.rs')
-          text = path.read_text()
-          old_head = '        return index::list(&db).map(|definitions| {'
-          new_head = '        index::list(&db).map(|definitions| {'
-          if old_head not in text:
-              raise SystemExit('expected list_indexes return pattern not found in api.rs')
-          text = text.replace(old_head, new_head, 1)
-          old_tail = '''                .collect()
-        });
-    }
-
-    #[cfg(not(feature = "full"))]'''
-          new_tail = '''                .collect()
-        })
-    }
-
-    #[cfg(not(feature = "full"))]'''
-          if old_tail not in text:
-              raise SystemExit('expected list_indexes map tail not found in api.rs')
-          path.write_text(text.replace(old_tail, new_tail, 1))
-          PY
-
-      - name: Format native sources
-        run: cargo fmt --manifest-path rust/Cargo.toml
-
+      - run: flutter pub get
+      - run: python3 tool/apply_query_index_db_patch.py
+      - name: Fix list_indexes expression
+        run: python3 -c "from pathlib import Path; p=Path('rust/src/api.rs'); s=p.read_text(); s=s.replace('        return index::list(&db).map(|definitions| {','        index::list(&db).map(|definitions| {',1); s=s.replace('                .collect()\n        });\n    }\n\n    #[cfg(not(feature = \\\"full\\\"))]','                .collect()\n        })\n    }\n\n    #[cfg(not(feature = \\\"full\\\"))]',1); p.write_text(s)"
+      - run: cargo fmt --manifest-path rust/Cargo.toml
       - name: Validate Rust profiles
         run: |
           cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features
           cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
           cargo test --manifest-path rust/Cargo.toml --all-targets
-
-      - name: Install flutter_rust_bridge_codegen 2.8.0
-        run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
-
-      - name: Regenerate exact bindings
+      - run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
+      - name: Regenerate bindings
         run: |
           flutter_rust_bridge_codegen generate
           dart format lib/src/rust lib/src/box.dart lib/src/native_api.dart
-
-      - name: Validate Flutter facade
+      - name: Validate Flutter
         run: |
           flutter analyze
           flutter test --reporter expanded
-
-      - name: Remove temporary finalize tooling
+      - name: Remove temporary tooling
         run: git rm .github/workflows/frb_sync_query_temp.yml tool/apply_query_index_db_patch.py
-
-      - name: Commit finalized query/index implementation
+      - name: Commit finalized implementation
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
