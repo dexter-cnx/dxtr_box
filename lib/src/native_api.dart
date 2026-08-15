@@ -115,7 +115,8 @@ final class FrbNativeDxtrApi implements NativeDxtrApi {
     final value = await frb.length(boxName: boxName);
     final maxDartInt = BigInt.from(0x7fffffffffffffff);
     if (value.isNegative || value > maxDartInt) {
-      throw StateError('Native box length cannot be represented as a Dart int.');
+      throw StateError(
+          'Native box length cannot be represented as a Dart int.');
     }
     return value.toInt();
   }
@@ -125,7 +126,8 @@ final class FrbNativeDxtrApi implements NativeDxtrApi {
 final class UnavailableNativeDxtrApi implements NativeDxtrApi {
   const UnavailableNativeDxtrApi();
 
-  Never _missing() => throw StateError('dxtr_box Rust bindings are unavailable.');
+  Never _missing() =>
+      throw StateError('dxtr_box Rust bindings are unavailable.');
 
   @override
   Future<void> initDb(String path) async => _missing();
