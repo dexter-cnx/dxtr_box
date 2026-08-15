@@ -52,7 +52,11 @@ abstract final class DxtrBox {
   }
 
   static void _validateBoxName(String name) {
-    if (name.isEmpty || name.contains('/') || name.contains('\\') || name == '.' || name == '..') {
+    if (name.isEmpty ||
+        name.contains('/') ||
+        name.contains('\\') ||
+        name == '.' ||
+        name == '..') {
       throw ArgumentError.value(name, 'name', 'Invalid box name');
     }
   }
