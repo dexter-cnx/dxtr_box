@@ -249,9 +249,6 @@ fn resolve_existing_box(
 ) -> Result<EncryptionState, String> {
     let format = read_meta(db, META_FORMAT_VERSION)?;
 
-    // Files created before metadata support are known plaintext boxes. Persist
-    // the v1 marker on first reopen, but never reinterpret existing plaintext
-    // data as encrypted just because a caller supplied a key.
     if format.is_none() {
         if encryption_key.is_some() {
             return Err(
@@ -285,7 +282,6 @@ fn resolve_existing_box(
             if password.is_empty() {
                 return Err("encryption key cannot be empty".to_string());
             }
-
             let salt_bytes = read_meta(db, META_ENCRYPTION_SALT)?
                 .ok_or_else(|| "encrypted box metadata is missing salt".to_string())?;
             let salt: [u8; crypto::SALT_LEN] = salt_bytes
@@ -346,7 +342,6 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
     if MIGRATING.read().contains(name) {
         return Err(format!("box '{name}' is migrating; retry later"));
     }
-
     if let Some(entry) = databases.get_mut(name) {
         entry.encryption.validate_requested_key(encryption_key)?;
         entry.handles += 1;
@@ -370,8 +365,6 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
         }
         resolve_existing_box(&db, encryption_key)
     } else {
-        // A file without the data table is an interrupted first creation,
-        // not a legacy plaintext box. Re-run the atomic initializer.
         initialize_new_box(&db, encryption_key)
     };
 
@@ -420,7 +413,9 @@ pub fn delete_box(name: &str) -> Result<(), String> {
         return Err(format!("cannot delete open box '{name}'"));
     }
     if COMPACTING.read().contains(name) || MIGRATING.read().contains(name) {
-        return Err(format!("box '{name}' is busy with maintenance; retry later"));
+        return Err(format!(
+            "box '{name}' is busy with maintenance; retry later"
+        ));
     }
 
     match fs::remove_file(path) {
@@ -470,9 +465,6 @@ pub fn encrypt_box(name: &str, encryption_key: &str) -> Result<(), String> {
 
         let result = (|| {
             let db = Database::create(&path).map_err(|e| format!("open {path:?}: {e}"))?;
-
-            // Ensure both tables exist for legacy plaintext boxes. Creating an
-            // empty metadata table is safe and leaves the box plaintext.
             {
                 let write = db.begin_write().map_err(|e| e.to_string())?;
                 write.open_table(DATA).map_err(|e| e.to_string())?;
@@ -749,8 +741,6 @@ mod tests {
     use once_cell::sync::Lazy;
     use parking_lot::Mutex;
 
-    // The engine intentionally keeps process-global base-path and database caches.
-    // Serialize tests that mutate that global state so `cargo test` remains deterministic.
     static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     fn pack<T: serde::Serialize>(value: &T) -> Vec<u8> {
@@ -789,7 +779,6 @@ mod tests {
             ],
         )
         .unwrap();
-
         let deleted = delete_all(
             "batch-delete",
             &["a".to_string(), "missing".to_string(), "c".to_string()],
@@ -814,7 +803,6 @@ mod tests {
         )
         .unwrap();
         clear("compact").unwrap();
-
         assert!(compact("compact").is_ok());
         open("compact", None).unwrap();
         assert!(compact("compact").is_err());
@@ -846,7 +834,6 @@ mod tests {
         open("persistent", None).unwrap();
         put("persistent", "answer", &pack(&42_i64)).unwrap();
         close("persistent");
-
         open("persistent", None).unwrap();
         assert_eq!(get("persistent", "answer").unwrap(), Some(pack(&42_i64)));
         assert_eq!(len("persistent").unwrap(), 1);
@@ -859,10 +846,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
         open("atomic", None).unwrap();
-
         let entries = vec![
             ("good".to_string(), pack(&1_i64)),
-            ("bad".to_string(), vec![0xc1]), // Reserved MessagePack byte.
+            ("bad".to_string(), vec![0xc1]),
         ];
         assert!(put_all("atomic", &entries).is_err());
         assert_eq!(len("atomic").unwrap(), 0);
@@ -874,7 +860,6 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-
         for name in [
             "",
             ".",
@@ -902,11 +887,9 @@ mod tests {
         let second = tempfile::tempdir().unwrap();
         init(first.path().to_str().unwrap()).unwrap();
         init(first.path().to_str().unwrap()).unwrap();
-
         open("active", None).unwrap();
         assert!(init(second.path().to_str().unwrap()).is_err());
         close("active");
-
         init(second.path().to_str().unwrap()).unwrap();
     }
 
@@ -918,10 +901,8 @@ mod tests {
         open("shared", None).unwrap();
         open("shared", None).unwrap();
         put("shared", "k", &pack(&1_i64)).unwrap();
-
         close("shared");
         assert_eq!(get("shared", "k").unwrap(), Some(pack(&1_i64)));
-
         close("shared");
         assert!(get("shared", "k").is_err());
     }
@@ -934,11 +915,9 @@ mod tests {
         open("temporary", None).unwrap();
         put("temporary", "k", &pack(&1_i64)).unwrap();
         assert!(box_exists("temporary").unwrap());
-
         assert!(delete_box("temporary").is_err());
         assert!(box_exists("temporary").unwrap());
         close("temporary");
-
         delete_box("temporary").unwrap();
         assert!(!box_exists("temporary").unwrap());
         assert!(get("temporary", "k").is_err());
@@ -956,15 +935,12 @@ mod tests {
         put("migrate", "alpha", &alpha).unwrap();
         put("migrate", "beta", &beta).unwrap();
         close("migrate");
-
         encrypt_box("migrate", "migration-key").unwrap();
-
         assert!(open("migrate", None).is_err());
         assert!(open("migrate", Some("wrong-key")).is_err());
         open("migrate", Some("migration-key")).unwrap();
         assert_eq!(get("migrate", "alpha").unwrap(), Some(alpha.clone()));
         assert_eq!(get("migrate", "beta").unwrap(), Some(beta.clone()));
-
         let (db, _) = database("migrate").unwrap();
         assert_eq!(
             read_meta(&db, META_ENCRYPTION_MODE).unwrap().as_deref(),
@@ -976,8 +952,14 @@ mod tests {
         );
         let read = db.begin_read().unwrap();
         let table = read.open_table(DATA).unwrap();
-        assert_ne!(table.get("alpha").unwrap().unwrap().value(), alpha.as_slice());
-        assert_ne!(table.get("beta").unwrap().unwrap().value(), beta.as_slice());
+        assert_ne!(
+            table.get("alpha").unwrap().unwrap().value(),
+            alpha.as_slice()
+        );
+        assert_ne!(
+            table.get("beta").unwrap().unwrap().value(),
+            beta.as_slice()
+        );
         drop(table);
         drop(read);
         drop(db);
@@ -990,14 +972,11 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-
         assert!(encrypt_box("missing", "key").is_err());
-
         open("plain-open", None).unwrap();
         assert!(encrypt_box("plain-open", "key").is_err());
         close("plain-open");
         assert!(encrypt_box("plain-open", "").is_err());
-
         open("already-secure", Some("key")).unwrap();
         close("already-secure");
         assert!(encrypt_box("already-secure", "new-key").is_err());
@@ -1011,7 +990,6 @@ mod tests {
         init(dir.path().to_str().unwrap()).unwrap();
         open("migration-failure", None).unwrap();
         put("migration-failure", "good", &pack(&1_i64)).unwrap();
-
         let (db, _) = database("migration-failure").unwrap();
         let write = db.begin_write().unwrap();
         {
@@ -1021,16 +999,21 @@ mod tests {
         write.commit().unwrap();
         drop(db);
         close("migration-failure");
-
         assert!(encrypt_box("migration-failure", "key").is_err());
         open("migration-failure", None).unwrap();
         assert_eq!(
-            read_meta(&database("migration-failure").unwrap().0, META_ENCRYPTION_MODE)
-                .unwrap()
-                .as_deref(),
+            read_meta(
+                &database("migration-failure").unwrap().0,
+                META_ENCRYPTION_MODE,
+            )
+            .unwrap()
+            .as_deref(),
             Some(ENCRYPTION_NONE)
         );
-        assert_eq!(get("migration-failure", "good").unwrap(), Some(pack(&1_i64)));
+        assert_eq!(
+            get("migration-failure", "good").unwrap(),
+            Some(pack(&1_i64))
+        );
         close("migration-failure");
     }
 
@@ -1044,7 +1027,6 @@ mod tests {
         let plaintext = pack(&"secret-value");
         put("secure", "token", &plaintext).unwrap();
         assert_eq!(get("secure", "token").unwrap(), Some(plaintext.clone()));
-
         let (db, _) = database("secure").unwrap();
         let read = db.begin_read().unwrap();
         let table = read.open_table(DATA).unwrap();
@@ -1062,7 +1044,6 @@ mod tests {
         open("secure-reopen", Some("first-key")).unwrap();
         put("secure-reopen", "answer", &pack(&42_i64)).unwrap();
         close("secure-reopen");
-
         assert!(open("secure-reopen", None).is_err());
         assert!(open("secure-reopen", Some("wrong-key")).is_err());
         open("secure-reopen", Some("first-key")).unwrap();
@@ -1076,23 +1057,19 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-
         open("secure-a", Some("password")).unwrap();
         let (db_a, _) = database("secure-a").unwrap();
         let salt_a = read_meta(&db_a, META_ENCRYPTION_SALT).unwrap().unwrap();
         drop(db_a);
         close("secure-a");
-
         open("secure-b", Some("password")).unwrap();
         let (db_b, _) = database("secure-b").unwrap();
         let salt_b = read_meta(&db_b, META_ENCRYPTION_SALT).unwrap().unwrap();
         drop(db_b);
         close("secure-b");
-
         assert_eq!(salt_a.len(), crypto::SALT_LEN);
         assert_eq!(salt_b.len(), crypto::SALT_LEN);
         assert_ne!(salt_a, salt_b);
-
         open("secure-a", Some("password")).unwrap();
         let (db_a_reopened, _) = database("secure-a").unwrap();
         assert_eq!(
@@ -1114,7 +1091,6 @@ mod tests {
         open("swap", Some("password")).unwrap();
         put("swap", "a", &pack(&"first")).unwrap();
         put("swap", "b", &pack(&"second")).unwrap();
-
         let (db, _) = database("swap").unwrap();
         let (payload_a, payload_b) = {
             let read = db.begin_read().unwrap();
@@ -1131,7 +1107,6 @@ mod tests {
             table.insert("b", payload_a.as_slice()).unwrap();
         }
         write.commit().unwrap();
-
         assert!(get("swap", "a").is_err());
         assert!(get("swap", "b").is_err());
         drop(db);
@@ -1146,7 +1121,6 @@ mod tests {
         init(dir.path().to_str().unwrap()).unwrap();
         open("tamper", Some("password")).unwrap();
         put("tamper", "key", &pack(&"value")).unwrap();
-
         let (db, _) = database("tamper").unwrap();
         let write = db.begin_write().unwrap();
         {
@@ -1157,7 +1131,6 @@ mod tests {
             table.insert("key", stored.as_slice()).unwrap();
         }
         write.commit().unwrap();
-
         assert!(get("tamper", "key").is_err());
         close("tamper");
     }
@@ -1171,7 +1144,6 @@ mod tests {
         open("plain", None).unwrap();
         put("plain", "key", &pack(&1_i64)).unwrap();
         close("plain");
-
         assert!(open("plain", Some("password")).is_err());
         open("plain", None).unwrap();
         assert_eq!(get("plain", "key").unwrap(), Some(pack(&1_i64)));
