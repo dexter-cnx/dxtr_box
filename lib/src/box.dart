@@ -12,20 +12,25 @@ final class BoxMetadata {
 final class Box {
   Box.internal({
     required this.name,
+    required String watcherId,
     required NativeDxtrApi api,
     required BoxMetadata metadata,
     required void Function() onClose,
-  })  : _api = api,
+  })  : _watcherId = watcherId,
+        _api = api,
         _metadata = metadata,
         _onClose = onClose;
 
   final String name;
+  final String _watcherId;
   final NativeDxtrApi _api;
   final BoxMetadata _metadata;
   final void Function() _onClose;
   final StreamController<BoxEvent> _events =
       StreamController<BoxEvent>.broadcast(sync: true);
 
+  StreamSubscription<NativeWatchEvent>? _nativeWatchSubscription;
+  bool _nativeWatchRegistered = false;
   bool _closed = false;
   Future<void>? _closeFuture;
 
@@ -43,6 +48,32 @@ final class Box {
     return result;
   }
 
+  Future<void> initializeNativeWatch() async {
+    _ensureOpen();
+    final nativeStream = await _api.watchBox(name, _watcherId);
+    _nativeWatchRegistered = true;
+    _nativeWatchSubscription = nativeStream.listen(
+      _handleNativeWatchEvent,
+      onError: (Object error, StackTrace stackTrace) {
+        if (!_events.isClosed) {
+          _events.addError(error, stackTrace);
+        }
+      },
+    );
+  }
+
+  Future<void> disposeNativeWatch() async {
+    final subscription = _nativeWatchSubscription;
+    _nativeWatchSubscription = null;
+    if (subscription != null) {
+      await subscription.cancel();
+    }
+    if (_nativeWatchRegistered) {
+      await _api.unwatchBox(name, _watcherId);
+      _nativeWatchRegistered = false;
+    }
+  }
+
   Future<void> refreshMetadata() async {
     _ensureOpen();
     _metadata.keys = List<String>.unmodifiable(await _api.getAllKeys(name));
@@ -58,9 +89,6 @@ final class Box {
         key,
       ]);
     }
-    _events.add(
-      BoxEvent(boxName: name, type: BoxEventType.put, key: key, value: value),
-    );
   }
 
   Future<void> putAll(Map<String, dynamic> entries) async {
@@ -73,16 +101,6 @@ final class Box {
     await _api.putAll(name, encoded);
     final set = <String>{..._metadata.keys, ...entries.keys};
     _metadata.keys = List<String>.unmodifiable(set);
-    for (final entry in entries.entries) {
-      _events.add(
-        BoxEvent(
-          boxName: name,
-          type: BoxEventType.put,
-          key: entry.key,
-          value: entry.value,
-        ),
-      );
-    }
   }
 
   Future<dynamic> get(String key, {dynamic defaultValue}) async {
@@ -105,14 +123,12 @@ final class Box {
     _metadata.keys = List<String>.unmodifiable(
       _metadata.keys.where((item) => item != key),
     );
-    _events.add(BoxEvent(boxName: name, type: BoxEventType.delete, key: key));
   }
 
   Future<void> clear() async {
     _ensureOpen();
     await _api.clear(name);
     _metadata.keys = const <String>[];
-    _events.add(BoxEvent(boxName: name, type: BoxEventType.clear));
   }
 
   Future<void> close() {
@@ -127,6 +143,7 @@ final class Box {
 
   Future<void> _performClose() async {
     try {
+      await disposeNativeWatch();
       await _api.closeBox(name);
       _closed = true;
       _onClose();
@@ -157,8 +174,61 @@ final class Box {
     );
   }
 
+  void _handleNativeWatchEvent(NativeWatchEvent event) {
+    if (_closed || event.boxName != name) {
+      return;
+    }
+
+    switch (event.type) {
+      case NativeWatchEventType.put:
+        final key = event.key;
+        final bytes = event.value;
+        if (key == null || bytes == null) {
+          _addWatchProtocolError('put event requires key and value');
+          return;
+        }
+        if (!_metadata.keys.contains(key)) {
+          _metadata.keys = List<String>.unmodifiable(<String>[
+            ..._metadata.keys,
+            key,
+          ]);
+        }
+        _events.add(
+          BoxEvent(
+            boxName: name,
+            type: BoxEventType.put,
+            key: key,
+            value: DxtrCodec.decode(bytes),
+          ),
+        );
+      case NativeWatchEventType.delete:
+        final key = event.key;
+        if (key == null) {
+          _addWatchProtocolError('delete event requires key');
+          return;
+        }
+        _metadata.keys = List<String>.unmodifiable(
+          _metadata.keys.where((item) => item != key),
+        );
+        _events.add(
+          BoxEvent(boxName: name, type: BoxEventType.delete, key: key),
+        );
+      case NativeWatchEventType.clear:
+        _metadata.keys = const <String>[];
+        _events.add(BoxEvent(boxName: name, type: BoxEventType.clear));
+    }
+  }
+
+  void _addWatchProtocolError(String message) {
+    if (!_events.isClosed) {
+      _events.addError(StateError('Invalid native watch event: $message'));
+    }
+  }
+
   void _ensureOpen() {
-    if (_closed) throw StateError('Box "$name" is closed.');
+    if (_closed || _closeFuture != null) {
+      throw StateError('Box "$name" is closing or closed.');
+    }
   }
 
   static void _validateKey(String key) {
