@@ -1,21 +1,21 @@
 /// Declarative query contract for the 0.3 query/index milestone.
 ///
-/// This file intentionally defines query and index semantics independently of
-/// the execution engine. Native execution and persisted indexes can evolve
-/// without changing the Dart-facing query model.
-sealed class DxtrCondition {
-  const DxtrCondition();
+/// Query and index semantics are intentionally independent of the execution
+/// engine so native scans and persisted indexes can evolve without changing
+/// the Dart-facing model.
+sealed class QueryFilter {
+  const QueryFilter();
 }
 
-final class DxtrCompare extends DxtrCondition {
-  DxtrCompare({
+final class QueryComparison extends QueryFilter {
+  QueryComparison({
     required this.field,
     required this.operator,
     this.value,
     this.upperValue,
   }) {
     _validateField(field);
-    if (operator == DxtrCompareOperator.between && upperValue == null) {
+    if (operator == QueryOperator.between && upperValue == null) {
       throw ArgumentError.value(
         upperValue,
         'upperValue',
@@ -25,12 +25,12 @@ final class DxtrCompare extends DxtrCondition {
   }
 
   final String field;
-  final DxtrCompareOperator operator;
+  final QueryOperator operator;
   final dynamic value;
   final dynamic upperValue;
 }
 
-enum DxtrCompareOperator {
+enum QueryOperator {
   equal,
   notEqual,
   greaterThan,
@@ -42,38 +42,32 @@ enum DxtrCompareOperator {
   isNotNull,
 }
 
-final class DxtrAnd extends DxtrCondition {
-  DxtrAnd(Iterable<DxtrCondition> conditions)
-      : conditions = List<DxtrCondition>.unmodifiable(conditions) {
-    if (this.conditions.isEmpty) {
+enum QueryLogicalOperator { and, or }
+
+final class QueryGroup extends QueryFilter {
+  QueryGroup.and(Iterable<QueryFilter> filters)
+      : this._(QueryLogicalOperator.and, filters);
+
+  QueryGroup.or(Iterable<QueryFilter> filters)
+      : this._(QueryLogicalOperator.or, filters);
+
+  QueryGroup._(this.operator, Iterable<QueryFilter> filters)
+      : filters = List<QueryFilter>.unmodifiable(filters) {
+    if (this.filters.isEmpty) {
       throw ArgumentError.value(
-        conditions,
-        'conditions',
-        'AND requires at least one condition',
+        filters,
+        'filters',
+        '${operator.name.toUpperCase()} requires at least one filter',
       );
     }
   }
 
-  final List<DxtrCondition> conditions;
+  final QueryLogicalOperator operator;
+  final List<QueryFilter> filters;
 }
 
-final class DxtrOr extends DxtrCondition {
-  DxtrOr(Iterable<DxtrCondition> conditions)
-      : conditions = List<DxtrCondition>.unmodifiable(conditions) {
-    if (this.conditions.isEmpty) {
-      throw ArgumentError.value(
-        conditions,
-        'conditions',
-        'OR requires at least one condition',
-      );
-    }
-  }
-
-  final List<DxtrCondition> conditions;
-}
-
-final class DxtrQuery {
-  DxtrQuery({
+final class BoxQuery {
+  BoxQuery({
     required this.where,
     this.limit,
     this.offset = 0,
@@ -86,7 +80,7 @@ final class DxtrQuery {
     }
   }
 
-  final DxtrCondition where;
+  final QueryFilter where;
   final int? limit;
   final int offset;
 }
@@ -95,8 +89,8 @@ final class DxtrQuery {
 ///
 /// 0.3 starts with one scalar value index per field path. Composite, text,
 /// multi-value, and unique-index semantics remain separate future extensions.
-final class DxtrIndexDefinition {
-  DxtrIndexDefinition({
+final class IndexDefinition {
+  IndexDefinition({
     required this.name,
     required this.field,
   }) {
