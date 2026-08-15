@@ -18,7 +18,7 @@ full        = encryption + maintenance (compact + plaintext migration)
 
 Do not add a fourth public build profile just for query/index work.
 
-During 0.3, query/index implementation must be introduced in a way that preserves these three named profiles and their ordering. If native index machinery has meaningful binary-size cost, it may initially be compiled only into `full`, while the Dart contract remains stable and reduced profiles fail explicitly for unavailable native query/index operations. A later decision may move mature low-cost query primitives into the core profile, but that requires an explicit profile-contract review rather than an incidental Cargo edit.
+During 0.3, query/index implementation must preserve these three named profiles and their ordering. Query/index capability must not silently redefine `minimal`, `encryption`, or `full`. Any future decision to conditionally compile query/index machinery requires an explicit profile-contract review rather than an incidental Cargo edit.
 
 ## Binary-size regression policy is separate
 
@@ -26,22 +26,40 @@ The PR #13 same-commit size-stability gate remains intact.
 
 0.3 query/index work must **not** introduce or tune a cross-commit binary-size regression threshold. Any future cross-commit size budget is a separate policy change with controlled baseline selection, toolchain/platform metadata, and documented exceptions.
 
-Query/index PRs may record their measured size impact for information, but correctness and API work must not be blocked on defining that future policy.
+Query/index PRs may record measured size impact for information, but correctness and API work must not be blocked on defining that future policy.
+
+## Public naming policy
+
+`Dxtr` is reserved for the product/root namespace such as `DxtrBox`. Feature-level public types use domain names instead of repeating the brand prefix.
+
+The query surface therefore uses:
+
+```text
+BoxQuery
+QueryFilter
+QueryComparison
+QueryGroup
+QueryOperator
+QueryLogicalOperator
+IndexDefinition
+```
+
+This keeps call sites readable while retaining enough domain context to avoid overly generic names such as bare `Query`, `And`, or `Or`.
 
 ## Dart query model
 
-The first foundation exposes a declarative AST:
+The foundation exposes a declarative AST:
 
 ```text
-DxtrQuery
-  where: DxtrCondition
+BoxQuery
+  where: QueryFilter
   limit: int?
   offset: int
 
-DxtrCondition
-  DxtrCompare
-  DxtrAnd
-  DxtrOr
+QueryFilter
+  QueryComparison
+  QueryGroup.and(...)
+  QueryGroup.or(...)
 ```
 
 Initial comparison operators:
@@ -72,8 +90,8 @@ The Dart AST is intentionally execution-agnostic. It can be serialized across FR
 
 0.3 starts with named scalar secondary indexes:
 
-```text
-DxtrIndexDefinition(
+```dart
+IndexDefinition(
   name: 'by-status',
   field: 'status',
 )
@@ -101,7 +119,7 @@ data: record key -> MessagePack payload or encrypted payload
 
 Secondary indexes are derived state. They must never become the only copy of user data.
 
-The target full-profile layout is conceptually:
+The target persisted-index layout is conceptually:
 
 ```text
 data
@@ -127,8 +145,8 @@ Therefore the first persisted-index implementation must explicitly choose and do
 Implementation sequence:
 
 1. Dart query/index AST and validation.
-2. FRB transport types for the AST.
-3. Native full-profile scan query returning matching record keys and payloads in one boundary crossing.
+2. Stable native transport representation for the AST.
+3. Native scan query returning matching record keys and payloads in one FRB boundary crossing.
 4. Query semantics tests against plaintext and encrypted boxes.
 5. Persisted index definition metadata.
 6. Transactional index maintenance for put/putAll/delete/deleteAll/clear.
