@@ -68,6 +68,36 @@ pub fn matches_record(payload: &[u8], filter: &Filter) -> Result<bool, String> {
     matches_filter(&record, filter)
 }
 
+pub fn validate_index_definition(name: &str, field: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() => {}
+        _ => return Err("index name must start with a letter".to_string()),
+    }
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err("index name may contain only letters, digits, _ or -".to_string());
+    }
+    validate_field(field)
+}
+
+pub fn index_scalar_key(payload: &[u8], field: &str) -> Result<Option<Vec<u8>>, String> {
+    let record = decode_dxtr(payload)?;
+    let Some(value) = lookup_field(&record, field) else {
+        return Ok(None);
+    };
+    if !is_index_scalar(value) {
+        return Err(format!(
+            "field '{field}' contains a value unsupported by scalar indexes"
+        ));
+    }
+    let mut encoded = Vec::new();
+    rmpv::encode::write_value(&mut encoded, value).map_err(|e| e.to_string())?;
+    Ok(Some(encoded))
+}
+
 fn parse_filter(value: &Value) -> Result<Filter, String> {
     let map = as_map(value)?;
     match as_str(required(map, "type")?)? {
@@ -317,6 +347,15 @@ fn as_f64(value: &Value) -> Option<f64> {
         .as_f64()
         .or_else(|| value.as_i64().map(|value| value as f64))
         .or_else(|| value.as_u64().map(|value| value as f64))
+}
+
+fn is_index_scalar(value: &Value) -> bool {
+    value.is_nil()
+        || value.is_bool()
+        || value.as_i64().is_some()
+        || value.as_u64().is_some()
+        || value.as_f64().is_some()
+        || value.as_str().is_some()
 }
 
 fn validate_field(field: &str) -> Result<(), String> {
