@@ -63,20 +63,24 @@ impl EncryptionState {
         }
     }
 
-    fn encode_value(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    fn encode_value(&self, record_key: &str, plaintext: &[u8]) -> Result<Vec<u8>, String> {
         match self {
             Self::Plain => Ok(plaintext.to_vec()),
             #[cfg(feature = "encryption")]
-            Self::Encrypted { key, .. } => crypto::encrypt(key, plaintext),
+            Self::Encrypted { key, .. } => {
+                crypto::encrypt_with_aad(key, record_key.as_bytes(), plaintext)
+            }
         }
     }
 
-    fn decode_value(&self, stored: &[u8]) -> Result<Vec<u8>, String> {
+    fn decode_value(&self, record_key: &str, stored: &[u8]) -> Result<Vec<u8>, String> {
         match self {
             Self::Plain => Ok(stored.to_vec()),
             #[cfg(feature = "encryption")]
-            Self::Encrypted { key, .. } => crypto::decrypt(key, stored)
-                .map_err(|_| "encrypted value authentication failed".to_string()),
+            Self::Encrypted { key, .. } => {
+                crypto::decrypt_with_aad(key, record_key.as_bytes(), stored)
+                    .map_err(|_| "encrypted value authentication failed".to_string())
+            }
         }
     }
 }
@@ -180,34 +184,22 @@ fn write_plain_metadata(db: &Database) -> Result<(), String> {
     write.commit().map_err(|e| e.to_string())
 }
 
-#[cfg(feature = "encryption")]
-fn write_encrypted_metadata(
-    db: &Database,
-    salt: &[u8; crypto::SALT_LEN],
-    key_check: &[u8],
-) -> Result<(), String> {
-    let write = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut meta = write.open_table(META).map_err(|e| e.to_string())?;
-        meta.insert(META_FORMAT_VERSION, FORMAT_VERSION)
-            .map_err(|e| e.to_string())?;
-        meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_CHACHA20POLY1305)
-            .map_err(|e| e.to_string())?;
-        meta.insert(META_ENCRYPTION_SALT, salt.as_slice())
-            .map_err(|e| e.to_string())?;
-        meta.insert(META_KEY_CHECK, key_check)
-            .map_err(|e| e.to_string())?;
-    }
-    write.commit().map_err(|e| e.to_string())
-}
-
 fn initialize_new_box(
     db: &Database,
     encryption_key: Option<&str>,
 ) -> Result<EncryptionState, String> {
     match encryption_key {
         None => {
-            write_plain_metadata(db)?;
+            let write = db.begin_write().map_err(|e| e.to_string())?;
+            {
+                write.open_table(DATA).map_err(|e| e.to_string())?;
+                let mut meta = write.open_table(META).map_err(|e| e.to_string())?;
+                meta.insert(META_FORMAT_VERSION, FORMAT_VERSION)
+                    .map_err(|e| e.to_string())?;
+                meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_NONE)
+                    .map_err(|e| e.to_string())?;
+            }
+            write.commit().map_err(|e| e.to_string())?;
             Ok(EncryptionState::Plain)
         }
         Some(password) => {
@@ -219,7 +211,20 @@ fn initialize_new_box(
                 let salt = crypto::new_salt();
                 let key = crypto::derive_key(password, &salt)?;
                 let key_check = crypto::encrypt(&key, KEY_CHECK_PLAINTEXT)?;
-                write_encrypted_metadata(db, &salt, &key_check)?;
+                let write = db.begin_write().map_err(|e| e.to_string())?;
+                {
+                    write.open_table(DATA).map_err(|e| e.to_string())?;
+                    let mut meta = write.open_table(META).map_err(|e| e.to_string())?;
+                    meta.insert(META_FORMAT_VERSION, FORMAT_VERSION)
+                        .map_err(|e| e.to_string())?;
+                    meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_CHACHA20POLY1305)
+                        .map_err(|e| e.to_string())?;
+                    meta.insert(META_ENCRYPTION_SALT, salt.as_slice())
+                        .map_err(|e| e.to_string())?;
+                    meta.insert(META_KEY_CHECK, key_check.as_slice())
+                        .map_err(|e| e.to_string())?;
+                }
+                write.commit().map_err(|e| e.to_string())?;
                 Ok(EncryptionState::Encrypted { key, salt })
             }
             #[cfg(not(feature = "encryption"))]
@@ -335,16 +340,24 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
     }
 
     let db = Arc::new(Database::create(&path).map_err(|e| format!("open {path:?}: {e}"))?);
-    {
-        let write = db.begin_write().map_err(|e| e.to_string())?;
-        write.open_table(DATA).map_err(|e| e.to_string())?;
-        write.open_table(META).map_err(|e| e.to_string())?;
-        write.commit().map_err(|e| e.to_string())?;
-    }
+    let had_data_table = if existed {
+        let read = db.begin_read().map_err(|e| e.to_string())?;
+        read.open_table(DATA).is_ok()
+    } else {
+        false
+    };
 
-    let encryption = if existed {
+    let encryption = if existed && had_data_table {
+        {
+            let write = db.begin_write().map_err(|e| e.to_string())?;
+            write.open_table(DATA).map_err(|e| e.to_string())?;
+            write.open_table(META).map_err(|e| e.to_string())?;
+            write.commit().map_err(|e| e.to_string())?;
+        }
         resolve_existing_box(&db, encryption_key)
     } else {
+        // A file without the data table is an interrupted first creation,
+        // not a legacy plaintext box. Re-run the atomic initializer.
         initialize_new_box(&db, encryption_key)
     };
 
@@ -352,7 +365,7 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
         Ok(state) => Arc::new(state),
         Err(error) => {
             drop(db);
-            if !existed {
+            if !existed || !had_data_table {
                 let _ = fs::remove_file(&path);
             }
             return Err(error);
@@ -407,7 +420,7 @@ pub fn box_exists(name: &str) -> Result<bool, String> {
 pub fn put(name: &str, key: &str, value: &[u8]) -> Result<(), String> {
     validate_message_pack(value)?;
     let (db, encryption) = database(name)?;
-    let stored = encryption.encode_value(value)?;
+    let stored = encryption.encode_value(key, value)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
@@ -423,7 +436,7 @@ pub fn put_all(name: &str, entries: &[(String, Vec<u8>)]) -> Result<(), String> 
     let mut stored_entries = Vec::with_capacity(entries.len());
     for (key, value) in entries {
         validate_message_pack(value)?;
-        stored_entries.push((key.as_str(), encryption.encode_value(value)?));
+        stored_entries.push((key.as_str(), encryption.encode_value(key, value)?));
     }
 
     let (db, _) = database(name)?;
@@ -453,7 +466,7 @@ pub fn get(name: &str, key: &str) -> Result<Option<Vec<u8>>, String> {
     match stored {
         None => Ok(None),
         Some(payload) => {
-            let plaintext = encryption.decode_value(&payload)?;
+            let plaintext = encryption.decode_value(key, &payload)?;
             validate_message_pack(&plaintext)?;
             Ok(Some(plaintext))
         }
@@ -740,6 +753,39 @@ mod tests {
         );
         drop(db_a_reopened);
         close("secure-a");
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn swapping_encrypted_payloads_between_keys_is_rejected() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("swap", Some("password")).unwrap();
+        put("swap", "a", &pack(&"first")).unwrap();
+        put("swap", "b", &pack(&"second")).unwrap();
+
+        let (db, _) = database("swap").unwrap();
+        let (payload_a, payload_b) = {
+            let read = db.begin_read().unwrap();
+            let table = read.open_table(DATA).unwrap();
+            (
+                table.get("a").unwrap().unwrap().value().to_vec(),
+                table.get("b").unwrap().unwrap().value().to_vec(),
+            )
+        };
+        let write = db.begin_write().unwrap();
+        {
+            let mut table = write.open_table(DATA).unwrap();
+            table.insert("a", payload_b.as_slice()).unwrap();
+            table.insert("b", payload_a.as_slice()).unwrap();
+        }
+        write.commit().unwrap();
+
+        assert!(get("swap", "a").is_err());
+        assert!(get("swap", "b").is_err());
+        drop(db);
+        close("swap");
     }
 
     #[cfg(feature = "encryption")]

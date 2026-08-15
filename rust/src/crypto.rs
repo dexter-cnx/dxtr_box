@@ -26,11 +26,7 @@ pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, String> {
     encrypt_with_aad(key, &[], plaintext)
 }
 
-pub fn encrypt_with_aad(
-    key: &[u8; 32],
-    aad: &[u8],
-    plaintext: &[u8],
-) -> Result<Vec<u8>, String> {
+pub fn encrypt_with_aad(key: &[u8; 32], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
     let cipher = ChaCha20Poly1305::new_from_slice(key).map_err(|e| e.to_string())?;
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
