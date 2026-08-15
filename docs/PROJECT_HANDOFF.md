@@ -6,6 +6,8 @@
 
 Target: a Hive-simple Flutter API backed by redb, with durable storage outside the Dart heap and no app-level model code generation.
 
+The 1.0 product claim is now explicitly defined as **functional replacement for practical Hive/Hive CE local-database workloads**, not source-level/drop-in API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` is a release gate: any practical capability classified as `Gap` blocks the 1.0 functional-replacement claim.
+
 ## Current snapshot — 0.1.0 foundation
 
 Implemented:
@@ -20,13 +22,14 @@ Implemented:
 - Rust tests using real redb files for CRUD, clear, close/reopen persistence, malformed `putAll`, invalid names, and delete-box behavior.
 - Test-only serialization of Rust engine tests so process-global base-path/cache state cannot make `cargo test` flaky.
 - GitHub Actions CI: Flutter format/analyze/test on Ubuntu plus Rust fmt/clippy/tests on Ubuntu, macOS, and Windows.
-- `docs/CODE_WALKTHROUGH.md` and `docs/TESTING.md`.
+- `docs/CODE_WALKTHROUGH.md`, `docs/TESTING.md`, and `docs/HIVE_FUNCTIONAL_PARITY.md`.
 - Five-platform package metadata plus local scaffold/bootstrap scripts.
 
 ## Documentation map
 
 - `docs/CODE_WALKTHROUGH.md` — API-to-storage execution flow and architectural rationale.
 - `docs/TESTING.md` — current tests, CI gates, deferred integration tiers, and local commands.
+- `docs/HIVE_FUNCTIONAL_PARITY.md` — capability matrix and 1.0 functional-replacement release gate.
 - `.github/workflows/ci.yml` — current foundation CI.
 
 ## Deliberate API correction
@@ -34,6 +37,8 @@ Implemented:
 The initial Hive-shaped proposal used synchronous `get()` / `containsKey()` / `values`. A redb-backed database does not keep every value in Dart RAM, so native storage reads should not block Flutter's UI isolate. The foundation therefore exposes storage reads asynchronously.
 
 `length` and `keys` are cached metadata in the Dart `Box`; values are fetched from redb on demand.
+
+Functional parity explicitly allows API shape to differ where the architecture demands it. Do not reintroduce whole-box Dart caching merely to imitate synchronous Hive reads.
 
 ## Current limitation
 
@@ -64,6 +69,21 @@ The current CI intentionally validates the foundation without pretending the mis
 9. Add Dart 3.13 native tree-shaking hardening using build/link hooks and `package:record_use` where the FRB/native-symbol mapping permits it.
 10. Add binary-size regression CI with separate measurements for minimal CRUD, CRUD+encryption, and full-feature builds.
 11. Only after the storage/bridge path is stable, start 0.3 query/index work.
+12. Before 1.0 RC, execute the full Hive Functional Parity Audit against the latest Hive CE release and close every practical `Gap`.
+
+## Hive Functional Parity release policy
+
+The audit uses these classifications:
+
+- `Exact` — equivalent user-visible capability and semantics.
+- `Compatible` — same practical capability with a different API or implementation model.
+- `Superseded` — dxtr_box uses a different mechanism that fully covers the practical use case.
+- `Not applicable` — Hive-specific implementation detail with no capability loss.
+- `Gap` — missing practical capability; blocks 1.0.
+
+The audit must cover at minimum CRUD/batch operations, lazy behavior, events, encryption, compaction, custom objects/schema evolution, isolate access, lifecycle semantics, crash durability, migration, Web/IndexedDB behavior, and practical Flutter integration.
+
+Immediately before 1.0 RC, refresh the matrix against the latest Hive CE public API and add/refresh automated tests and real Hive CE migration fixtures for all practical parity claims.
 
 ## CI policy
 
