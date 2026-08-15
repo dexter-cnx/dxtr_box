@@ -64,8 +64,8 @@ jobs:
 
       - name: Check formatting
         run: |
-          dart format lib test example
-          git diff --exit-code -- lib test example
+          dart format lib test example benchmark/test
+          git diff --exit-code -- lib test example benchmark/test
 
       - name: Analyze
         run: flutter analyze
@@ -105,10 +105,16 @@ jobs:
           DXTR_BOX_NATIVE_TEST: '1'
         run: flutter test test/native_integration_test.dart --reporter expanded
 
+      - name: Install benchmark dependencies
+        working-directory: benchmark
+        run: flutter pub get
+
       - name: Benchmark smoke harness
+        working-directory: benchmark
         env:
           DXTR_BOX_BENCHMARK: '1'
           DXTR_BOX_BENCHMARK_OPS: '100'
+          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
         run: flutter test test/benchmark_smoke_test.dart --reporter expanded
 
   rust:
