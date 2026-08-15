@@ -95,6 +95,7 @@ static BASE_PATH: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None)
 static DATABASES: Lazy<RwLock<HashMap<String, OpenDatabase>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 static COMPACTING: Lazy<RwLock<HashSet<String>>> = Lazy::new(|| RwLock::new(HashSet::new()));
+static MIGRATING: Lazy<RwLock<HashSet<String>>> = Lazy::new(|| RwLock::new(HashSet::new()));
 
 fn base_path() -> Result<PathBuf, String> {
     BASE_PATH
@@ -162,6 +163,9 @@ fn database(name: &str) -> Result<(Arc<Database>, Arc<EncryptionState>), String>
     }
     if COMPACTING.read().contains(name) {
         return Err(format!("box '{name}' is compacting; retry later"));
+    }
+    if MIGRATING.read().contains(name) {
+        return Err(format!("box '{name}' is migrating; retry later"));
     }
     Err(format!("box '{name}' is not open"))
 }
@@ -339,6 +343,9 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
     if COMPACTING.read().contains(name) {
         return Err(format!("box '{name}' is compacting; retry later"));
     }
+    if MIGRATING.read().contains(name) {
+        return Err(format!("box '{name}' is migrating; retry later"));
+    }
 
     if let Some(entry) = databases.get_mut(name) {
         entry.encryption.validate_requested_key(encryption_key)?;
@@ -412,6 +419,9 @@ pub fn delete_box(name: &str) -> Result<(), String> {
     if databases.contains_key(name) {
         return Err(format!("cannot delete open box '{name}'"));
     }
+    if COMPACTING.read().contains(name) || MIGRATING.read().contains(name) {
+        return Err(format!("box '{name}' is busy with maintenance; retry later"));
+    }
 
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -422,6 +432,117 @@ pub fn delete_box(name: &str) -> Result<(), String> {
 
 pub fn box_exists(name: &str) -> Result<bool, String> {
     Ok(file_path(name)?.exists())
+}
+
+pub fn encrypt_box(name: &str, encryption_key: &str) -> Result<(), String> {
+    validate_name(name)?;
+    if encryption_key.is_empty() {
+        return Err("encryption key cannot be empty".to_string());
+    }
+
+    #[cfg(not(feature = "encryption"))]
+    {
+        let _ = name;
+        let _ = encryption_key;
+        return Err("this native build was compiled without encryption support".to_string());
+    }
+
+    #[cfg(feature = "encryption")]
+    {
+        let path = file_path(name)?;
+        if !path.exists() {
+            return Err(format!("box '{name}' does not exist"));
+        }
+
+        {
+            let databases = DATABASES.write();
+            if databases.contains_key(name) {
+                return Err(format!("cannot migrate open box '{name}'"));
+            }
+            if COMPACTING.read().contains(name) {
+                return Err(format!("box '{name}' is compacting; retry later"));
+            }
+            let mut migrating = MIGRATING.write();
+            if !migrating.insert(name.to_string()) {
+                return Err(format!("box '{name}' is already migrating"));
+            }
+        }
+
+        let result = (|| {
+            let db = Database::create(&path).map_err(|e| format!("open {path:?}: {e}"))?;
+
+            // Ensure both tables exist for legacy plaintext boxes. Creating an
+            // empty metadata table is safe and leaves the box plaintext.
+            {
+                let write = db.begin_write().map_err(|e| e.to_string())?;
+                write.open_table(DATA).map_err(|e| e.to_string())?;
+                write.open_table(META).map_err(|e| e.to_string())?;
+                write.commit().map_err(|e| e.to_string())?;
+            }
+
+            let format = read_meta(&db, META_FORMAT_VERSION)?;
+            if format.is_none() {
+                write_plain_metadata(&db)?;
+            } else if format.as_deref() != Some(FORMAT_VERSION) {
+                return Err("unsupported dxtr_box storage format".to_string());
+            }
+
+            let mode = read_meta(&db, META_ENCRYPTION_MODE)?
+                .ok_or_else(|| "box metadata is missing encryption mode".to_string())?;
+            if mode == ENCRYPTION_CHACHA20POLY1305 {
+                return Err("box is already encrypted".to_string());
+            }
+            if mode != ENCRYPTION_NONE {
+                return Err("unsupported box encryption mode".to_string());
+            }
+
+            let salt = crypto::new_salt();
+            let key = crypto::derive_key(encryption_key, &salt)?;
+            let key_check = crypto::encrypt(&key, KEY_CHECK_PLAINTEXT)?;
+
+            let write = db.begin_write().map_err(|e| e.to_string())?;
+            {
+                let mut data = write.open_table(DATA).map_err(|e| e.to_string())?;
+                let plaintext_entries = data
+                    .iter()
+                    .map_err(|e| e.to_string())?
+                    .map(|item| {
+                        item.map(|(key, value)| {
+                            (key.value().to_string(), value.value().to_vec())
+                        })
+                        .map_err(|e| e.to_string())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let mut encrypted_entries = Vec::with_capacity(plaintext_entries.len());
+                for (record_key, plaintext) in plaintext_entries {
+                    validate_message_pack(&plaintext)?;
+                    let encrypted =
+                        crypto::encrypt_with_aad(&key, record_key.as_bytes(), &plaintext)?;
+                    encrypted_entries.push((record_key, encrypted));
+                }
+
+                for (record_key, encrypted) in &encrypted_entries {
+                    data.insert(record_key.as_str(), encrypted.as_slice())
+                        .map_err(|e| e.to_string())?;
+                }
+
+                let mut meta = write.open_table(META).map_err(|e| e.to_string())?;
+                meta.insert(META_FORMAT_VERSION, FORMAT_VERSION)
+                    .map_err(|e| e.to_string())?;
+                meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_CHACHA20POLY1305)
+                    .map_err(|e| e.to_string())?;
+                meta.insert(META_ENCRYPTION_SALT, salt.as_slice())
+                    .map_err(|e| e.to_string())?;
+                meta.insert(META_KEY_CHECK, key_check.as_slice())
+                    .map_err(|e| e.to_string())?;
+            }
+            write.commit().map_err(|e| e.to_string())
+        })();
+
+        MIGRATING.write().remove(name);
+        result
+    }
 }
 
 pub fn put(name: &str, key: &str, value: &[u8]) -> Result<(), String> {
@@ -548,6 +669,9 @@ pub fn compact(name: &str) -> Result<bool, String> {
         }
         if Arc::strong_count(&current.db) != 1 {
             return Err("box is busy; retry compact when no operations are in flight".to_string());
+        }
+        if MIGRATING.read().contains(name) {
+            return Err(format!("box '{name}' is migrating; retry later"));
         }
         COMPACTING.write().insert(name.to_string());
         databases
@@ -818,6 +942,96 @@ mod tests {
         delete_box("temporary").unwrap();
         assert!(!box_exists("temporary").unwrap());
         assert!(get("temporary", "k").is_err());
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn plaintext_box_migrates_to_encrypted_atomically() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("migrate", None).unwrap();
+        let alpha = pack(&"alpha-value");
+        let beta = pack(&vec![1_i64, 2, 3]);
+        put("migrate", "alpha", &alpha).unwrap();
+        put("migrate", "beta", &beta).unwrap();
+        close("migrate");
+
+        encrypt_box("migrate", "migration-key").unwrap();
+
+        assert!(open("migrate", None).is_err());
+        assert!(open("migrate", Some("wrong-key")).is_err());
+        open("migrate", Some("migration-key")).unwrap();
+        assert_eq!(get("migrate", "alpha").unwrap(), Some(alpha.clone()));
+        assert_eq!(get("migrate", "beta").unwrap(), Some(beta.clone()));
+
+        let (db, _) = database("migrate").unwrap();
+        assert_eq!(
+            read_meta(&db, META_ENCRYPTION_MODE).unwrap().as_deref(),
+            Some(ENCRYPTION_CHACHA20POLY1305)
+        );
+        assert_eq!(
+            read_meta(&db, META_ENCRYPTION_SALT).unwrap().unwrap().len(),
+            crypto::SALT_LEN
+        );
+        let read = db.begin_read().unwrap();
+        let table = read.open_table(DATA).unwrap();
+        assert_ne!(table.get("alpha").unwrap().unwrap().value(), alpha.as_slice());
+        assert_ne!(table.get("beta").unwrap().unwrap().value(), beta.as_slice());
+        drop(table);
+        drop(read);
+        drop(db);
+        close("migrate");
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn migration_rejects_open_missing_already_encrypted_and_empty_key() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+
+        assert!(encrypt_box("missing", "key").is_err());
+
+        open("plain-open", None).unwrap();
+        assert!(encrypt_box("plain-open", "key").is_err());
+        close("plain-open");
+        assert!(encrypt_box("plain-open", "").is_err());
+
+        open("already-secure", Some("key")).unwrap();
+        close("already-secure");
+        assert!(encrypt_box("already-secure", "new-key").is_err());
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn migration_validation_failure_preserves_plaintext_state() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("migration-failure", None).unwrap();
+        put("migration-failure", "good", &pack(&1_i64)).unwrap();
+
+        let (db, _) = database("migration-failure").unwrap();
+        let write = db.begin_write().unwrap();
+        {
+            let mut table = write.open_table(DATA).unwrap();
+            table.insert("bad", &[0xc1_u8][..]).unwrap();
+        }
+        write.commit().unwrap();
+        drop(db);
+        close("migration-failure");
+
+        assert!(encrypt_box("migration-failure", "key").is_err());
+        open("migration-failure", None).unwrap();
+        assert_eq!(
+            read_meta(&database("migration-failure").unwrap().0, META_ENCRYPTION_MODE)
+                .unwrap()
+                .as_deref(),
+            Some(ENCRYPTION_NONE)
+        );
+        assert_eq!(get("migration-failure", "good").unwrap(), Some(pack(&1_i64)));
+        close("migration-failure");
     }
 
     #[cfg(feature = "encryption")]
