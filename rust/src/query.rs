@@ -43,6 +43,13 @@ pub enum CompareOp {
     IsNotNull,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum NumericValue {
+    Signed(i64),
+    Unsigned(u64),
+    Float(f64),
+}
+
 pub fn decode_query(bytes: &[u8]) -> Result<QuerySpec, String> {
     let value = decode_dxtr(bytes)?;
     let map = as_map(&value)?;
@@ -214,8 +221,8 @@ fn compare(actual: &Value, expected: Option<&Value>) -> Result<Option<Ordering>,
     let Some(expected) = expected else {
         return Ok(None);
     };
-    if let (Some(left), Some(right)) = (as_f64(actual), as_f64(expected)) {
-        return Ok(left.partial_cmp(&right));
+    if let (Some(left), Some(right)) = (as_numeric(actual), as_numeric(expected)) {
+        return Ok(compare_numeric(left, right));
     }
     if let (Some(left), Some(right)) = (actual.as_str(), expected.as_str()) {
         return Ok(Some(left.cmp(right)));
@@ -224,10 +231,102 @@ fn compare(actual: &Value, expected: Option<&Value>) -> Result<Option<Ordering>,
 }
 
 fn values_equal(left: &Value, right: &Value) -> bool {
-    if let (Some(left), Some(right)) = (as_f64(left), as_f64(right)) {
-        return left == right;
+    if let (Some(left), Some(right)) = (as_numeric(left), as_numeric(right)) {
+        return compare_numeric(left, right) == Some(Ordering::Equal);
     }
     left == right
+}
+
+fn as_numeric(value: &Value) -> Option<NumericValue> {
+    if let Some(value) = value.as_i64() {
+        return Some(NumericValue::Signed(value));
+    }
+    if let Some(value) = value.as_u64() {
+        return Some(NumericValue::Unsigned(value));
+    }
+    value.as_f64().map(NumericValue::Float)
+}
+
+fn compare_numeric(left: NumericValue, right: NumericValue) -> Option<Ordering> {
+    match (left, right) {
+        (NumericValue::Signed(left), NumericValue::Signed(right)) => Some(left.cmp(&right)),
+        (NumericValue::Unsigned(left), NumericValue::Unsigned(right)) => Some(left.cmp(&right)),
+        (NumericValue::Signed(left), NumericValue::Unsigned(right)) => {
+            if left < 0 {
+                Some(Ordering::Less)
+            } else {
+                Some((left as u64).cmp(&right))
+            }
+        }
+        (NumericValue::Unsigned(left), NumericValue::Signed(right)) => {
+            compare_numeric(NumericValue::Signed(right), NumericValue::Unsigned(left))
+                .map(Ordering::reverse)
+        }
+        (NumericValue::Float(left), NumericValue::Float(right)) => left.partial_cmp(&right),
+        (NumericValue::Signed(left), NumericValue::Float(right)) => compare_i64_f64(left, right),
+        (NumericValue::Float(left), NumericValue::Signed(right)) => {
+            compare_i64_f64(right, left).map(Ordering::reverse)
+        }
+        (NumericValue::Unsigned(left), NumericValue::Float(right)) => compare_u64_f64(left, right),
+        (NumericValue::Float(left), NumericValue::Unsigned(right)) => {
+            compare_u64_f64(right, left).map(Ordering::reverse)
+        }
+    }
+}
+
+fn compare_i64_f64(integer: i64, float: f64) -> Option<Ordering> {
+    if float.is_nan() {
+        return None;
+    }
+    if float == f64::NEG_INFINITY {
+        return Some(Ordering::Greater);
+    }
+    if float == f64::INFINITY {
+        return Some(Ordering::Less);
+    }
+
+    const TWO_POW_63: f64 = 9_223_372_036_854_775_808.0;
+    if float >= TWO_POW_63 {
+        return Some(Ordering::Less);
+    }
+    if float < -TWO_POW_63 {
+        return Some(Ordering::Greater);
+    }
+
+    let truncated = float.trunc();
+    let truncated_integer = truncated as i64;
+    match integer.cmp(&truncated_integer) {
+        Ordering::Equal if float == truncated => Some(Ordering::Equal),
+        Ordering::Equal if float > truncated => Some(Ordering::Less),
+        Ordering::Equal => Some(Ordering::Greater),
+        ordering => Some(ordering),
+    }
+}
+
+fn compare_u64_f64(integer: u64, float: f64) -> Option<Ordering> {
+    if float.is_nan() {
+        return None;
+    }
+    if float == f64::NEG_INFINITY || float < 0.0 {
+        return Some(Ordering::Greater);
+    }
+    if float == f64::INFINITY {
+        return Some(Ordering::Less);
+    }
+
+    const TWO_POW_64: f64 = 18_446_744_073_709_551_616.0;
+    if float >= TWO_POW_64 {
+        return Some(Ordering::Less);
+    }
+
+    let truncated = float.trunc();
+    let truncated_integer = truncated as u64;
+    match integer.cmp(&truncated_integer) {
+        Ordering::Equal if float == truncated => Some(Ordering::Equal),
+        Ordering::Equal if float > truncated => Some(Ordering::Less),
+        Ordering::Equal => Some(Ordering::Greater),
+        ordering => Some(ordering),
+    }
 }
 
 fn lookup_field<'a>(record: &'a Value, path: &str) -> Option<&'a Value> {
@@ -342,13 +441,6 @@ fn as_usize(value: &Value) -> Result<Option<usize>, String> {
         .map_err(|_| "query pagination value is too large".to_string())
 }
 
-fn as_f64(value: &Value) -> Option<f64> {
-    value
-        .as_f64()
-        .or_else(|| value.as_i64().map(|value| value as f64))
-        .or_else(|| value.as_u64().map(|value| value as f64))
-}
-
 fn is_index_scalar(value: &Value) -> bool {
     value.is_nil()
         || value.is_bool()
@@ -377,5 +469,41 @@ mod tests {
     fn rejects_invalid_dxtr_map_payload() {
         let payload = rmp_serde::to_vec(&vec!["@dxtr:map", "placeholder"]).unwrap();
         assert!(decode_dxtr(&payload).is_err());
+    }
+
+    #[test]
+    fn integer_comparisons_preserve_values_above_f64_exact_range() {
+        let lower = Value::from(9_007_199_254_740_992_i64);
+        let higher = Value::from(9_007_199_254_740_993_i64);
+
+        assert!(!values_equal(&lower, &higher));
+        assert_eq!(compare(&higher, Some(&lower)).unwrap(), Some(Ordering::Greater));
+        assert_eq!(compare(&lower, Some(&higher)).unwrap(), Some(Ordering::Less));
+    }
+
+    #[test]
+    fn signed_and_unsigned_integer_comparisons_remain_exact() {
+        let negative = Value::from(-1_i64);
+        let zero = Value::from(0_u64);
+        let max_signed = Value::from(i64::MAX);
+        let above_signed = Value::from((i64::MAX as u64) + 1);
+
+        assert_eq!(compare(&negative, Some(&zero)).unwrap(), Some(Ordering::Less));
+        assert_eq!(
+            compare(&above_signed, Some(&max_signed)).unwrap(),
+            Some(Ordering::Greater)
+        );
+    }
+
+    #[test]
+    fn integer_float_comparisons_do_not_round_large_integers_to_float() {
+        let integer = Value::from(9_007_199_254_740_993_i64);
+        let rounded_float = Value::from(9_007_199_254_740_992_f64);
+
+        assert!(!values_equal(&integer, &rounded_float));
+        assert_eq!(
+            compare(&integer, Some(&rounded_float)).unwrap(),
+            Some(Ordering::Greater)
+        );
     }
 }
