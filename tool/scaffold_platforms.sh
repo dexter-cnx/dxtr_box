@@ -29,6 +29,7 @@ flutter_rust_bridge_codegen integrate
 # and example, so remove only those generated demo files before codegen.
 rm -rf "$root/rust/src/api"
 rm -f "$root/lib/main.dart"
+rm -rf "$root/lib/src/rust"
 rm -rf "$root/integration_test" "$root/test_driver"
 
 # Generate bindings from the real `crate::api` implementation in rust/src/api.rs.
