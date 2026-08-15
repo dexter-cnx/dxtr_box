@@ -1,6 +1,7 @@
 pub mod api;
 mod codec;
-mod crypto;
+#[cfg(feature = "encryption")]
+pub mod crypto;
 mod db;
 
 pub use api::*;
