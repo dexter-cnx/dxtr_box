@@ -1,0 +1,51 @@
+name: Temporary Reduced Index Guard Finalize
+
+on:
+  push:
+    branches:
+      - feature/0.3-query-index-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-query-index-foundation
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Apply reduced-profile guard
+        run: python3 tool/apply_reduced_index_guard.py
+
+      - name: Format Rust
+        run: cargo fmt --manifest-path rust/Cargo.toml
+
+      - name: Validate Rust profiles
+        run: |
+          cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features
+          cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
+          cargo test --manifest-path rust/Cargo.toml --all-targets
+
+      - name: Remove temporary tooling
+        run: git rm .github/workflows/reduced_index_guard_temp.yml tool/apply_reduced_index_guard.py
+
+      - name: Commit finalized guard
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/src/db.rs rust/tests/reduced_index_guard.rs
+          if git diff --cached --quiet; then
+            echo "No guard changes to commit"
+            exit 1
+          fi
+          git commit -m "fix: protect persisted indexes in reduced profiles"
+          git push origin HEAD:feature/0.3-query-index-foundation
