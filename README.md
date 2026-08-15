@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.1.0 foundation / active development**. Public API and storage format are not stable yet.
+> Status: **0.1.0 native MVP hardening / active development**. Public API and storage format are not stable yet.
 
 ## Why
 
@@ -41,6 +41,8 @@ await box.close();
 
 Native reads are asynchronous by design: unlike Hive's in-memory read model, `dxtr_box` may perform real storage I/O and should not block Flutter's UI isolate.
 
+Values are already fetched from native storage on demand rather than cached wholesale in Dart. Hive-style `lazy: true` semantics are not implemented yet, so `DxtrBox.open(..., lazy: true)` currently throws `UnsupportedError` instead of pretending to support a distinct lazy mode.
+
 ## Engine
 
 - Rust
@@ -50,24 +52,28 @@ Native reads are asynchronous by design: unlike Hive's in-memory read model, `dx
 - `once_cell` + `parking_lot`
 - optional `argon2` + `chacha20poly1305`
 
+Native build ownership lives in the checked-in `rust_builder/` Cargokit plugin. The root package is the Dart-facing facade and intentionally has no duplicate platform plugin scaffolds.
+
 ## Engineering docs
 
 - [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction flow.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, local commands, CI gates, and deferred integration tiers.
 - [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
-- [CI workflow](.github/workflows/ci.yml) — Flutter analyze/test plus Rust host-matrix checks.
+- [CI workflow](.github/workflows/ci.yml) — Flutter analyze/test, native Linux round-trip, and Rust host-matrix checks.
+- [Platform builds](.github/workflows/platform_builds.yml) — Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Test suite
 
-Current foundation coverage includes:
+Current coverage includes:
 
 - Dart dynamic codec round trips and invalid-map validation.
 - `Box`/`DxtrBox` behavior through an in-memory native API fake.
+- multi-handle lifecycle, concurrent close serialization, delete-while-open policy, base-path switching, and Windows-safe box-name validation.
+- real Dart -> FRB -> Rust -> redb Linux round-trip with close/reopen persistence.
 - real redb CRUD, clear, persistence-after-reopen, malformed `putAll`, unsafe box names, and delete-box behavior.
-- Rust default and `encryption` feature test runs in CI.
-
-The CI is intentionally not yet claiming five-platform Flutter builds: generated FRB bindings and native plugin scaffolds must be checked in and validated first.
+- Rust default and `encryption` feature test runs in CI on Ubuntu, macOS, and Windows.
+- example compilation on Android, iOS without code signing, macOS, Linux, and Windows.
 
 ## Roadmap
 
@@ -79,6 +85,7 @@ The CI is intentionally not yet claiming five-platform Flutter builds: generated
 - Android / iOS / macOS / Linux / Windows
 - FRB code generation
 - Rust + Flutter tests
+- lifecycle and multi-handle hardening
 
 ### 0.2.0 — Hive parity foundation
 
@@ -100,7 +107,6 @@ The CI is intentionally not yet claiming five-platform Flutter builds: generated
 ### 0.4.0 — Production hardening
 
 - ACID crash tests
-- five-platform CI
 - binary-size regression checks
 - Dart 3.13 native tree-shaking investigation using `record_use` + link hooks
 - target minimal native binary under 1 MB where technically achievable
