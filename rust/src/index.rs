@@ -6,6 +6,17 @@ const INDEX_DEFINITIONS: TableDefinition<&str, &str> = TableDefinition::new("ind
 const INDEX_ENTRIES: TableDefinition<&[u8], &[u8]> = TableDefinition::new("index_entries");
 const EMPTY_VALUE: &[u8] = &[];
 
+pub(crate) fn ensure_tables(db: &Database) -> Result<(), String> {
+    let write = db.begin_write().map_err(|e| e.to_string())?;
+    write
+        .open_table(INDEX_DEFINITIONS)
+        .map_err(|e| e.to_string())?;
+    write
+        .open_table(INDEX_ENTRIES)
+        .map_err(|e| e.to_string())?;
+    write.commit().map_err(|e| e.to_string())
+}
+
 pub(crate) fn create(
     db: &Database,
     encryption: &EncryptionState,
@@ -66,11 +77,9 @@ pub(crate) fn create(
 
 pub(crate) fn list(db: &Database) -> Result<Vec<(String, String)>, String> {
     let read = db.begin_read().map_err(|e| e.to_string())?;
-    let table = match read.open_table(INDEX_DEFINITIONS) {
-        Ok(table) => table,
-        Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
-        Err(error) => return Err(error.to_string()),
-    };
+    let table = read
+        .open_table(INDEX_DEFINITIONS)
+        .map_err(|e| e.to_string())?;
     table
         .iter()
         .map_err(|e| e.to_string())?
