@@ -93,7 +93,19 @@ The result includes:
 - exact artifact path;
 - artifact bytes.
 
-The CI size job publishes the complete `build/native-size` directory as an artifact. These measurements are informational only. There is no regression threshold until repeated measurements are shown to be stable enough across a controlled runner/toolchain.
+The CI size job publishes only `build/native-size/native-size-baseline.tsv` as the retained artifact; isolated Cargo target directories are deliberately not uploaded. These measurements are informational only. There is no regression threshold until repeated measurements are shown to be stable enough across a controlled runner/toolchain.
+
+### Validated Linux x86_64 baseline
+
+PR #12 CI #144 validated the three release profiles on Linux x86_64 with the same runner/toolchain and isolated target directories:
+
+| Profile | Bytes | Delta vs minimal |
+| --- | ---: | ---: |
+| minimal | 1,893,736 | baseline |
+| encryption | 1,992,296 | +98,560 (+5.2%) |
+| full | 2,032,312 | +138,576 (+7.3%) |
+
+These are native dynamic-library measurements for that Linux x86_64 CI environment only. They are not cross-platform package-size claims.
 
 ## Current scope
 

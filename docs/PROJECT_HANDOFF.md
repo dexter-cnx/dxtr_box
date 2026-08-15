@@ -10,7 +10,7 @@ The 1.0 product claim is **functional replacement for practical Hive/Hive CE loc
 
 ## Current snapshot — 0.1.x native foundation
 
-Implemented on `main` through PR #10, with PR #11 completing the public migration facade, native integration coverage, and documentation acceptance trail:
+Implemented on `main` through PR #11, with PR #12 validating Cargo feature profiles and the first reproducible Linux x86_64 native-size baseline:
 
 - Public Dart facade: `DxtrBox`, `Box`, `BoxEvent`.
 - Minimum compatibility floor: Dart >= 3.4.0 / Flutter >= 3.22.0, verified by dedicated CI.
@@ -39,7 +39,10 @@ Implemented on `main` through PR #10, with PR #11 completing the public migratio
 - Linux Dart -> FRB -> Rust -> redb encrypted close/reopen and migration coverage.
 - Process-level crash/reopen durability coverage for acknowledged plaintext and encrypted commits.
 - `hive_ce` benchmark smoke harness isolated in `benchmark/` so benchmark dependencies do not raise the root package SDK floor.
-- Root Makefile targets for preflight, native testing, process-crash testing, benchmark smoke/full, FRB regeneration, Rust checks, and platform example builds.
+- Root Makefile targets for preflight, native testing, process-crash testing, benchmark smoke/full, FRB regeneration, Rust checks, native profile builds/size measurement, and platform example builds.
+- Native feature profiles: `minimal`, `encryption`, and default `full`.
+- CI validates all three Rust profiles on Ubuntu, macOS, and Windows.
+- Linux x86_64 release-library baseline: minimal 1,893,736 bytes; encryption 1,992,296 bytes; full 2,032,312 bytes.
 
 ## Minimum SDK policy
 
@@ -256,7 +259,7 @@ Generated FRB bindings stay checked in whenever native APIs change.
 
 ## Current validation state
 
-After PR #11 is green, the validation surface is:
+After PR #12 CI #144 and Platform Builds #88 are green, the validation surface is:
 
 ```text
 Minimum SDK / Ubuntu
@@ -289,42 +292,35 @@ Example compilation
   Android -> Linux -> Windows -> macOS -> iOS --no-codesign
 ```
 
-## Active milestone after PR #11 — Cargo feature splitting + binary-size baseline
+## PR #12 validated — Cargo feature splitting + binary-size baseline
 
-The next work is native payload control without raising the public Dart/Flutter SDK floor.
+PR #12 establishes three maintainable native profiles without changing Dart/Flutter compatibility:
 
-### Goals
+```text
+minimal     = CRUD + lifecycle + native watch
+encryption  = minimal + encrypted create/open/read/write
+full        = encryption + maintenance (compact + plaintext migration)
+```
 
-1. Split optional Rust functionality into intentional Cargo features instead of one monolithic default native profile.
-2. Define a minimal CRUD feature profile that still supports the core storage contract.
-3. Keep encryption optional and measurable as a distinct profile.
-4. Identify any watch/maintenance/query-support code that can be feature-gated without creating misleading runtime APIs.
-5. Ensure FRB/Cargokit builds remain deterministic for each supported profile.
-6. Produce reproducible native binary-size measurements for at least:
-   - minimal CRUD;
-   - CRUD + encryption;
-   - full current feature set.
-7. Record toolchain, platform, architecture, build mode, feature set, and binary artifact measured.
-8. Do not introduce a binary-size regression gate until repeated measurements are stable enough to be meaningful.
-9. Do not start Dart 3.13 recorded-use/native tree-shaking in this milestone.
-10. Preserve Flutter 3.22 / Dart 3.4 compatibility.
+`full` remains the default so normal Cargokit/Flutter builds preserve current behavior. Reduced profiles retain the stable FRB surface and fail explicitly for unavailable maintenance capabilities.
 
-### Design rules
+Validated Linux x86_64 release-library baseline from CI #144:
 
-- Feature splitting must not change storage correctness.
-- A public Dart API that is unavailable in a reduced native profile must fail explicitly; never silently no-op.
-- Avoid feature combinations that cannot be meaningfully tested or maintained.
-- Prefer a small number of product-relevant profiles over a combinatorial feature matrix.
-- Binary-size claims must be measured per target/platform/architecture, not inferred from Rust crate dependency lists.
+| Profile | Bytes | Delta vs minimal |
+| --- | ---: | ---: |
+| minimal | 1,893,736 | baseline |
+| encryption | 1,992,296 | +98,560 (+5.2%) |
+| full | 2,032,312 | +138,576 (+7.3%) |
+
+The size job retains only `native-size-baseline.tsv`. No regression threshold is enabled yet because repeated controlled measurements are required before a size gate is defensible.
 
 ## Next implementation sequence
 
-1. Complete PR #11 public migration facade/docs/integration and merge when green.
-2. Cargo feature splitting for optional Rust functionality.
-3. Establish binary-size baselines for minimal CRUD, CRUD+encryption, and full builds.
-4. Add binary-size regression CI when measurements are reproducible enough to be useful.
-5. Begin 0.3 query/index work only after storage/bridge hardening above is stable.
-6. Before 1.0 RC, execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.
+1. Merge PR #12 after final documentation CI remains green.
+2. Collect repeated size measurements and only then define a binary-size regression policy.
+3. Begin 0.3 query/index work while preserving the validated profile contract.
+4. Keep Dart 3.13 recorded-use/native tree shaking deferred.
+5. Before 1.0 RC, execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.
 
 ## Dart 3.13 native tree-shaking — FUTURE ONLY
 

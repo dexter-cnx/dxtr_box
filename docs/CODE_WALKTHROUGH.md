@@ -302,7 +302,7 @@ Files:
 - `rust/src/db.rs`
 - `rust/Cargo.toml`
 
-The standard native build currently enables the `encryption` Cargo feature by default.
+The standard native build uses the `full` Cargo profile by default. Reduced `minimal` and `encryption` profiles are validated separately in CI without changing the public Dart SDK floor.
 
 ### Metadata contract
 
@@ -397,7 +397,7 @@ rust/tests/process_crash.rs
   acknowledged-commit process-kill recovery
 ```
 
-CI also runs generated-FRB drift detection, Rust fmt/clippy/tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, and the five-platform Flutter example build matrix.
+CI also runs generated-FRB drift detection, Rust fmt/clippy plus minimal/encryption/full profile tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, a Linux x86_64 native-size baseline job, and the five-platform Flutter example build matrix.
 
 ## 13. Developer entry points
 
@@ -418,14 +418,23 @@ make example-macos
 make example-ios
 ```
 
-## 14. Next architectural step
+## 14. Native feature profiles and next architectural step
 
-After the public migration completion lands, the active sequence is:
+PR #12 establishes three product-relevant profiles:
 
-1. split optional Rust functionality into Cargo features with a clear minimal CRUD profile;
-2. establish reproducible binary-size baselines for minimal CRUD, CRUD+encryption, and full-feature builds;
-3. add binary-size regression CI only after the measurements are stable enough to be meaningful;
-4. begin 0.3 query/index work after storage/bridge hardening;
-5. before 1.0 RC, execute the full Hive Functional Parity Audit and close every practical `Gap`.
+```text
+minimal     = CRUD + lifecycle + native watch
+encryption  = minimal + encrypted create/open/read/write
+full        = encryption + maintenance (compact + plaintext migration)
+```
+
+The validated Linux x86_64 release-library baseline is 1,893,736 bytes for minimal, 1,992,296 bytes for encryption, and 2,032,312 bytes for full. These measurements are informational and platform-specific.
+
+The active sequence after PR #12 is:
+
+1. collect repeated size measurements before introducing a regression threshold;
+2. begin 0.3 query/index work while preserving the three-profile contract;
+3. add binary-size regression CI only when the baseline is stable enough to be meaningful;
+4. before 1.0 RC, execute the full Hive Functional Parity Audit and close every practical `Gap`.
 
 Dart 3.13 recorded-use/native tree shaking remains future-only and must not raise the Dart 3.4 / Flutter 3.22 compatibility floor. See `docs/FUTURE_NATIVE_TREE_SHAKING.md`.
