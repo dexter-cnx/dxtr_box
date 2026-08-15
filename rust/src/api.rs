@@ -109,7 +109,7 @@ pub fn encrypt_box(name: String, encryption_key: String) -> Result<(), String> {
     {
         let mutation_lock = mutation_lock(&name);
         let _mutation_guard = mutation_lock.lock();
-        return db::encrypt_box(&name, &encryption_key);
+        db::encrypt_box(&name, &encryption_key)
     }
 
     #[cfg(not(all(feature = "encryption", feature = "maintenance")))]
@@ -251,7 +251,7 @@ pub fn compact(box_name: String) -> Result<bool, String> {
     {
         let mutation_lock = mutation_lock(&box_name);
         let _mutation_guard = mutation_lock.lock();
-        return db::compact(&box_name);
+        db::compact(&box_name)
     }
 
     #[cfg(not(feature = "maintenance"))]
