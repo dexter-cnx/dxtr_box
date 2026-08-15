@@ -53,7 +53,7 @@ abstract final class DxtrCodec {
       value,
       'value',
       'Unsupported type ${value.runtimeType}. Supported: null, bool, int, '
-      'double, String, List, Map<String, dynamic>, Uint8List, DateTime.',
+          'double, String, List, Map<String, dynamic>, Uint8List, DateTime.',
     );
   }
 
