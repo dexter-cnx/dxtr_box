@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the 0.1.0 foundation from the public Flutter API down to the redb transaction layer.
+This walkthrough describes the current 0.1.x foundation from the public Flutter API down to redb, including the native watch path.
 
 ## 1. Package boundary
 
@@ -14,7 +14,7 @@ Flutter app
   -> redb storage engine
 ```
 
-The Dart layer owns API ergonomics, dynamic-value encoding, cached key metadata, and local box events. Rust owns durable storage and transactions. The application does not generate model adapters or serializers.
+The Dart layer owns API ergonomics, dynamic-value encoding, cached key metadata, and the public `BoxEvent` stream facade. Rust owns durable storage, transactions, and native event fan-out. The application does not generate model adapters or serializers.
 
 ## 2. Public entry point
 
@@ -39,12 +39,14 @@ File: `lib/src/dxtr_box.dart`
 `DxtrBox` owns package-level lifecycle operations:
 
 - `init()` resolves the database directory and initializes the native engine.
-- `open()` validates the box name, opens the redb file, creates a `Box`, then hydrates its key metadata.
-- `deleteBox()` removes a box file through Rust.
+- `open()` validates the box name, opens the redb file, registers a native watcher, then hydrates key metadata.
+- `deleteBox()` removes a box file through Rust when no handles are live.
 - `boxExists()` checks whether the corresponding `.dxtr` file exists.
-- `bindNativeApi()` is the seam used by generated FRB bindings and tests.
+- `bindNativeApi()` is the test/alternate-engine seam.
 
-A box name may not be empty, `.` or `..`, and may not contain path separators. The same validation exists in Rust so callers cannot bypass the Dart guard through native APIs.
+Each open handle receives a random 128-bit watcher id. Watch registration happens before key hydration so mutations that occur during startup are either included in the refreshed metadata snapshot or delivered by the native stream.
+
+`lazy: true` is rejected until a distinct lazy-box contract is implemented. Normal reads already fetch values from native storage on demand rather than retaining full box contents in Dart RAM.
 
 ## 4. `Box`
 
@@ -52,13 +54,14 @@ File: `lib/src/box.dart`
 
 `Box` is the Hive-shaped object used by application code.
 
-It stores only lightweight metadata in Dart:
+It stores only lightweight state in Dart:
 
 ```text
 name
-keys
-closed state
-event controller
+shared key metadata
+native watcher id/subscription
+closed/closing state
+public BoxEvent controller
 ```
 
 Values stay in redb and are fetched on demand.
@@ -76,11 +79,13 @@ Box.put
   -> db::put
   -> redb write transaction
   -> commit
-  -> update Dart key metadata
-  -> emit BoxEvent
+  -> Rust emit NativeBoxEvent::Put
+  -> FRB StreamSink
+  -> every registered Box handle
+  -> Dart metadata/event update
 ```
 
-Metadata and events are updated only after the native write completes successfully.
+The initiating `Box` also updates its shared key metadata after the native call succeeds, so `keys`/`length` are immediately coherent after `await put(...)`. Public events are not emitted locally; they come only from the Rust stream, avoiding duplicate notifications.
 
 ### Read path
 
@@ -102,15 +107,40 @@ A missing key returns `defaultValue`.
 
 ### `putAll`
 
-Dart encodes every value before invoking native code. Rust validates every MessagePack payload before opening the redb write transaction, then inserts all entries in one transaction and commits once.
+Dart encodes every value before invoking native code. Rust validates every MessagePack payload before opening the redb write transaction, then inserts all entries in one transaction and commits once. After the commit, Rust emits one native `put` event per committed entry.
 
 ### `where`
 
-The 0.1.0 `where()` API is intentionally a linear client-side scan. It reads each persisted value and applies the Dart predicate. It is not the planned 0.3 query engine and does not use indexes.
+The current `where()` API is intentionally a linear client-side scan. It reads each persisted value and applies the Dart predicate. It is not the planned query engine and does not use indexes.
 
 ### `watch`
 
-The current stream is local to a Dart `Box` instance. It observes mutations performed through that object. Cross-instance/native event broadcasting is scheduled for 0.2.0 via an FRB stream.
+`Box.watch()` is backed by native Rust fan-out.
+
+```text
+Rust WATCHERS
+  box name
+    -> watcher id A -> StreamSink
+    -> watcher id B -> StreamSink
+    -> ...
+```
+
+A mutation performed by any handle is emitted after the redb commit succeeds and is delivered to every registered handle for that box. `watch(key:)` filters by key in Dart but still forwards `clear`, preserving existing public semantics.
+
+When a sink send fails, Rust removes that watcher entry. Normal `Box.close()` explicitly unregisters its watcher.
+
+### Close path
+
+```text
+Box.close
+  -> unregister watcher in Rust / drop StreamSink
+  -> cancel Dart native stream subscription
+  -> NativeDxtrApi.closeBox
+  -> native handle refcount decrement
+  -> close public BoxEvent controller
+```
+
+Concurrent calls to `close()` share one in-flight Future.
 
 ## 5. Dynamic codec
 
@@ -130,30 +160,29 @@ The Dart/Rust wire format is MessagePack. Supported values are:
 
 DateTime and byte arrays use tagged representations so their Dart types survive round trips. Maps reject non-string keys to keep the storage format deterministic and queryable later.
 
-Rust's `codec.rs` validates incoming MessagePack before a transaction is written. Rust does not deserialize application models in the MVP; it stores opaque validated MessagePack bytes.
+Rust's codec validation checks incoming MessagePack before a transaction is written. Rust does not deserialize application models in the MVP; it stores opaque validated MessagePack bytes.
 
 ## 6. Native seam and Flutter Rust Bridge
 
 File: `lib/src/native_api.dart`
 
-`NativeDxtrApi` isolates the package API from generated FRB symbols. This gives two benefits:
+`NativeDxtrApi` isolates package logic from generated FRB symbols. This allows Dart behavior to be unit-tested with an in-memory fake and contains FRB-generated naming/layout changes in one adapter.
 
-1. Dart behavior can be unit-tested with an in-memory fake without loading a native library.
-2. FRB-generated naming/layout changes remain contained in one adapter instead of leaking through `Box` and `DxtrBox`.
+The production `FrbNativeDxtrApi` initializes `RustLib` once, delegates CRUD/lifecycle calls, and maps generated `NativeBoxEvent` values into the package-internal `NativeWatchEvent` representation.
 
-`UnavailableNativeDxtrApi` deliberately fails with a useful message until generated bindings are wired.
-
-The production adapter should initialize `RustLib` once and implement `NativeDxtrApi` by delegating to the generated functions.
+Generated bindings are checked in under `lib/src/rust/` and `rust/src/frb_generated.rs`. Native build ownership belongs to the checked-in Cargokit package under `rust_builder/`; the root package does not own duplicate platform FFI scaffolds.
 
 ## 7. Rust API boundary
 
 File: `rust/src/api.rs`
 
-This module exposes functions for flutter_rust_bridge and immediately delegates storage work to `db.rs`.
+This module exposes functions for flutter_rust_bridge and delegates storage work to `db.rs`.
 
-Small lifecycle calls are currently marked `#[frb(sync)]`; value I/O functions are left asynchronous from Dart's perspective so disk work does not need to block Flutter's UI isolate.
+Small lifecycle calls are marked `#[frb(sync)]`; value I/O remains asynchronous from Dart's perspective.
 
-Encryption keys are rejected in 0.1.0 even though cryptographic primitives already exist behind a Cargo feature. Persisted encryption metadata and value-path integration belong to 0.2.0.
+Native watch registration uses FRB 2.8 `StreamSink<NativeBoxEvent>`. The watcher registry is keyed by box name and watcher id. `put`, `put_all`, `delete`, and `clear` emit only after the corresponding `db` function has returned successfully, so the event describes a committed mutation.
+
+Encryption keys are still rejected until persisted encryption metadata and value-path integration are implemented.
 
 ## 8. redb engine
 
@@ -173,15 +202,11 @@ TableDefinition<&str, &[u8]>
 
 Keys are UTF-8 strings. Values are MessagePack byte slices.
 
-### Database cache
+### Database cache and handles
 
-Open databases are cached as:
+Open databases are cached with per-box handle counts. The global lock protects cache lookup/mutation only; operations clone the database handle and release the cache lock before starting redb work.
 
-```rust
-Lazy<RwLock<HashMap<String, Arc<Database>>>>
-```
-
-The global lock protects only cache lookup/mutation. Each operation clones the `Arc<Database>` and releases the cache lock before starting a redb transaction, avoiding unnecessary serialization through the global map.
+Closing one `Box` therefore does not invalidate another handle for the same box. `deleteBox` is rejected while live handles remain.
 
 ### Transactions
 
@@ -203,13 +228,15 @@ The optional `encryption` Cargo feature contains:
 - random 12-byte nonce per encrypted value
 - nonce + ciphertext payload layout
 
-This is deliberately not connected to redb yet. 0.2.0 must add persisted box encryption metadata, key verification, decrypt-on-read, encrypt-on-write, and migration/version rules before the public `encryptionKey` option is considered implemented.
+This is deliberately not connected to redb yet. The next encryption milestone must add persisted box encryption metadata, key verification, decrypt-on-read, encrypt-on-write, and migration/version rules before the public `encryptionKey` option is considered implemented.
 
 ## 10. Why keys are cached but values are not
 
 The Hive-like API expects cheap `length`, `isEmpty`, and `keys`. Keeping only keys in Dart provides those ergonomics without loading every stored value into RAM.
 
-For very large key counts this still has a memory cost. A later API may expose native iterators/pagination, but the 0.1 contract intentionally prioritizes Hive-simple behavior while eliminating full-value box residency.
+Multiple same-isolate handles share the same key metadata object. Native watch events also update that metadata, so changes from another handle remain coherent.
+
+For very large key counts this still has a memory cost. A later API may expose native iterators/pagination.
 
 ## 11. Testing seams
 
@@ -221,25 +248,20 @@ test/codec_test.dart
 
 test/box_test.dart
   Box/DxtrBox semantics using FakeNativeDxtrApi
+  native-watch fan-out / filtering / teardown semantics
+
+test/native_integration_test.dart
+  real Dart -> FRB -> Rust -> redb persistence
+  real cross-handle native watch delivery
 
 rust/src/db.rs tests
   real redb files and transaction behavior
 ```
 
-The Rust engine uses process-global state, so its unit tests take a test-only mutex before changing the base path/cache. This avoids parallel `cargo test` cases corrupting each other's assumptions.
+The Rust engine uses process-global state, so its unit tests take a test-only mutex before changing the base path/cache.
 
 See `docs/TESTING.md` for the full test matrix and CI gates.
 
 ## 12. Next architectural step
 
-The next critical path remains:
-
-```text
-platform plugin scaffolds
-  -> FRB code generation
-  -> NativeDxtrApi production adapter
-  -> macOS smoke test
-  -> Android/iOS/Linux/Windows validation
-```
-
-Only after that path is green should 0.2.0 add encryption persistence, native watch streams, compaction, and benchmark work.
+With lifecycle hardening, five-platform native builds, and native watch fan-out in place, the next storage milestone is persisted encryption metadata and value-path encryption. After that come batch deletion/compaction, crash/reopen durability testing, benchmark work, Cargo feature splitting, and Dart 3.13 native tree-shaking/size hardening.
