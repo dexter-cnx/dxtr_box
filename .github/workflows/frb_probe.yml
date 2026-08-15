@@ -59,7 +59,11 @@ jobs:
           path: |
             frb-generated-status.txt
             frb-generated.patch
+            analysis_options.yaml
+            pubspec.yaml
             lib/src/rust
+            rust/src/frb_generated.rs
+            rust_builder
             android
             ios
             macos
