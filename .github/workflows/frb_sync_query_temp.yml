@@ -36,26 +36,34 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Normalize temporary patch
+      - name: Apply transactional index integration
+        run: python3 tool/apply_query_index_db_patch.py
+
+      - name: Fix list_indexes expression tail
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('tool/apply_query_index_db_patch.py')
+          path = Path('rust/src/api.rs')
           text = path.read_text()
-          old = '        return index::list(&db).map(|definitions| {'
-          new = '        index::list(&db).map(|definitions| {'
-          if old not in text:
-              raise SystemExit('expected list_indexes return pattern not found')
-          text = text.replace(old, new, 1)
-          old_tail = '''        });\n    }\n\n    #[cfg(not(feature = "full"))]'''
-          new_tail = '''        })\n    }\n\n    #[cfg(not(feature = "full"))]'''
+          old_head = '        return index::list(&db).map(|definitions| {'
+          new_head = '        index::list(&db).map(|definitions| {'
+          if old_head not in text:
+              raise SystemExit('expected list_indexes return pattern not found in api.rs')
+          text = text.replace(old_head, new_head, 1)
+          old_tail = '''                .collect()
+        });
+    }
+
+    #[cfg(not(feature = "full"))]'''
+          new_tail = '''                .collect()
+        })
+    }
+
+    #[cfg(not(feature = "full"))]'''
           if old_tail not in text:
-              raise SystemExit('expected list_indexes map tail not found')
+              raise SystemExit('expected list_indexes map tail not found in api.rs')
           path.write_text(text.replace(old_tail, new_tail, 1))
           PY
-
-      - name: Apply transactional index integration
-        run: python3 tool/apply_query_index_db_patch.py
 
       - name: Format native sources
         run: cargo fmt --manifest-path rust/Cargo.toml
@@ -87,7 +95,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add rust/src/db.rs rust/src/api.rs rust/src/index.rs rust/src/query.rs rust/src/lib.rs rust/Cargo.toml lib/src/rust lib/src/box.dart lib/src/native_api.dart
+          git add rust/src/db.rs rust/src/api.rs rust/src/index.rs rust/src/query.rs rust/src/lib.rs rust/Cargo.toml rust/tests/query_index.rs lib/src/rust lib/src/box.dart lib/src/native_api.dart
           git add -u .github/workflows tool
           git commit -m 'feat: add native query scan and persisted indexes'
           git push origin HEAD:feature/0.3-query-index-foundation
