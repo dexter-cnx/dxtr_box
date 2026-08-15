@@ -703,10 +703,7 @@ mod tests {
         assert!(open("secure-reopen", None).is_err());
         assert!(open("secure-reopen", Some("wrong-key")).is_err());
         open("secure-reopen", Some("first-key")).unwrap();
-        assert_eq!(
-            get("secure-reopen", "answer").unwrap(),
-            Some(pack(&42_i64))
-        );
+        assert_eq!(get("secure-reopen", "answer").unwrap(), Some(pack(&42_i64)));
         close("secure-reopen");
     }
 
