@@ -499,10 +499,8 @@ pub fn encrypt_box(name: &str, encryption_key: &str) -> Result<(), String> {
                     .iter()
                     .map_err(|e| e.to_string())?
                     .map(|item| {
-                        item.map(|(key, value)| {
-                            (key.value().to_string(), value.value().to_vec())
-                        })
-                        .map_err(|e| e.to_string())
+                        item.map(|(key, value)| (key.value().to_string(), value.value().to_vec()))
+                            .map_err(|e| e.to_string())
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
@@ -956,10 +954,7 @@ mod tests {
             table.get("alpha").unwrap().unwrap().value(),
             alpha.as_slice()
         );
-        assert_ne!(
-            table.get("beta").unwrap().unwrap().value(),
-            beta.as_slice()
-        );
+        assert_ne!(table.get("beta").unwrap().unwrap().value(), beta.as_slice());
         drop(table);
         drop(read);
         drop(db);

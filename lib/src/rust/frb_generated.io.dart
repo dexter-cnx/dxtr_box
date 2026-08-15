@@ -4,13 +4,10 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api.dart';
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
-
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -26,8 +23,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RustStreamSink<NativeBoxEvent> dco_decode_StreamSink_native_box_event_Sse(
-    dynamic raw,
-  );
+      dynamic raw);
 
   @protected
   String dco_decode_String(dynamic raw);
@@ -49,8 +45,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<(String, Uint8List)> dco_decode_list_record_string_list_prim_u_8_strict(
-    dynamic raw,
-  );
+      dynamic raw);
 
   @protected
   NativeBoxEvent dco_decode_native_box_event(dynamic raw);
@@ -66,8 +61,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   (String, Uint8List) dco_decode_record_string_list_prim_u_8_strict(
-    dynamic raw,
-  );
+      dynamic raw);
 
   @protected
   BigInt dco_decode_u_64(dynamic raw);
@@ -83,8 +77,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RustStreamSink<NativeBoxEvent> sse_decode_StreamSink_native_box_event_Sse(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
@@ -106,16 +99,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<(String, Uint8List)> sse_decode_list_record_string_list_prim_u_8_strict(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   NativeBoxEvent sse_decode_native_box_event(SseDeserializer deserializer);
 
   @protected
   NativeBoxEventType sse_decode_native_box_event_type(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
@@ -125,8 +116,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   (String, Uint8List) sse_decode_record_string_list_prim_u_8_strict(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   BigInt sse_decode_u_64(SseDeserializer deserializer);
@@ -139,15 +129,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_AnyhowException(
-    AnyhowException self,
-    SseSerializer serializer,
-  );
+      AnyhowException self, SseSerializer serializer);
 
   @protected
   void sse_encode_StreamSink_native_box_event_Sse(
-    RustStreamSink<NativeBoxEvent> self,
-    SseSerializer serializer,
-  );
+      RustStreamSink<NativeBoxEvent> self, SseSerializer serializer);
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -166,42 +152,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-    Uint8List self,
-    SseSerializer serializer,
-  );
+      Uint8List self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_record_string_list_prim_u_8_strict(
-    List<(String, Uint8List)> self,
-    SseSerializer serializer,
-  );
+      List<(String, Uint8List)> self, SseSerializer serializer);
 
   @protected
   void sse_encode_native_box_event(
-    NativeBoxEvent self,
-    SseSerializer serializer,
-  );
+      NativeBoxEvent self, SseSerializer serializer);
 
   @protected
   void sse_encode_native_box_event_type(
-    NativeBoxEventType self,
-    SseSerializer serializer,
-  );
+      NativeBoxEventType self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_list_prim_u_8_strict(
-    Uint8List? self,
-    SseSerializer serializer,
-  );
+      Uint8List? self, SseSerializer serializer);
 
   @protected
   void sse_encode_record_string_list_prim_u_8_strict(
-    (String, Uint8List) self,
-    SseSerializer serializer,
-  );
+      (String, Uint8List) self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_64(BigInt self, SseSerializer serializer);
