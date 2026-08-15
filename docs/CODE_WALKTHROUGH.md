@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current 0.1.x native foundation from the Flutter API down to redb, including native watch fan-out, persisted encryption, explicit plaintext -> encrypted migration, bulk deletion, compaction, crash durability, and the benchmark seam.
+This walkthrough describes the current 0.1.x native foundation from the Flutter API down to redb, including native watch fan-out, persisted encryption, explicit plaintext -> encrypted migration, bulk deletion, compaction, crash durability, native feature profiles, binary-size baselines, and the benchmark seam.
 
 ## 1. Package boundary
 
@@ -365,7 +365,7 @@ Migration does not emit `BoxEvent`s because live box handles are forbidden durin
 
 ## 11. Crash durability and benchmarks
 
-`rust/tests/process_crash.rs` kills a writer process after acknowledged commits and verifies a fresh process can reopen committed plaintext and encrypted data. The project makes no durability claim for an operation that had not returned successfully before termination.
+`rust/tests/process_crash.rs` kills a writer process after acknowledged commits and verifies a fresh process can reopen committed plaintext data in `minimal`; `encryption` and `full` additionally verify committed encrypted data. The project makes no durability claim for an operation that had not returned successfully before termination.
 
 The separate `benchmark/` package compares equal logical workloads against current Hive CE without raising the root package's Dart/Flutter compatibility floor. Shared-runner timing is informational; CI checks harness execution, not performance thresholds.
 
@@ -411,12 +411,17 @@ make process-crash
 make benchmark-smoke
 make benchmark-full
 make rust-check
+make native-build-minimal
+make native-build-encryption
+make native-size-baseline
 make example-android
 make example-linux
 make example-windows
 make example-macos
 make example-ios
 ```
+
+`make native-size-baseline` builds all three release profiles in isolated Cargo target directories and records exact artifact bytes plus environment/toolchain metadata in `build/native-size/native-size-baseline.tsv`.
 
 ## 14. Native feature profiles and next architectural step
 
