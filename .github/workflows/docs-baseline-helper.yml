@@ -1,0 +1,109 @@
+name: Docs Baseline Helper
+
+on:
+  push:
+    branches: [feature/cargo-feature-size-baseline]
+
+permissions:
+  contents: write
+
+jobs:
+  sync-docs:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: feature/cargo-feature-size-baseline
+          fetch-depth: 0
+
+      - name: Sync measured baseline docs
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'missing expected text in {path}: {old[:80]!r}')
+              p.write_text(text.replace(old, new))
+
+          replace(
+              'docs/NATIVE_FEATURE_PROFILES.md',
+              'The CI size job publishes the complete `build/native-size` directory as an artifact. These measurements are informational only. There is no regression threshold until repeated measurements are shown to be stable enough across a controlled runner/toolchain.',
+              '''The CI size job publishes only `build/native-size/native-size-baseline.tsv` as the retained artifact; isolated Cargo target directories are deliberately not uploaded. These measurements are informational only. There is no regression threshold until repeated measurements are shown to be stable enough across a controlled runner/toolchain.\n\n### Validated Linux x86_64 baseline\n\nPR #12 CI #144 validated the three release profiles on Linux x86_64 with the same runner/toolchain and isolated target directories:\n\n| Profile | Bytes | Delta vs minimal |\n| --- | ---: | ---: |\n| minimal | 1,893,736 | baseline |\n| encryption | 1,992,296 | +98,560 (+5.2%) |\n| full | 2,032,312 | +138,576 (+7.3%) |\n\nThese are native dynamic-library measurements for that Linux x86_64 CI environment only. They are not cross-platform package-size claims.'''
+          )
+
+          replace(
+              'docs/CODE_WALKTHROUGH.md',
+              'The standard native build currently enables the `encryption` Cargo feature by default.',
+              'The standard native build uses the `full` Cargo profile by default. Reduced `minimal` and `encryption` profiles are validated separately in CI without changing the public Dart SDK floor.'
+          )
+          replace(
+              'docs/CODE_WALKTHROUGH.md',
+              'CI also runs generated-FRB drift detection, Rust fmt/clippy/tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, and the five-platform Flutter example build matrix.',
+              'CI also runs generated-FRB drift detection, Rust fmt/clippy plus minimal/encryption/full profile tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, a Linux x86_64 native-size baseline job, and the five-platform Flutter example build matrix.'
+          )
+          replace(
+              'docs/CODE_WALKTHROUGH.md',
+              '''## 14. Next architectural step\n\nAfter the public migration completion lands, the active sequence is:\n\n1. split optional Rust functionality into Cargo features with a clear minimal CRUD profile;\n2. establish reproducible binary-size baselines for minimal CRUD, CRUD+encryption, and full-feature builds;\n3. add binary-size regression CI only after the measurements are stable enough to be meaningful;\n4. begin 0.3 query/index work after storage/bridge hardening;\n5. before 1.0 RC, execute the full Hive Functional Parity Audit and close every practical `Gap`.''',
+              '''## 14. Native feature profiles and next architectural step\n\nPR #12 establishes three product-relevant profiles:\n\n```text\nminimal     = CRUD + lifecycle + native watch\nencryption  = minimal + encrypted create/open/read/write\nfull        = encryption + maintenance (compact + plaintext migration)\n```\n\nThe validated Linux x86_64 release-library baseline is 1,893,736 bytes for minimal, 1,992,296 bytes for encryption, and 2,032,312 bytes for full. These measurements are informational and platform-specific.\n\nThe active sequence after PR #12 is:\n\n1. collect repeated size measurements before introducing a regression threshold;\n2. begin 0.3 query/index work while preserving the three-profile contract;\n3. add binary-size regression CI only when the baseline is stable enough to be meaningful;\n4. before 1.0 RC, execute the full Hive Functional Parity Audit and close every practical `Gap`.'''
+          )
+
+          replace(
+              'docs/TESTING.md',
+              '''cargo fmt --manifest-path rust/Cargo.toml -- --check\ncargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings\ncargo test --manifest-path rust/Cargo.toml --all-targets\ncargo test --manifest-path rust/Cargo.toml --all-targets --features encryption''',
+              '''cargo fmt --manifest-path rust/Cargo.toml -- --check\ncargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings\ncargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features\ncargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption\ncargo test --manifest-path rust/Cargo.toml --all-targets'''
+          )
+          replace(
+              'docs/TESTING.md',
+              '3. The child opens plaintext and encrypted boxes.',
+              '3. The child always opens a plaintext box; builds with the `encryption` feature also open an encrypted box.'
+          )
+          replace(
+              'docs/TESTING.md',
+              '7. A fresh process context reopens the same files and verifies all previously committed plaintext and encrypted values.',
+              '7. A fresh process context reopens the same files and verifies all previously committed plaintext values plus encrypted values when the `encryption` feature is enabled.'
+          )
+          replace(
+              'docs/TESTING.md',
+              '''Each host runs:\n\n- rustfmt check\n- clippy with warnings denied\n- default-feature tests\n- encryption-feature tests\n\n`cargo test --all-targets` includes the process-kill integration test, giving crash/reopen coverage on every supported Rust CI host where the test process can be killed normally.''',
+              '''Each host runs:\n\n- rustfmt check\n- clippy with warnings denied on the default/full profile\n- minimal tests with `--no-default-features`\n- encryption tests with `--no-default-features --features encryption`\n- full/default tests\n\n`cargo test --all-targets` includes the process-kill integration test. Minimal validates plaintext acknowledged-commit recovery; encryption/full additionally validate encrypted recovery.\n\n### Native size baseline job\n\nLinux x86_64 builds minimal, encryption, and full release libraries into isolated Cargo target directories and records exact bytes plus toolchain/environment metadata in `native-size-baseline.tsv`. PR #12 CI #144 measured 1,893,736 / 1,992,296 / 2,032,312 bytes respectively. The artifact contains only the TSV metadata file, not Cargo target directories.'''
+          )
+
+          replace(
+              'docs/PROJECT_HANDOFF.md',
+              'Implemented on `main` through PR #10, with PR #11 completing the public migration facade, native integration coverage, and documentation acceptance trail:',
+              'Implemented on `main` through PR #11, with PR #12 validating Cargo feature profiles and the first reproducible Linux x86_64 native-size baseline:'
+          )
+          replace(
+              'docs/PROJECT_HANDOFF.md',
+              '- Root Makefile targets for preflight, native testing, process-crash testing, benchmark smoke/full, FRB regeneration, Rust checks, and platform example builds.',
+              '- Root Makefile targets for preflight, native testing, process-crash testing, benchmark smoke/full, FRB regeneration, Rust checks, native profile builds/size measurement, and platform example builds.\n- Native feature profiles: `minimal`, `encryption`, and default `full`.\n- CI validates all three Rust profiles on Ubuntu, macOS, and Windows.\n- Linux x86_64 release-library baseline: minimal 1,893,736 bytes; encryption 1,992,296 bytes; full 2,032,312 bytes.'
+          )
+          replace(
+              'docs/PROJECT_HANDOFF.md',
+              'After PR #11 is green, the validation surface is:',
+              'After PR #12 CI #144 and Platform Builds #88 are green, the validation surface is:'
+          )
+          start = '## Active milestone after PR #11 — Cargo feature splitting + binary-size baseline'
+          end = '## Dart 3.13 native tree-shaking — FUTURE ONLY'
+          p = Path('docs/PROJECT_HANDOFF.md')
+          text = p.read_text()
+          i = text.index(start)
+          j = text.index(end)
+          replacement = '''## PR #12 validated — Cargo feature splitting + binary-size baseline\n\nPR #12 establishes three maintainable native profiles without changing Dart/Flutter compatibility:\n\n```text\nminimal     = CRUD + lifecycle + native watch\nencryption  = minimal + encrypted create/open/read/write\nfull        = encryption + maintenance (compact + plaintext migration)\n```\n\n`full` remains the default so normal Cargokit/Flutter builds preserve current behavior. Reduced profiles retain the stable FRB surface and fail explicitly for unavailable maintenance capabilities.\n\nValidated Linux x86_64 release-library baseline from CI #144:\n\n| Profile | Bytes | Delta vs minimal |\n| --- | ---: | ---: |\n| minimal | 1,893,736 | baseline |\n| encryption | 1,992,296 | +98,560 (+5.2%) |\n| full | 2,032,312 | +138,576 (+7.3%) |\n\nThe size job retains only `native-size-baseline.tsv`. No regression threshold is enabled yet because repeated controlled measurements are required before a size gate is defensible.\n\n## Next implementation sequence\n\n1. Merge PR #12 after final documentation CI remains green.\n2. Collect repeated size measurements and only then define a binary-size regression policy.\n3. Begin 0.3 query/index work while preserving the validated profile contract.\n4. Keep Dart 3.13 recorded-use/native tree shaking deferred.\n5. Before 1.0 RC, execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.\n\n'''
+          p.write_text(text[:i] + replacement + text[j:])
+
+      - name: Remove one-shot helper
+        run: git rm .github/workflows/docs-baseline-helper.yml
+
+      - name: Commit synchronized docs
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/NATIVE_FEATURE_PROFILES.md docs/CODE_WALKTHROUGH.md docs/TESTING.md docs/PROJECT_HANDOFF.md
+          git commit -m "docs: record validated native size baseline"
+          git push origin feature/cargo-feature-size-baseline
