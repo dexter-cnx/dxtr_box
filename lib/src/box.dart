@@ -65,12 +65,16 @@ final class Box {
   Future<void> disposeNativeWatch() async {
     final subscription = _nativeWatchSubscription;
     _nativeWatchSubscription = null;
-    if (subscription != null) {
-      await subscription.cancel();
-    }
+
+    // Drop the native StreamSink first so FRB can close the producer side
+    // before Dart tears down its subscription. Reversing this order can leave
+    // cancellation waiting on a producer that is still retained in Rust.
     if (_nativeWatchRegistered) {
       await _api.unwatchBox(name, _watcherId);
       _nativeWatchRegistered = false;
+    }
+    if (subscription != null) {
+      await subscription.cancel();
     }
   }
 
