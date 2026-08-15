@@ -170,6 +170,12 @@ pub fn len(name: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use once_cell::sync::Lazy;
+    use parking_lot::Mutex;
+
+    // The engine intentionally keeps process-global base-path and database caches.
+    // Serialize tests that mutate that global state so `cargo test` remains deterministic.
+    static TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     fn pack<T: serde::Serialize>(value: &T) -> Vec<u8> {
         rmp_serde::to_vec(value).unwrap()
@@ -177,24 +183,82 @@ mod tests {
 
     #[test]
     fn crud_round_trip() {
+        let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
         open("people").unwrap();
         put("people", "alice", &pack(&42_i64)).unwrap();
         assert_eq!(get("people", "alice").unwrap(), Some(pack(&42_i64)));
+        assert!(contains_key("people", "alice").unwrap());
         assert_eq!(len("people").unwrap(), 1);
         assert_eq!(all_keys("people").unwrap(), vec!["alice".to_string()]);
         delete("people", "alice").unwrap();
+        assert!(!contains_key("people", "alice").unwrap());
         assert_eq!(len("people").unwrap(), 0);
     }
 
     #[test]
     fn clear_is_atomic_write_transaction() {
+        let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
         open("items").unwrap();
         put_all("items", &[("a".into(), pack(&1_i64)), ("b".into(), pack(&2_i64))]).unwrap();
         clear("items").unwrap();
         assert_eq!(len("items").unwrap(), 0);
+    }
+
+    #[test]
+    fn data_survives_close_and_reopen() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("persistent").unwrap();
+        put("persistent", "answer", &pack(&42_i64)).unwrap();
+        close("persistent");
+
+        open("persistent").unwrap();
+        assert_eq!(get("persistent", "answer").unwrap(), Some(pack(&42_i64)));
+        assert_eq!(len("persistent").unwrap(), 1);
+    }
+
+    #[test]
+    fn put_all_rejects_invalid_payload_before_writing() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("atomic").unwrap();
+
+        let entries = vec![
+            ("good".to_string(), pack(&1_i64)),
+            ("bad".to_string(), vec![0xc1]), // Reserved MessagePack byte.
+        ];
+        assert!(put_all("atomic", &entries).is_err());
+        assert_eq!(len("atomic").unwrap(), 0);
+    }
+
+    #[test]
+    fn invalid_box_names_are_rejected() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+
+        for name in ["", ".", "..", "nested/box", "nested\\box"] {
+            assert!(open(name).is_err(), "name should be rejected: {name:?}");
+        }
+    }
+
+    #[test]
+    fn delete_box_removes_file_and_cache_entry() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("temporary").unwrap();
+        put("temporary", "k", &pack(&1_i64)).unwrap();
+        assert!(box_exists("temporary").unwrap());
+
+        delete_box("temporary").unwrap();
+        assert!(!box_exists("temporary").unwrap());
+        assert!(get("temporary", "k").is_err());
     }
 }
