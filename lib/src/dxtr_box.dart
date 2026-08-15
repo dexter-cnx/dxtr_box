@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -11,6 +13,7 @@ abstract final class DxtrBox {
   static final Map<String, int> _openHandlesByName = <String, int>{};
   static final Map<String, BoxMetadata> _metadataByName =
       <String, BoxMetadata>{};
+  static final Random _watcherRandom = Random.secure();
 
   static const Set<String> _windowsReservedNames = <String>{
     'CON',
@@ -86,6 +89,7 @@ abstract final class DxtrBox {
     final metadata = _metadataByName.putIfAbsent(name, BoxMetadata.new);
     final box = Box.internal(
       name: name,
+      watcherId: _newWatcherId(),
       api: _api,
       metadata: metadata,
       onClose: () {
@@ -100,8 +104,14 @@ abstract final class DxtrBox {
     );
 
     try {
+      // Register native events before metadata hydration. This closes the race
+      // where another handle mutates the box between initial key loading and
+      // watch registration; the following refresh then establishes a current
+      // metadata snapshot while future mutations arrive through the stream.
+      await box.initializeNativeWatch();
       await box.refreshMetadata();
     } catch (_) {
+      await box.disposeNativeWatch();
       await _api.closeBox(name);
       rethrow;
     }
@@ -125,6 +135,11 @@ abstract final class DxtrBox {
     _ensureInitialized();
     _validateBoxName(name);
     return _api.boxExists(name);
+  }
+
+  static String _newWatcherId() {
+    final bytes = List<int>.generate(16, (_) => _watcherRandom.nextInt(256));
+    return bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
   }
 
   static void _ensureInitialized() {

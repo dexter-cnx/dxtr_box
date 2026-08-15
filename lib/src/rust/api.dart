@@ -6,6 +6,9 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `emit_event`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`
+
 void initDb({required String path}) =>
     RustLib.instance.api.crateApiInitDb(path: path);
 
@@ -21,6 +24,15 @@ void deleteBox({required String name}) =>
 
 bool boxExists({required String name}) =>
     RustLib.instance.api.crateApiBoxExists(name: name);
+
+Future<Stream<NativeBoxEvent>> watchBox(
+        {required String boxName, required String watcherId}) =>
+    RustLib.instance.api
+        .crateApiWatchBox(boxName: boxName, watcherId: watcherId);
+
+void unwatchBox({required String boxName, required String watcherId}) =>
+    RustLib.instance.api
+        .crateApiUnwatchBox(boxName: boxName, watcherId: watcherId);
 
 Future<void> put(
         {required String boxName,
@@ -50,3 +62,38 @@ Future<List<String>> getAllKeys({required String boxName}) =>
 
 Future<BigInt> length({required String boxName}) =>
     RustLib.instance.api.crateApiLength(boxName: boxName);
+
+class NativeBoxEvent {
+  final String boxName;
+  final NativeBoxEventType eventType;
+  final String? key;
+  final Uint8List? value;
+
+  const NativeBoxEvent({
+    required this.boxName,
+    required this.eventType,
+    this.key,
+    this.value,
+  });
+
+  @override
+  int get hashCode =>
+      boxName.hashCode ^ eventType.hashCode ^ key.hashCode ^ value.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NativeBoxEvent &&
+          runtimeType == other.runtimeType &&
+          boxName == other.boxName &&
+          eventType == other.eventType &&
+          key == other.key &&
+          value == other.value;
+}
+
+enum NativeBoxEventType {
+  put,
+  delete,
+  clear,
+  ;
+}

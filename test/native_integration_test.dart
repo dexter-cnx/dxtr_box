@@ -21,12 +21,20 @@ void main() {
       expect(await DxtrBox.boxExists('native'), isFalse);
 
       var box = await DxtrBox.open('native');
+      final observer = await DxtrBox.open('native');
       expect(await DxtrBox.boxExists('native'), isTrue);
 
       final timestamp = DateTime.utc(2026, 8, 15, 5, 30, 45, 123);
       final bytes = Uint8List.fromList(<int>[0, 1, 2, 127, 128, 255]);
 
+      final observedIntPut = observer.watch(key: 'int').first;
       await box.put('int', 42);
+      final nativeWatchEvent =
+          await observedIntPut.timeout(const Duration(seconds: 5));
+      expect(nativeWatchEvent.type, BoxEventType.put);
+      expect(nativeWatchEvent.key, 'int');
+      expect(nativeWatchEvent.value, 42);
+
       await box.put('string', 'forged in Rust');
       await box.put('bytes', bytes);
       await box.put('time', timestamp);
@@ -48,18 +56,20 @@ void main() {
       expect(await box.containsKey('int'), isTrue);
       expect(box.length, 8);
       expect(
-          box.keys.toSet(),
-          containsAll(<String>{
-            'int',
-            'string',
-            'bytes',
-            'time',
-            'bool',
-            'double',
-            'list',
-            'map',
-          }));
+        box.keys.toSet(),
+        containsAll(<String>{
+          'int',
+          'string',
+          'bytes',
+          'time',
+          'bool',
+          'double',
+          'list',
+          'map',
+        }),
+      );
 
+      await observer.close();
       await box.close();
       box = await DxtrBox.open('native');
       expect(await box.get('string'), 'forged in Rust');

@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.8.0';
 
   @override
-  int get rustContentHash => -159301426;
+  int get rustContentHash => 1502003791;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -106,6 +106,11 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiPutAll(
       {required String boxName, required List<(String, Uint8List)> entries});
+
+  void crateApiUnwatchBox({required String boxName, required String watcherId});
+
+  Future<Stream<NativeBoxEvent>> crateApiWatchBox(
+      {required String boxName, required String watcherId});
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -436,6 +441,73 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argNames: ["boxName", "entries"],
       );
 
+  @override
+  void crateApiUnwatchBox(
+      {required String boxName, required String watcherId}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(boxName, serializer);
+        sse_encode_String(watcherId, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiUnwatchBoxConstMeta,
+      argValues: [boxName, watcherId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiUnwatchBoxConstMeta => const TaskConstMeta(
+        debugName: "unwatch_box",
+        argNames: ["boxName", "watcherId"],
+      );
+
+  @override
+  Future<Stream<NativeBoxEvent>> crateApiWatchBox(
+      {required String boxName, required String watcherId}) async {
+    final sink = RustStreamSink<NativeBoxEvent>();
+    await handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(boxName, serializer);
+        sse_encode_String(watcherId, serializer);
+        sse_encode_StreamSink_native_box_event_Sse(sink, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 15, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_String,
+      ),
+      constMeta: kCrateApiWatchBoxConstMeta,
+      argValues: [boxName, watcherId, sink],
+      apiImpl: this,
+    ));
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiWatchBoxConstMeta => const TaskConstMeta(
+        debugName: "watch_box",
+        argNames: ["boxName", "watcherId", "sink"],
+      );
+
+  @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return AnyhowException(raw as String);
+  }
+
+  @protected
+  RustStreamSink<NativeBoxEvent> dco_decode_StreamSink_native_box_event_Sse(
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    throw UnimplementedError();
+  }
+
   @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -446,6 +518,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   bool dco_decode_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
+  }
+
+  @protected
+  int dco_decode_i_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
   }
 
   @protected
@@ -473,6 +551,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return (raw as List<dynamic>)
         .map(dco_decode_record_string_list_prim_u_8_strict)
         .toList();
+  }
+
+  @protected
+  NativeBoxEvent dco_decode_native_box_event(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return NativeBoxEvent(
+      boxName: dco_decode_String(arr[0]),
+      eventType: dco_decode_native_box_event_type(arr[1]),
+      key: dco_decode_opt_String(arr[2]),
+      value: dco_decode_opt_list_prim_u_8_strict(arr[3]),
+    );
+  }
+
+  @protected
+  NativeBoxEventType dco_decode_native_box_event_type(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return NativeBoxEventType.values[raw as int];
   }
 
   @protected
@@ -520,6 +618,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_String(deserializer);
+    return AnyhowException(inner);
+  }
+
+  @protected
+  RustStreamSink<NativeBoxEvent> sse_decode_StreamSink_native_box_event_Sse(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    throw UnimplementedError('Unreachable ()');
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
@@ -530,6 +642,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getInt32();
   }
 
   @protected
@@ -569,6 +687,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ans_.add(sse_decode_record_string_list_prim_u_8_strict(deserializer));
     }
     return ans_;
+  }
+
+  @protected
+  NativeBoxEvent sse_decode_native_box_event(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_boxName = sse_decode_String(deserializer);
+    var var_eventType = sse_decode_native_box_event_type(deserializer);
+    var var_key = sse_decode_opt_String(deserializer);
+    var var_value = sse_decode_opt_list_prim_u_8_strict(deserializer);
+    return NativeBoxEvent(
+        boxName: var_boxName,
+        eventType: var_eventType,
+        key: var_key,
+        value: var_value);
+  }
+
+  @protected
+  NativeBoxEventType sse_decode_native_box_event_type(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return NativeBoxEventType.values[inner];
   }
 
   @protected
@@ -620,9 +760,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer) {
+  void sse_encode_AnyhowException(
+      AnyhowException self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getInt32();
+    sse_encode_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_StreamSink_native_box_event_Sse(
+      RustStreamSink<NativeBoxEvent> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(
+        self.setupAndSerialize(
+            codec: SseCodec(
+          decodeSuccessData: sse_decode_native_box_event,
+          decodeErrorData: sse_decode_AnyhowException,
+        )),
+        serializer);
   }
 
   @protected
@@ -635,6 +789,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
+  }
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putInt32(self);
   }
 
   @protected
@@ -671,6 +831,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     for (final item in self) {
       sse_encode_record_string_list_prim_u_8_strict(item, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_native_box_event(
+      NativeBoxEvent self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.boxName, serializer);
+    sse_encode_native_box_event_type(self.eventType, serializer);
+    sse_encode_opt_String(self.key, serializer);
+    sse_encode_opt_list_prim_u_8_strict(self.value, serializer);
+  }
+
+  @protected
+  void sse_encode_native_box_event_type(
+      NativeBoxEventType self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -717,11 +894,5 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_unit(void self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-  }
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putInt32(self);
   }
 }
