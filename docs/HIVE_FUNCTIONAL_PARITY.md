@@ -28,33 +28,34 @@ The audit should be refreshed against the latest Hive CE release immediately bef
 
 | Area | Hive/Hive CE capability | dxtr_box target | Status |
 |---|---|---|---|
-| Initialization | configurable storage path | `DxtrBox.init(path:)` | In progress |
-| Box lifecycle | open / close / delete / exists | equivalent lifecycle | In progress |
-| CRUD | put / get / delete | equivalent capability | In progress |
-| Batch writes | putAll / deleteAll | transactional batch operations | In progress |
+| Initialization | configurable storage path | `DxtrBox.init(path:)` | Implemented; final audit pending |
+| Box lifecycle | open / close / delete / exists | equivalent lifecycle | Implemented; final audit pending |
+| CRUD | put / get / delete | equivalent capability | Implemented; final audit pending |
+| Batch writes | putAll / deleteAll | transactional batch operations | Implemented; final audit pending |
 | Introspection | keys / values / length / isEmpty / containsKey | equivalent capability | In progress |
-| Defaults | get with default value | equivalent capability | In progress |
-| Clear | clear entire box | one ACID write transaction | In progress |
-| Lazy access | values not retained wholesale in Dart RAM | native storage reads on demand; `lazy` semantics finalized before 1.0 | Planned |
-| Events | `watch()` / key filtering | native Rust event broadcast exposed through FRB stream | Planned 0.2 |
-| Compaction | manual / strategy-driven compaction | redb-appropriate compact/maintenance API | Planned 0.2 |
-| Encryption | encrypted boxes | Argon2id-derived key + ChaCha20Poly1305 authenticated values | Planned 0.2 |
-| Custom values | TypeAdapter-backed objects | codegen-free structured codec / explicit serializer extension mechanism | Planned audit |
-| Schema evolution | adapter-compatible model evolution | versioned codec/schema migration mechanism | Planned audit |
+| Defaults | get with default value | equivalent capability | Implemented; final audit pending |
+| Clear | clear entire box | one ACID write transaction | Implemented; final audit pending |
+| Lazy access | values not retained wholesale in Dart RAM | native storage reads on demand; `lazy` semantics finalized before 1.0 | Gap |
+| Events | `watch()` / key filtering | native Rust event broadcast exposed through FRB stream | Implemented; isolate semantics pending |
+| Compaction | manual / strategy-driven compaction | explicit redb-backed `compact()` plus future policy | Compatible candidate; policy audit pending |
+| Encryption | encrypted boxes | Argon2-derived key + ChaCha20Poly1305 authenticated values | Implemented; binary-size/audit gate pending |
+| Encryption migration | plaintext box -> encrypted box | explicit transactional `DxtrBox.encryptBox()` | Implemented; dedicated interruption injection still future hardening |
+| Custom values | TypeAdapter-backed objects | codegen-free structured codec / explicit serializer extension mechanism | Gap |
+| Schema evolution | adapter-compatible model evolution | versioned codec/schema migration mechanism | Gap |
 | Primitive coverage | null, bool, number, String, List, Map, binary, DateTime, etc. | MessagePack codec plus required additional built-ins | In progress |
-| Sets / Duration | Hive CE built-ins | add codec support or equivalent representation | Planned parity |
+| Sets / Duration | Hive CE built-ins | add codec support or equivalent representation | Gap |
 | Object helpers | HiveObject save/delete relationships | ergonomic object/repository helper if practical use case warrants | Planned audit |
 | Object references | HiveList/reference-style relationships | explicit reference/link mechanism or documented superseding pattern | Planned audit |
-| Isolates | `IsolatedHive` | safe multi-isolate native database access and event behavior | Planned parity |
-| Concurrent reads | supported access model | redb concurrent read transactions | Engine capability; integration tests required |
-| Write serialization | database-safe writes | redb ACID single-writer transaction model | Engine capability; integration tests required |
-| Crash durability | persisted writes survive process failure | crash/reopen ACID test suite | Planned 0.4 |
-| Web | IndexedDB/Web/WASM support | IndexedDB fallback behind same Dart API | Planned 1.0 |
+| Isolates | `IsolatedHive` | safe multi-isolate native database access and event behavior | Gap |
+| Concurrent reads | supported access model | redb concurrent read transactions | Engine capability; Dart/isolate integration tests required |
+| Write serialization | database-safe writes | redb ACID single-writer transaction model | Engine capability; broader concurrency tests required |
+| Crash durability | persisted writes survive process failure | acknowledged-commit process-kill/reopen suite | Implemented foundation; broader soak/fault injection pending |
+| Web | IndexedDB/Web/WASM support | IndexedDB fallback behind same Dart API | Gap |
 | Flutter integration | Flutter initialization/helpers | dxtr_box Flutter facade | In progress |
 | DevTools inspection | Hive CE Inspector | optional dxtr_box inspector/tooling; evaluate as parity requirement | Planned audit |
-| Migration | existing Hive data | `migrateFromHiveCe()` with documented supported types | Planned 0.3 |
+| Hive data migration | existing Hive data | `migrateFromHiveCe()` with documented supported types | Gap / planned 0.3 |
 | Query/filter | app-side filtering | native query helpers + indexes where useful | Planned 0.3 |
-| Binary size | pure-Dart Hive has no native payload | explicit native-size budget and tree shaking | Planned 0.4 |
+| Binary size | pure-Dart Hive has no native payload | explicit native-size budget, Cargo profiles/features, future tree shaking | In progress / next milestone |
 
 ## Compatibility principle
 
@@ -96,24 +97,43 @@ Functional parity requires more than compiling from multiple isolates. Tests mus
 - writes are serialized correctly,
 - stale Dart metadata cannot overwrite native truth,
 - watch events have documented cross-isolate behavior,
-- close/delete behavior is deterministic while other handles exist.
+- close/delete/maintenance behavior is deterministic while other handles exist.
 
 ## Encryption parity gate
 
-Before encryption can be marked complete:
+Before encryption can be marked fully audited:
 
 - each encrypted box has a unique persisted random salt,
-- Argon2id derives the encryption key,
+- Argon2 derives the encryption key,
 - each value uses a unique nonce,
 - ChaCha20Poly1305 authenticates ciphertext,
+- record-key AAD prevents ciphertext swapping between keys,
 - wrong passwords fail deterministically,
 - tampered payloads are rejected,
-- reopen and migration scenarios are tested,
+- encrypted reopen and plaintext -> encrypted migration are tested,
 - encryption-enabled binary size is measured separately.
 
-## Migration parity gate
+The implementation now covers the storage/security behaviors above except the binary-size measurement gate and broader release-audit evidence.
 
-`migrateFromHiveCe()` must define support for at least:
+## Plaintext -> encrypted migration contract
+
+`DxtrBox.encryptBox()` is a storage-mode maintenance operation, distinct from future Hive-file migration.
+
+Required semantics:
+
+- never triggered implicitly by `open(..., encryptionKey: ...)`,
+- requires all live handles for the box to be closed,
+- validates all plaintext MessagePack payloads before committing the transition,
+- rewrites values and changes encryption metadata in one redb write transaction,
+- persists a fresh salt and authenticated key-check sentinel,
+- rejects missing, open, already-encrypted, unsupported-format, or empty-key cases,
+- successful reopen requires the new key and preserves decoded data.
+
+A dedicated process-kill test that targets an in-flight migration remains future fault-injection hardening. The current contract relies on redb transactional before/after semantics plus tests that pre-commit validation failure preserves plaintext state.
+
+## Hive migration parity gate
+
+Future `migrateFromHiveCe()` must define support for at least:
 
 - primitive values,
 - lists/maps,
@@ -123,7 +143,7 @@ Before encryption can be marked complete:
 - custom objects through an explicit conversion callback where automatic conversion is impossible,
 - encrypted-source migration with caller-supplied source credentials where technically feasible.
 
-Migration must be restart-safe or transactional enough that a failed migration cannot silently produce a partially valid destination.
+Hive data migration must be restart-safe or transactional enough that a failed migration cannot silently produce a partially valid destination.
 
 ## Performance is not parity
 
@@ -148,7 +168,7 @@ Before 1.0 RC:
 
 1. Refresh this matrix against the latest Hive CE public API and documentation.
 2. Add tests for every row classified `Exact`, `Compatible`, or `Superseded` where automation is practical.
-3. Resolve every `Gap` that corresponds to a practical local-database use case.
+3. Resolve every practical capability still marked `Gap`.
 4. Document intentional API/semantic differences in the migration guide.
 5. Run migration tests using real Hive CE fixture databases.
 6. Run Android, iOS, macOS, Linux, Windows, and Web validation.
