@@ -149,7 +149,13 @@ abstract final class DxtrBox {
       throw StateError('Cannot encrypt box "$name" while it is open.');
     }
 
-    await _api.encryptBox(name, encryptionKey);
+    final api = _api;
+    if (api is! NativeEncryptionMigrationApi) {
+      throw StateError(
+        'The configured dxtr_box native engine does not support encryption migration.',
+      );
+    }
+    await api.encryptBox(name, encryptionKey);
     _metadataByName.remove(name);
   }
 
