@@ -47,6 +47,64 @@ jobs:
           PY
 
           python3 tool/apply_delete_all_compact.py
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('test/box_test.dart')
+          text = path.read_text()
+          text = text.replace(
+              '  Future<void> clear(String boxName) async {',
+              '  @override\n  Future<void> clear(String boxName) async {',
+              1,
+          )
+          text = text.replace(
+              '  Future<List<String>> getAllKeys(String boxName) async {',
+              '  @override\n  Future<List<String>> getAllKeys(String boxName) async {',
+              1,
+          )
+          path.write_text(text)
+
+          path = Path('test/watch_hydration_test.dart')
+          text = path.read_text()
+          marker = '  @override\n  Future<void> clear(String boxName) async {'
+          insert = '''  @override
+          Future<List<String>> deleteAll(String boxName, List<String> keys) async {
+            _requireOpen(boxName);
+            final deleted = <String>[];
+            for (final key in keys) {
+              if (_box(boxName).remove(key) != null) {
+                deleted.add(key);
+                _emit(
+                  NativeWatchEvent(
+                    boxName: boxName,
+                    type: NativeWatchEventType.delete,
+                    key: key,
+                  ),
+                );
+              }
+            }
+            return deleted;
+          }
+
+          '''
+          if marker not in text:
+              raise SystemExit('hydration clear marker not found')
+          text = text.replace(marker, insert + marker, 1)
+          marker = '  @override\n  Future<List<String>> getAllKeys(String boxName) async {'
+          insert = '''  @override
+          Future<bool> compact(String boxName) async {
+            _requireOpen(boxName);
+            return false;
+          }
+
+          '''
+          if marker not in text:
+              raise SystemExit('hydration getAllKeys marker not found')
+          text = text.replace(marker, insert + marker, 1)
+          path.write_text(text)
+          PY
+
           cargo fmt --manifest-path rust/Cargo.toml
           flutter pub get
           flutter_rust_bridge_codegen generate
