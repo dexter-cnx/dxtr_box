@@ -28,8 +28,7 @@ jobs:
           cache-workspaces: rust
       - run: flutter pub get
       - run: python3 tool/apply_query_index_db_patch.py
-      - name: Fix list_indexes expression
-        run: python3 -c "from pathlib import Path; p=Path('rust/src/api.rs'); s=p.read_text(); s=s.replace('        return index::list(&db).map(|definitions| {','        index::list(&db).map(|definitions| {',1); s=s.replace('                .collect()\n        });\n    }\n\n    #[cfg(not(feature = \\\"full\\\"))]','                .collect()\n        })\n    }\n\n    #[cfg(not(feature = \\\"full\\\"))]',1); p.write_text(s)"
+      - run: python3 tool/fix_query_index_api.py
       - run: cargo fmt --manifest-path rust/Cargo.toml
       - name: Validate Rust profiles
         run: |
@@ -47,7 +46,7 @@ jobs:
           flutter analyze
           flutter test --reporter expanded
       - name: Remove temporary tooling
-        run: git rm .github/workflows/frb_sync_query_temp.yml tool/apply_query_index_db_patch.py
+        run: git rm .github/workflows/frb_sync_query_temp.yml tool/apply_query_index_db_patch.py tool/fix_query_index_api.py
       - name: Commit finalized implementation
         run: |
           git config user.name 'github-actions[bot]'
