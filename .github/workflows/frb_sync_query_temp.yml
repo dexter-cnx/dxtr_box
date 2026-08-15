@@ -46,7 +46,12 @@ jobs:
           new = '        index::list(&db).map(|definitions| {'
           if old not in text:
               raise SystemExit('expected list_indexes return pattern not found')
-          path.write_text(text.replace(old, new, 1))
+          text = text.replace(old, new, 1)
+          old_tail = '''        });\n    }\n\n    #[cfg(not(feature = "full"))]'''
+          new_tail = '''        })\n    }\n\n    #[cfg(not(feature = "full"))]'''
+          if old_tail not in text:
+              raise SystemExit('expected list_indexes map tail not found')
+          path.write_text(text.replace(old_tail, new_tail, 1))
           PY
 
       - name: Apply transactional index integration
