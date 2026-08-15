@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - .github/workflows/frb_probe.yml
+      - tool/scaffold_platforms.sh
+      - flutter_rust_bridge.yaml
+      - rust/**
   workflow_dispatch:
 
 permissions:
