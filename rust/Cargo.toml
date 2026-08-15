@@ -12,8 +12,12 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 
 [features]
-default = ["encryption"]
+default = ["full"]
+# Core CRUD, lifecycle, and watch delivery are always compiled because the
+# public Dart Box lifecycle depends on native watch registration.
 encryption = ["dep:argon2", "dep:chacha20poly1305", "dep:rand_core"]
+maintenance = []
+full = ["encryption", "maintenance"]
 
 [dependencies]
 redb = "=2.1.0"
