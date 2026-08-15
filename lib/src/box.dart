@@ -10,13 +10,14 @@ final class Box {
     required this.name,
     required NativeDxtrApi api,
     required bool lazy,
-  })  : _api = api,
-        _lazy = lazy;
+  }) : _api = api,
+       _lazy = lazy;
 
   final String name;
   final NativeDxtrApi _api;
   final bool _lazy;
-  final StreamController<BoxEvent> _events = StreamController<BoxEvent>.broadcast(sync: true);
+  final StreamController<BoxEvent> _events =
+      StreamController<BoxEvent>.broadcast(sync: true);
 
   List<String> _keys = const <String>[];
   bool _closed = false;
@@ -47,7 +48,9 @@ final class Box {
     if (!_keys.contains(key)) {
       _keys = List<String>.unmodifiable(<String>[..._keys, key]);
     }
-    _events.add(BoxEvent(boxName: name, type: BoxEventType.put, key: key, value: value));
+    _events.add(
+      BoxEvent(boxName: name, type: BoxEventType.put, key: key, value: value),
+    );
   }
 
   Future<void> putAll(Map<String, dynamic> entries) async {
@@ -61,7 +64,14 @@ final class Box {
     final set = <String>{..._keys, ...entries.keys};
     _keys = List<String>.unmodifiable(set);
     for (final entry in entries.entries) {
-      _events.add(BoxEvent(boxName: name, type: BoxEventType.put, key: entry.key, value: entry.value));
+      _events.add(
+        BoxEvent(
+          boxName: name,
+          type: BoxEventType.put,
+          key: entry.key,
+          value: entry.value,
+        ),
+      );
     }
   }
 
@@ -100,7 +110,9 @@ final class Box {
     await _events.close();
   }
 
-  Future<List<MapEntry<String, dynamic>>> where(bool Function(dynamic) test) async {
+  Future<List<MapEntry<String, dynamic>>> where(
+    bool Function(dynamic) test,
+  ) async {
     _ensureOpen();
     final result = <MapEntry<String, dynamic>>[];
     for (final key in _keys) {
@@ -113,7 +125,9 @@ final class Box {
   Stream<BoxEvent> watch({String? key}) {
     _ensureOpen();
     if (key == null) return _events.stream;
-    return _events.stream.where((event) => event.key == key || event.type == BoxEventType.clear);
+    return _events.stream.where(
+      (event) => event.key == key || event.type == BoxEventType.clear,
+    );
   }
 
   bool get lazy => _lazy;
@@ -123,6 +137,8 @@ final class Box {
   }
 
   static void _validateKey(String key) {
-    if (key.isEmpty) throw ArgumentError.value(key, 'key', 'Key cannot be empty');
+    if (key.isEmpty) {
+      throw ArgumentError.value(key, 'key', 'Key cannot be empty');
+    }
   }
 }
