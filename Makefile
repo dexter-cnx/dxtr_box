@@ -1,10 +1,11 @@
-.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-test process-crash benchmark-smoke benchmark-full preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-test process-crash benchmark-smoke benchmark-full preflight example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
 FRB ?= flutter_rust_bridge_codegen
 BENCHMARK_OPS ?= 200
 BENCHMARK_FULL_OPS ?= 5000
+SIZE_STABILITY_RUNS ?= 3
 
 help:
 	@echo "dxtr_box developer targets"
@@ -14,6 +15,7 @@ help:
 	@echo "  make native-build-minimal Build core CRUD/lifecycle/watch only"
 	@echo "  make native-build-encryption Build minimal + encrypted open/create"
 	@echo "  make native-size-baseline Measure minimal/encryption/full native artifacts"
+	@echo "  make native-size-stability Repeat profile builds and verify same-run size stability"
 	@echo "  make process-crash        Process-kill + reopen durability test"
 	@echo "  make benchmark-smoke      dxtr_box vs hive_ce smoke benchmark"
 	@echo "  make benchmark-full       Larger local benchmark run"
@@ -67,6 +69,9 @@ native-build-encryption:
 
 native-size-baseline:
 	bash tool/native_size_baseline.sh
+
+native-size-stability:
+	DXTR_BOX_SIZE_RUNS=$(SIZE_STABILITY_RUNS) bash tool/native_size_stability.sh
 
 native-test: pub-get native-build
 	DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test test/native_integration_test.dart --reporter expanded
