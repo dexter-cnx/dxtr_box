@@ -1,5 +1,5 @@
 [package]
-name = "dxtr_box_rust"
+name = "rust_lib_dxtr_box"
 version = "0.1.0"
 edition = "2021"
 publish = false
