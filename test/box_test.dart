@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dxtr_box/src/box_event.dart';
@@ -51,6 +52,23 @@ void main() {
     expect(second.length, 3);
   });
 
+  test('concurrent close calls share one native teardown', () async {
+    final first = await DxtrBox.open('shared-close');
+    final second = await DxtrBox.open('shared-close');
+    api.pauseClose();
+
+    final firstClose = first.close();
+    final duplicateClose = first.close();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(api.closeCalls, 1);
+    api.resumeClose();
+    await Future.wait(<Future<void>>[firstClose, duplicateClose]);
+
+    await second.put('still-open', 1);
+    expect(await second.get('still-open'), 1);
+  });
+
   test('get returns default value for a missing key', () async {
     final box = await DxtrBox.open('settings');
     expect(await box.get('missing', defaultValue: 'fallback'), 'fallback');
@@ -100,7 +118,7 @@ void main() {
     await expectLater(box.get('key'), throwsStateError);
   });
 
-  test('changing base path is blocked while a box is open', () async {
+  test('changing base path is blocked by the native engine while open', () async {
     final box = await DxtrBox.open('active');
 
     await expectLater(
@@ -152,9 +170,19 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   final Map<String, int> _openCounts = <String, int>{};
   int closeCalls = 0;
   String? lastInitPath;
+  Completer<void>? _closeBarrier;
 
   void seed(String boxName, Map<String, Uint8List> values) {
     _boxes[boxName] = Map<String, Uint8List>.from(values);
+  }
+
+  void pauseClose() {
+    _closeBarrier = Completer<void>();
+  }
+
+  void resumeClose() {
+    _closeBarrier?.complete();
+    _closeBarrier = null;
   }
 
   Map<String, Uint8List> _box(String name) =>
@@ -168,6 +196,9 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
 
   @override
   Future<void> initDb(String path) async {
+    if (lastInitPath != null && lastInitPath != path && _openCounts.isNotEmpty) {
+      throw StateError('cannot change base path while boxes are open');
+    }
     lastInitPath = path;
   }
 
@@ -180,6 +211,9 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   @override
   Future<void> closeBox(String name) async {
     closeCalls += 1;
+    final barrier = _closeBarrier;
+    if (barrier != null) await barrier.future;
+
     final remaining = (_openCounts[name] ?? 1) - 1;
     if (remaining == 0) {
       _openCounts.remove(name);
