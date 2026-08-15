@@ -13,17 +13,14 @@ final class Box {
   Box.internal({
     required this.name,
     required NativeDxtrApi api,
-    required bool lazy,
     required BoxMetadata metadata,
     required void Function() onClose,
   })  : _api = api,
-        _lazy = lazy,
         _metadata = metadata,
         _onClose = onClose;
 
   final String name;
   final NativeDxtrApi _api;
-  final bool _lazy;
   final BoxMetadata _metadata;
   final void Function() _onClose;
   final StreamController<BoxEvent> _events =
@@ -159,8 +156,6 @@ final class Box {
       (event) => event.key == key || event.type == BoxEventType.clear,
     );
   }
-
-  bool get lazy => _lazy;
 
   void _ensureOpen() {
     if (_closed) throw StateError('Box "$name" is closed.');
