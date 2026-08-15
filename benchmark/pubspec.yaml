@@ -1,0 +1,17 @@
+name: dxtr_box_benchmark
+publish_to: none
+
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+  flutter: '>=3.24.0'
+
+dependencies:
+  dxtr_box:
+    path: ..
+  flutter:
+    sdk: flutter
+  hive_ce: ^2.19.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
