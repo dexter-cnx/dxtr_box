@@ -36,6 +36,19 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Normalize temporary patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tool/apply_query_index_db_patch.py')
+          text = path.read_text()
+          old = '        return index::list(&db).map(|definitions| {'
+          new = '        index::list(&db).map(|definitions| {'
+          if old not in text:
+              raise SystemExit('expected list_indexes return pattern not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Apply transactional index integration
         run: python3 tool/apply_query_index_db_patch.py
 
