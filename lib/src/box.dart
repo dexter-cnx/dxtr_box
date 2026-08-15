@@ -170,13 +170,13 @@ final class Box {
   /// Executes the complete declarative query in one native boundary crossing.
   Future<List<MapEntry<String, dynamic>>> query(BoxQuery query) async {
     _ensureOpen();
-    final api = _api;
-    if (api is! NativeQueryApi) {
+    if (_api is! NativeQueryApi) {
       throw UnsupportedError(
           'The configured native engine does not support queries.');
     }
+    final queryApi = _api as NativeQueryApi;
     final records =
-        await api.scanQuery(name, DxtrCodec.encode(_queryWire(query)));
+        await queryApi.scanQuery(name, DxtrCodec.encode(_queryWire(query)));
     return records
         .map(
           (record) => MapEntry<String, dynamic>(
