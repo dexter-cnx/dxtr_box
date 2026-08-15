@@ -29,8 +29,10 @@ final class Box {
   final StreamController<BoxEvent> _events =
       StreamController<BoxEvent>.broadcast(sync: true);
 
+  final List<NativeWatchEvent> _pendingWatchEvents = <NativeWatchEvent>[];
   StreamSubscription<NativeWatchEvent>? _nativeWatchSubscription;
   bool _nativeWatchRegistered = false;
+  bool _metadataHydrated = false;
   bool _closed = false;
   Future<void>? _closeFuture;
 
@@ -76,11 +78,25 @@ final class Box {
     if (subscription != null) {
       await subscription.cancel();
     }
+    _pendingWatchEvents.clear();
   }
 
   Future<void> refreshMetadata() async {
     _ensureOpen();
-    _metadata.keys = List<String>.unmodifiable(await _api.getAllKeys(name));
+    final snapshot = await _api.getAllKeys(name);
+    _metadata.keys = List<String>.unmodifiable(snapshot);
+
+    // Events can arrive after watch registration but before the metadata read
+    // completes. Replaying them after assigning the snapshot prevents a stale
+    // snapshot from overwriting a committed mutation. Key transformations are
+    // idempotent, so replay is correct whether the snapshot was taken before,
+    // during, or after any buffered event.
+    _metadataHydrated = true;
+    final pending = List<NativeWatchEvent>.of(_pendingWatchEvents);
+    _pendingWatchEvents.clear();
+    for (final event in pending) {
+      _applyNativeWatchEvent(event);
+    }
   }
 
   Future<void> put(String key, dynamic value) async {
@@ -182,7 +198,14 @@ final class Box {
     if (_closed || event.boxName != name) {
       return;
     }
+    if (!_metadataHydrated) {
+      _pendingWatchEvents.add(event);
+      return;
+    }
+    _applyNativeWatchEvent(event);
+  }
 
+  void _applyNativeWatchEvent(NativeWatchEvent event) {
     switch (event.type) {
       case NativeWatchEventType.put:
         final key = event.key;
