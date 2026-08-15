@@ -50,7 +50,9 @@ The minimum-SDK lane must run at least:
 
 This lane exists to catch accidental use of newer language features, SDK APIs, or dependency upgrades that silently raise the real compatibility floor.
 
-Dev dependencies are part of this check. For example, `flutter_lints 5.x` requires Flutter 3.24 / Dart 3.5, so the project uses a compatible 4.x line while Flutter 3.22 / Dart 3.4 remains the declared minimum.
+Dev dependencies that are required to validate the root package are part of this check. `flutter_lints 5.x`, for example, requires Flutter 3.24 / Dart 3.5, so the root package uses a compatible 4.x line while Flutter 3.22 / Dart 3.4 remains the declared minimum.
+
+Benchmark-only dependencies are intentionally not part of the root package compatibility surface. The current `hive_ce` benchmark lives in the separate `benchmark/` package because Hive CE 2.19.x requires a newer `meta` range than the Flutter 3.22 SDK pins through its SDK test packages. Keeping the benchmark isolated lets dxtr_box prove its lower SDK floor without downgrading the comparison target to an obsolete Hive CE release.
 
 A future minimum-SDK increase should be intentional, documented in the handoff/changelog, and accompanied by a CI update. Dart 3.13 native tree shaking is explicitly not a reason to raise the floor today; see `docs/FUTURE_NATIVE_TREE_SHAKING.md`.
 
@@ -169,9 +171,11 @@ The test deliberately makes **no guarantee for writes that had not returned succ
 
 ## Benchmark smoke harness
 
-File: `test/benchmark_smoke_test.dart`
+Package: `benchmark/`
 
-Comparison dependency: `hive_ce`.
+Test file: `benchmark/test/benchmark_smoke_test.dart`
+
+Comparison dependency: current `hive_ce` line used by the benchmark package.
 
 Run the CI-sized smoke workload:
 
@@ -191,6 +195,8 @@ Override operation counts when needed:
 make benchmark-smoke BENCHMARK_OPS=500
 make benchmark-full BENCHMARK_FULL_OPS=10000
 ```
+
+The benchmark package depends on the root `dxtr_box` package by local path but resolves its own benchmark-only dependencies. This separation is deliberate: benchmark tooling must not silently raise the SDK floor of the library being benchmarked.
 
 Current scenarios use the same logical payload shape and operation count for both engines:
 
@@ -222,26 +228,25 @@ Workflow: `.github/workflows/ci.yml`
 ### Minimum SDK job — Ubuntu
 
 - install Flutter 3.22.0 / Dart 3.4.0
-- `flutter pub get`
+- `flutter pub get` for the root package only
 - `flutter analyze`
 - `flutter test`
 
-This job is the compatibility contract for the declared lower bound.
+This job is the compatibility contract for the declared lower bound. It intentionally does not resolve the separate benchmark package.
 
 ### Current Flutter job — Ubuntu
 
 - install current stable Flutter
 - `flutter pub get`
-- formatting check
+- formatting check, including `benchmark/test`
 - `flutter analyze`
 - `flutter test`
-
-Benchmark smoke is skipped in the general Flutter test job unless explicitly enabled.
 
 ### Native Linux job
 
 - build the Rust release library
-- run Dart -> FRB -> Rust native integration tests
+- run Dart -> FRB -> Rust native integration tests from the root package
+- resolve the separate `benchmark/` package on current stable Flutter
 - run the `hive_ce` benchmark smoke harness with a deliberately small operation count
 
 The benchmark step is an execution/regression check, not a performance threshold gate.
