@@ -172,9 +172,11 @@ final class Box {
     _ensureOpen();
     final api = _api;
     if (api is! NativeQueryApi) {
-      throw UnsupportedError('The configured native engine does not support queries.');
+      throw UnsupportedError(
+          'The configured native engine does not support queries.');
     }
-    final records = await api.scanQuery(name, DxtrCodec.encode(_queryWire(query)));
+    final records =
+        await api.scanQuery(name, DxtrCodec.encode(_queryWire(query)));
     return records
         .map(
           (record) => MapEntry<String, dynamic>(
