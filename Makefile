@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-check frb-generate native-build native-test process-crash benchmark-smoke benchmark-full preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-test process-crash benchmark-smoke benchmark-full preflight example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -8,13 +8,16 @@ BENCHMARK_FULL_OPS ?= 5000
 
 help:
 	@echo "dxtr_box developer targets"
-	@echo "  make preflight      Format check + analyze + Dart/Rust tests"
-	@echo "  make frb-generate   Refresh flutter_rust_bridge bindings"
-	@echo "  make native-test    Native FRB round-trip test"
-	@echo "  make process-crash  Process-kill + reopen durability test"
-	@echo "  make benchmark-smoke  dxtr_box vs hive_ce smoke benchmark"
-	@echo "  make benchmark-full   Larger local benchmark run"
-	@echo "  make rust-check     rustfmt + clippy + Rust tests"
+	@echo "  make preflight            Format check + analyze + Dart/Rust tests"
+	@echo "  make frb-generate         Refresh flutter_rust_bridge bindings"
+	@echo "  make native-test          Native FRB round-trip test"
+	@echo "  make native-build-minimal Build core CRUD/lifecycle/watch only"
+	@echo "  make native-build-encryption Build minimal + encrypted open/create"
+	@echo "  make native-size-baseline Measure minimal/encryption/full native artifacts"
+	@echo "  make process-crash        Process-kill + reopen durability test"
+	@echo "  make benchmark-smoke      dxtr_box vs hive_ce smoke benchmark"
+	@echo "  make benchmark-full       Larger local benchmark run"
+	@echo "  make rust-check           rustfmt + clippy + all native feature profiles"
 
 pub-get:
 	$(FLUTTER) pub get
@@ -42,7 +45,12 @@ rust-clippy:
 rust-test:
 	$(CARGO) test --manifest-path rust/Cargo.toml --all-targets
 
-rust-check: rust-fmt rust-clippy rust-test
+rust-test-profiles:
+	$(CARGO) test --manifest-path rust/Cargo.toml --all-targets --no-default-features
+	$(CARGO) test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
+	$(CARGO) test --manifest-path rust/Cargo.toml --all-targets
+
+rust-check: rust-fmt rust-clippy rust-test-profiles
 
 frb-generate: pub-get
 	$(FRB) generate
@@ -50,6 +58,15 @@ frb-generate: pub-get
 
 native-build:
 	$(CARGO) build --manifest-path rust/Cargo.toml --release
+
+native-build-minimal:
+	$(CARGO) build --manifest-path rust/Cargo.toml --release --no-default-features
+
+native-build-encryption:
+	$(CARGO) build --manifest-path rust/Cargo.toml --release --no-default-features --features encryption
+
+native-size-baseline:
+	bash tool/native_size_baseline.sh
 
 native-test: pub-get native-build
 	DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test test/native_integration_test.dart --reporter expanded
