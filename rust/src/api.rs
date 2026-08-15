@@ -105,9 +105,21 @@ pub fn delete_box(name: String) -> Result<(), String> {
 
 #[frb(sync)]
 pub fn encrypt_box(name: String, encryption_key: String) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&name);
-    let _mutation_guard = mutation_lock.lock();
-    db::encrypt_box(&name, &encryption_key)
+    #[cfg(all(feature = "encryption", feature = "maintenance"))]
+    {
+        let mutation_lock = mutation_lock(&name);
+        let _mutation_guard = mutation_lock.lock();
+        db::encrypt_box(&name, &encryption_key)
+    }
+
+    #[cfg(not(all(feature = "encryption", feature = "maintenance")))]
+    {
+        let _ = (name, encryption_key);
+        Err(
+            "plaintext encryption migration requires native features 'encryption' and 'maintenance'"
+                .to_string(),
+        )
+    }
 }
 
 #[frb(sync)]
@@ -235,9 +247,18 @@ pub fn clear(box_name: String) -> Result<(), String> {
 }
 
 pub fn compact(box_name: String) -> Result<bool, String> {
-    let mutation_lock = mutation_lock(&box_name);
-    let _mutation_guard = mutation_lock.lock();
-    db::compact(&box_name)
+    #[cfg(feature = "maintenance")]
+    {
+        let mutation_lock = mutation_lock(&box_name);
+        let _mutation_guard = mutation_lock.lock();
+        db::compact(&box_name)
+    }
+
+    #[cfg(not(feature = "maintenance"))]
+    {
+        let _ = box_name;
+        Err("compaction requires native feature 'maintenance'".to_string())
+    }
 }
 
 pub fn get_all_keys(box_name: String) -> Result<Vec<String>, String> {

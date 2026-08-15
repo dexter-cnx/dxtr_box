@@ -27,8 +27,9 @@ Run the Rust checks directly:
 ```bash
 cargo fmt --manifest-path rust/Cargo.toml -- --check
 cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features
+cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
 cargo test --manifest-path rust/Cargo.toml --all-targets
-cargo test --manifest-path rust/Cargo.toml --all-targets --features encryption
 ```
 
 ## Minimum SDK compatibility
@@ -187,11 +188,11 @@ This test proves a stronger boundary than ordinary `close()` / reopen coverage:
 
 1. The parent creates a temporary database directory.
 2. A child instance of the Rust test executable initializes the directory.
-3. The child opens plaintext and encrypted boxes.
+3. The child always opens a plaintext box; builds with the `encryption` feature also open an encrypted box.
 4. The child completes several committed transactions.
 5. Only after the final committed write returns, the child prints `DXTR_BOX_COMMITTED` and flushes stdout.
 6. The parent receives that marker and kills the child process while both boxes remain open.
-7. A fresh process context reopens the same files and verifies all previously committed plaintext and encrypted values.
+7. A fresh process context reopens the same files and verifies all previously committed plaintext values plus encrypted values when the `encryption` feature is enabled.
 
 The test deliberately makes **no guarantee for writes that had not returned successfully before termination**. It validates recovery of acknowledged commits, which is the contract dxtr_box should claim at this stage.
 
@@ -298,11 +299,16 @@ Runs on:
 Each host runs:
 
 - rustfmt check
-- clippy with warnings denied
-- default-feature tests
-- encryption-feature tests
+- clippy with warnings denied on the default/full profile
+- minimal tests with `--no-default-features`
+- encryption tests with `--no-default-features --features encryption`
+- full/default tests
 
-`cargo test --all-targets` includes the process-kill integration test, giving crash/reopen coverage on every supported Rust CI host where the test process can be killed normally.
+`cargo test --all-targets` includes the process-kill integration test. Minimal validates plaintext acknowledged-commit recovery; encryption/full additionally validate encrypted recovery.
+
+### Native size baseline job
+
+Linux x86_64 builds minimal, encryption, and full release libraries into isolated Cargo target directories and records exact bytes plus toolchain/environment metadata in `native-size-baseline.tsv`. PR #12 CI #144 measured 1,893,736 / 1,992,296 / 2,032,312 bytes respectively. The artifact contains only the TSV metadata file, not Cargo target directories.
 
 ## Platform build validation
 

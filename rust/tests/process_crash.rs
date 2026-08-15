@@ -43,22 +43,25 @@ fn child_workload() {
     )
     .expect("third committed transaction");
 
-    open_box(
-        "secure".to_string(),
-        Some("crash-reopen-secret".to_string()),
-    )
-    .expect("open encrypted box");
-    put(
-        "secure".to_string(),
-        "token".to_string(),
-        encoded(&"encrypted-committed"),
-    )
-    .expect("encrypted committed write");
+    #[cfg(feature = "encryption")]
+    {
+        open_box(
+            "secure".to_string(),
+            Some("crash-reopen-secret".to_string()),
+        )
+        .expect("open encrypted box");
+        put(
+            "secure".to_string(),
+            "token".to_string(),
+            encoded(&"encrypted-committed"),
+        )
+        .expect("encrypted committed write");
+    }
 
     println!("{COMMITTED_MARKER}");
     std::io::stdout().flush().expect("flush committed marker");
 
-    // Keep both boxes open. The parent kills this process after seeing the
+    // Keep the boxes open. The parent kills this process after seeing the
     // marker, so no Box close / redb Database drop path is exercised here.
     loop {
         thread::sleep(Duration::from_secs(60));
@@ -122,14 +125,17 @@ fn process_crash_recovers_committed_plaintext_and_encrypted_state() {
     );
     close_box("plain".to_string()).expect("close reopened plaintext box");
 
-    open_box(
-        "secure".to_string(),
-        Some("crash-reopen-secret".to_string()),
-    )
-    .expect("reopen encrypted box after process kill");
-    assert_eq!(
-        get("secure".to_string(), "token".to_string()).expect("read encrypted token"),
-        Some(encoded(&"encrypted-committed"))
-    );
-    close_box("secure".to_string()).expect("close reopened encrypted box");
+    #[cfg(feature = "encryption")]
+    {
+        open_box(
+            "secure".to_string(),
+            Some("crash-reopen-secret".to_string()),
+        )
+        .expect("reopen encrypted box after process kill");
+        assert_eq!(
+            get("secure".to_string(), "token".to_string()).expect("read encrypted token"),
+            Some(encoded(&"encrypted-committed"))
+        );
+        close_box("secure".to_string()).expect("close reopened encrypted box");
+    }
 }

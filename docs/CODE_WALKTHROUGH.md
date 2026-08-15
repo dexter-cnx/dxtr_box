@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current 0.1.x native foundation from the Flutter API down to redb, including native watch fan-out, persisted encryption, explicit plaintext -> encrypted migration, bulk deletion, compaction, crash durability, and the benchmark seam.
+This walkthrough describes the current 0.1.x native foundation from the Flutter API down to redb, including native watch fan-out, persisted encryption, explicit plaintext -> encrypted migration, bulk deletion, compaction, crash durability, native feature profiles, binary-size baselines, and the benchmark seam.
 
 ## 1. Package boundary
 
@@ -302,7 +302,7 @@ Files:
 - `rust/src/db.rs`
 - `rust/Cargo.toml`
 
-The standard native build currently enables the `encryption` Cargo feature by default.
+The standard native build uses the `full` Cargo profile by default. Reduced `minimal` and `encryption` profiles are validated separately in CI without changing the public Dart SDK floor.
 
 ### Metadata contract
 
@@ -365,7 +365,7 @@ Migration does not emit `BoxEvent`s because live box handles are forbidden durin
 
 ## 11. Crash durability and benchmarks
 
-`rust/tests/process_crash.rs` kills a writer process after acknowledged commits and verifies a fresh process can reopen committed plaintext and encrypted data. The project makes no durability claim for an operation that had not returned successfully before termination.
+`rust/tests/process_crash.rs` kills a writer process after acknowledged commits and verifies a fresh process can reopen committed plaintext data in `minimal`; `encryption` and `full` additionally verify committed encrypted data. The project makes no durability claim for an operation that had not returned successfully before termination.
 
 The separate `benchmark/` package compares equal logical workloads against current Hive CE without raising the root package's Dart/Flutter compatibility floor. Shared-runner timing is informational; CI checks harness execution, not performance thresholds.
 
@@ -397,7 +397,7 @@ rust/tests/process_crash.rs
   acknowledged-commit process-kill recovery
 ```
 
-CI also runs generated-FRB drift detection, Rust fmt/clippy/tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, and the five-platform Flutter example build matrix.
+CI also runs generated-FRB drift detection, Rust fmt/clippy plus minimal/encryption/full profile tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, a Linux x86_64 native-size baseline job, and the five-platform Flutter example build matrix.
 
 ## 13. Developer entry points
 
@@ -411,6 +411,9 @@ make process-crash
 make benchmark-smoke
 make benchmark-full
 make rust-check
+make native-build-minimal
+make native-build-encryption
+make native-size-baseline
 make example-android
 make example-linux
 make example-windows
@@ -418,14 +421,25 @@ make example-macos
 make example-ios
 ```
 
-## 14. Next architectural step
+`make native-size-baseline` builds all three release profiles in isolated Cargo target directories and records exact artifact bytes plus environment/toolchain metadata in `build/native-size/native-size-baseline.tsv`.
 
-After the public migration completion lands, the active sequence is:
+## 14. Native feature profiles and next architectural step
 
-1. split optional Rust functionality into Cargo features with a clear minimal CRUD profile;
-2. establish reproducible binary-size baselines for minimal CRUD, CRUD+encryption, and full-feature builds;
-3. add binary-size regression CI only after the measurements are stable enough to be meaningful;
-4. begin 0.3 query/index work after storage/bridge hardening;
-5. before 1.0 RC, execute the full Hive Functional Parity Audit and close every practical `Gap`.
+PR #12 establishes three product-relevant profiles:
+
+```text
+minimal     = CRUD + lifecycle + native watch
+encryption  = minimal + encrypted create/open/read/write
+full        = encryption + maintenance (compact + plaintext migration)
+```
+
+The validated Linux x86_64 release-library baseline is 1,893,736 bytes for minimal, 1,992,296 bytes for encryption, and 2,032,312 bytes for full. These measurements are informational and platform-specific.
+
+The active sequence after PR #12 is:
+
+1. collect repeated size measurements before introducing a regression threshold;
+2. begin 0.3 query/index work while preserving the three-profile contract;
+3. add binary-size regression CI only when the baseline is stable enough to be meaningful;
+4. before 1.0 RC, execute the full Hive Functional Parity Audit and close every practical `Gap`.
 
 Dart 3.13 recorded-use/native tree shaking remains future-only and must not raise the Dart 3.4 / Flutter 3.22 compatibility floor. See `docs/FUTURE_NATIVE_TREE_SHAKING.md`.

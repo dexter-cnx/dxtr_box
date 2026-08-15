@@ -104,6 +104,32 @@ Values are fetched from native storage on demand rather than cached wholesale in
 
 Native build ownership lives in the checked-in `rust_builder/` Cargokit plugin. The root package is the Dart-facing facade and intentionally has no duplicate platform plugin scaffolds.
 
+### Native feature profiles
+
+The default production native build remains `full` so current Flutter/Cargokit behavior does not change. Reduced profiles exist for intentional payload control and measurement:
+
+| Profile | Cargo flags | Contract |
+| --- | --- | --- |
+| `minimal` | `--no-default-features` | CRUD + lifecycle + native watch |
+| `encryption` | `--no-default-features --features encryption` | minimal + encrypted create/open/read/write |
+| `full` | default features | encryption + maintenance (`compact`, plaintext -> encrypted migration) |
+
+Native watch remains part of `minimal` because the current public `DxtrBox.open()` lifecycle registers a watcher before metadata hydration. Removing watch from the minimal profile would make the normal public Box lifecycle unusable.
+
+The FRB symbol surface stays stable across profiles. If a reduced native build receives a call for functionality it does not contain, the operation fails explicitly rather than silently no-oping. In particular, `compact()` requires `maintenance`, and plaintext -> encrypted migration requires both `encryption` and `maintenance`.
+
+PR #12 CI #144 validated the first same-run Linux x86_64 release-library baseline:
+
+| Profile | Bytes | Delta vs minimal |
+| --- | ---: | ---: |
+| `minimal` | 1,893,736 | baseline |
+| `encryption` | 1,992,296 | +98,560 (+5.2%) |
+| `full` | 2,032,312 | +138,576 (+7.3%) |
+
+These measurements are specific to that Linux x86_64 CI environment and are informational, not cross-platform package-size claims. CI retains only the `native-size-baseline.tsv` metadata artifact; Cargo target directories are not uploaded. No absolute size threshold is enforced until repeated controlled measurements are stable enough to justify a regression gate.
+
+See [`docs/NATIVE_FEATURE_PROFILES.md`](docs/NATIVE_FEATURE_PROFILES.md) and [`docs/CARGO_FEATURE_SIZE_HANDOFF.md`](docs/CARGO_FEATURE_SIZE_HANDOFF.md).
+
 ### Encryption storage contract
 
 Encrypted boxes persist metadata in a dedicated redb `meta` table:
@@ -126,19 +152,24 @@ make preflight
 make native-test
 make process-crash
 make benchmark-smoke
+make native-build-minimal
+make native-build-encryption
+make native-size-baseline
 ```
 
 Additional targets cover FRB regeneration, Rust-only checks, a larger local benchmark run, and per-platform example builds.
 
 ## Engineering docs
 
-- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, encryption, deleteAll, compaction, and migration flow.
-- [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmark methodology, local commands, and CI gates.
+- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, encryption, deleteAll, compaction, migration, and native profile flow.
+- [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmark methodology, local commands, profile matrix, and CI gates.
+- [Native feature profiles](docs/NATIVE_FEATURE_PROFILES.md) — minimal/encryption/full Cargo contracts, measured Linux x86_64 baseline, and reduced-profile behavior.
+- [Cargo feature + size handoff](docs/CARGO_FEATURE_SIZE_HANDOFF.md) — feature/profile design and binary-size baseline acceptance trail.
 - [Plaintext -> encrypted migration](docs/PLAINTEXT_ENCRYPTION_MIGRATION.md) — explicit API, atomicity, lifecycle, and recovery contract.
 - [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
 - [Future native tree shaking](docs/FUTURE_NATIVE_TREE_SHAKING.md) — why Dart 3.13 native tree shaking is useful later, why it is deferred now, and the compatibility gate for revisiting it.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
-- [CI workflow](.github/workflows/ci.yml) — minimum-SDK compatibility, current Flutter analyze/test, native Linux round-trip + benchmark smoke, FRB drift detection, and Rust host-matrix checks.
+- [CI workflow](.github/workflows/ci.yml) — minimum-SDK compatibility, current Flutter analyze/test, native Linux round-trip + benchmark smoke, FRB drift detection, native profile matrix, and Linux size baseline capture.
 - [Platform builds](.github/workflows/platform_builds.yml) — Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Test suite
@@ -159,7 +190,8 @@ Current coverage includes:
 - a `hive_ce` benchmark smoke harness for equal logical workloads; timing is informational, not a CI pass/fail threshold.
 - encryption tests for unique persisted salts, authenticated value round-trip, on-disk ciphertext, wrong keys, tampering, plaintext/encrypted mode mismatch, and migration failure safety.
 - generated FRB binding drift detection in CI.
-- Rust fmt/clippy/tests on Ubuntu, macOS, and Windows.
+- minimal, encryption, and full Rust profile builds/tests on Ubuntu, macOS, and Windows.
+- Linux x86_64 same-run native binary-size capture for all three profiles.
 - example compilation on Android, iOS without code signing, macOS, Linux, and Windows.
 
 ## Roadmap
@@ -184,9 +216,9 @@ Current coverage includes:
 
 ### 0.2.0 — Hive parity foundation
 
-- Cargo feature splitting for optional functionality
+- Cargo feature splitting for optional functionality — implemented in PR #12
 - retained benchmark result format and file-size reporting
-- binary-size baselines for minimal CRUD, CRUD+encryption, and full feature builds
+- binary-size baselines for minimal CRUD, CRUD+encryption, and full feature builds — first Linux x86_64 baseline implemented in PR #12
 
 ### 0.3.0 — Query & migration
 
@@ -197,7 +229,7 @@ Current coverage includes:
 
 ### 0.4.0 — Production hardening
 
-- binary-size regression checks
+- binary-size regression checks after repeated baseline validation
 - package-quality hardening
 - comparison vs hive_ce / isar_community / objectbox / drift
 

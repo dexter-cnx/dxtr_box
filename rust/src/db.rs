@@ -63,22 +63,22 @@ impl EncryptionState {
         }
     }
 
-    fn encode_value(&self, record_key: &str, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    fn encode_value(&self, _record_key: &str, plaintext: &[u8]) -> Result<Vec<u8>, String> {
         match self {
             Self::Plain => Ok(plaintext.to_vec()),
             #[cfg(feature = "encryption")]
             Self::Encrypted { key, .. } => {
-                crypto::encrypt_with_aad(key, record_key.as_bytes(), plaintext)
+                crypto::encrypt_with_aad(key, _record_key.as_bytes(), plaintext)
             }
         }
     }
 
-    fn decode_value(&self, record_key: &str, stored: &[u8]) -> Result<Vec<u8>, String> {
+    fn decode_value(&self, _record_key: &str, stored: &[u8]) -> Result<Vec<u8>, String> {
         match self {
             Self::Plain => Ok(stored.to_vec()),
             #[cfg(feature = "encryption")]
             Self::Encrypted { key, .. } => {
-                crypto::decrypt_with_aad(key, record_key.as_bytes(), stored)
+                crypto::decrypt_with_aad(key, _record_key.as_bytes(), stored)
                     .map_err(|_| "encrypted value authentication failed".to_string())
             }
         }
@@ -429,6 +429,7 @@ pub fn box_exists(name: &str) -> Result<bool, String> {
     Ok(file_path(name)?.exists())
 }
 
+#[cfg(all(feature = "encryption", feature = "maintenance"))]
 pub fn encrypt_box(name: &str, encryption_key: &str) -> Result<(), String> {
     validate_name(name)?;
     if encryption_key.is_empty() {
@@ -648,6 +649,7 @@ pub fn clear(name: &str) -> Result<(), String> {
     write.commit().map_err(|e| e.to_string())
 }
 
+#[cfg(feature = "maintenance")]
 pub fn compact(name: &str) -> Result<bool, String> {
     let entry = {
         let mut databases = DATABASES.write();
@@ -787,6 +789,7 @@ mod tests {
         close("batch-delete");
     }
 
+    #[cfg(feature = "maintenance")]
     #[test]
     fn compact_requires_a_single_idle_handle() {
         let _guard = TEST_LOCK.lock();
@@ -921,7 +924,7 @@ mod tests {
         assert!(get("temporary", "k").is_err());
     }
 
-    #[cfg(feature = "encryption")]
+    #[cfg(all(feature = "encryption", feature = "maintenance"))]
     #[test]
     fn plaintext_box_migrates_to_encrypted_atomically() {
         let _guard = TEST_LOCK.lock();
@@ -961,7 +964,7 @@ mod tests {
         close("migrate");
     }
 
-    #[cfg(feature = "encryption")]
+    #[cfg(all(feature = "encryption", feature = "maintenance"))]
     #[test]
     fn migration_rejects_open_missing_already_encrypted_and_empty_key() {
         let _guard = TEST_LOCK.lock();
@@ -977,7 +980,7 @@ mod tests {
         assert!(encrypt_box("already-secure", "new-key").is_err());
     }
 
-    #[cfg(feature = "encryption")]
+    #[cfg(all(feature = "encryption", feature = "maintenance"))]
     #[test]
     fn migration_validation_failure_preserves_plaintext_state() {
         let _guard = TEST_LOCK.lock();

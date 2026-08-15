@@ -169,6 +169,32 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
         run: flutter test test/benchmark_smoke_test.dart --reporter expanded
 
+  native-size:
+    name: Native size / Linux x64 profiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+
+      - name: Measure minimal, encryption, and full profiles
+        run: bash tool/native_size_baseline.sh
+
+      - name: Upload native size baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-size-linux-x64
+          path: build/native-size/native-size-baseline.tsv
+          if-no-files-found: error
+          retention-days: 14
+
   rust:
     name: Rust / ${{ matrix.os }}
     strategy:
@@ -176,7 +202,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -192,11 +218,14 @@ jobs:
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml -- --check
 
-      - name: Clippy
+      - name: Clippy full profile
         run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
 
-      - name: Test default features
-        run: cargo test --manifest-path rust/Cargo.toml --all-targets
+      - name: Test minimal profile
+        run: cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features
 
-      - name: Test encryption feature compiles and passes
-        run: cargo test --manifest-path rust/Cargo.toml --all-targets --features encryption
+      - name: Test encryption profile
+        run: cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
+
+      - name: Test full profile
+        run: cargo test --manifest-path rust/Cargo.toml --all-targets
