@@ -310,11 +310,10 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   ) async {
     _requireOpen(boxName);
     final controller = StreamController<NativeWatchEvent>.broadcast(sync: true);
-    _watchers
-        .putIfAbsent(
-          boxName,
-          () => <String, StreamController<NativeWatchEvent>>{},
-        )[watcherId] = controller;
+    _watchers.putIfAbsent(
+      boxName,
+      () => <String, StreamController<NativeWatchEvent>>{},
+    )[watcherId] = controller;
     return controller.stream;
   }
 
