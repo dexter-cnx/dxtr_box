@@ -17,17 +17,27 @@ abstract final class DxtrCodec {
   }
 
   static dynamic _toWire(dynamic value) {
-    if (value == null || value is bool || value is int || value is double || value is String) {
+    if (value == null ||
+        value is bool ||
+        value is int ||
+        value is double ||
+        value is String) {
       return value;
     }
     if (value is Uint8List) {
       return <dynamic>['@dxtr:bytes', value];
     }
     if (value is DateTime) {
-      return <dynamic>['@dxtr:datetime', value.toUtc().microsecondsSinceEpoch];
+      return <dynamic>[
+        '@dxtr:datetime',
+        value.toUtc().microsecondsSinceEpoch,
+      ];
     }
     if (value is List) {
-      return <dynamic>['@dxtr:list', value.map(_toWire).toList(growable: false)];
+      return <dynamic>[
+        '@dxtr:list',
+        value.map(_toWire).toList(growable: false),
+      ];
     }
     if (value is Map) {
       final entries = <dynamic>[];
@@ -43,7 +53,7 @@ abstract final class DxtrCodec {
       value,
       'value',
       'Unsupported type ${value.runtimeType}. Supported: null, bool, int, '
-          'double, String, List, Map<String, dynamic>, Uint8List, DateTime.',
+      'double, String, List, Map<String, dynamic>, Uint8List, DateTime.',
     );
   }
 
@@ -55,7 +65,9 @@ abstract final class DxtrCodec {
     final payload = value[1];
     switch (tag) {
       case '@dxtr:bytes':
-        return payload is Uint8List ? payload : Uint8List.fromList(List<int>.from(payload as List));
+        return payload is Uint8List
+            ? payload
+            : Uint8List.fromList(List<int>.from(payload as List));
       case '@dxtr:datetime':
         return DateTime.fromMicrosecondsSinceEpoch(payload as int, isUtc: true);
       case '@dxtr:list':
