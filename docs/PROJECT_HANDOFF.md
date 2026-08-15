@@ -4,163 +4,261 @@
 
 **dxtr_box — The Hive replacement, forged in Rust. By Dxtr.**
 
-Target: a Hive-simple Flutter API backed by redb, with durable storage outside the Dart heap and no app-level model code generation.
+Target: Hive-simple Flutter ergonomics backed by redb, with durable storage outside the Dart heap and no application-level model code generation.
 
-The 1.0 product claim is **functional replacement for practical Hive/Hive CE local-database workloads**, not source-level/drop-in API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` is a release gate: any practical capability classified as `Gap` blocks the 1.0 claim.
+The 1.0 product claim is **functional replacement for practical Hive/Hive CE local-database workloads**, not source-level/drop-in API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` remains a release gate: any practical capability classified as `Gap` blocks the 1.0 claim.
 
-## Current snapshot — 0.1.x native foundation
+## Current snapshot — 0.3 query/index foundation
 
-Implemented on `main` through PR #12, with PR #13 validating same-commit native-size reproducibility before any cross-commit regression budget is introduced:
+PR #14 implements the first executable 0.3 query/index slice on top of the already validated native foundation.
+
+Current public/native capabilities:
 
 - Public Dart facade: `DxtrBox`, `Box`, `BoxEvent`.
 - Minimum compatibility floor: Dart >= 3.4.0 / Flutter >= 3.22.0, verified by dedicated CI.
-- MessagePack wire codec for null/bool/int/double/String/List/Map<String,dynamic>/Uint8List/DateTime.
-- Rust `redb = 2.1.0` engine with one `{box}.dxtr` file per box.
-- Transactional put, putAll, get, contains, delete, deleteAll, clear, keys, length, close, deleteBox, boxExists.
-- Explicit `compact()` backed by redb compaction.
-- Checked-in Flutter Rust Bridge 2.8 bindings with CI drift detection.
-- Cargokit `rust_builder/` integration is the sole native build owner.
-- Production `FrbNativeDxtrApi`; Rust is the default storage engine.
-- Android, iOS, macOS, Linux, and Windows example compilation.
-- Native per-box handle refcounts and multi-handle lifecycle hardening.
-- Shared same-isolate Dart key metadata across handles.
-- Concurrent `Box.close()` calls share one teardown future.
-- `deleteBox` rejects live handles.
-- Repeated init to the same canonical path is idempotent; path switching is rejected while boxes are open.
-- Windows-safe box-name validation.
-- `lazy: true` is explicitly rejected until a real lazy contract exists.
-- Native Rust event fan-out for put/putAll/delete/deleteAll/clear through FRB `StreamSink`.
-- Persisted storage format marker `dxtr_box/1`.
-- Persisted encryption mode `none` or `chacha20poly1305`.
-- Unique random salt per encrypted box, Argon2 key derivation, encrypted key-check sentinel, and ChaCha20Poly1305 value encryption with record-key AAD.
-- Existing plaintext boxes cannot be silently reopened as encrypted.
-- Explicit transactional plaintext -> encrypted migration in Rust.
-- Public `DxtrBox.encryptBox(...)` maintenance API after PR #11.
-- Linux Dart -> FRB -> Rust -> redb encrypted close/reopen and migration coverage.
-- Process-level crash/reopen durability coverage for acknowledged plaintext and encrypted commits.
-- `hive_ce` benchmark smoke harness isolated in `benchmark/` so benchmark dependencies do not raise the root package SDK floor.
-- Root Makefile targets for preflight, native testing, process-crash testing, benchmark smoke/full, FRB regeneration, Rust checks, native profile builds/size measurement, and platform example builds.
-- Native feature profiles: `minimal`, `encryption`, and default `full`.
-- CI validates all three Rust profiles on Ubuntu, macOS, and Windows.
-- Linux x86_64 release-library baseline: minimal 1,893,736 bytes; encryption 1,992,296 bytes; full 2,032,312 bytes.
-- PR #13 CI #151 repeated each profile three times on the same commit/toolchain and measured zero-byte spread for all profiles.
+- MessagePack codec for dynamic Flutter values.
+- Rust `redb = 2.1.0` engine, one `{box}.dxtr` file per box.
+- Transactional CRUD/bulk CRUD/lifecycle operations.
+- Explicit `compact()` maintenance.
+- Native cross-handle watch fan-out through FRB streams.
+- Persisted per-box encryption using Argon2 + ChaCha20Poly1305.
+- Explicit transactional plaintext -> encrypted migration.
+- Process-level crash/reopen durability coverage for acknowledged commits.
+- Three public native profiles only: `minimal`, `encryption`, `full`.
+- Linux native-size baseline + same-commit reproducibility gate.
+- Hive CE benchmark smoke harness; timings remain informational.
+- Checked-in FRB 2.8 bindings with generated-drift CI.
+- Android/iOS/macOS/Linux/Windows example build coverage.
+- Root Makefile for preflight, native, query/index, benchmark, profile, and platform workflows.
+
+PR #14 adds:
+
+- `BoxQuery`, `QueryFilter`, `QueryComparison`, `QueryGroup`, query operator enums, and `IndexDefinition`.
+- `Box.query(...)` using **one FRB call per query**.
+- Rust native scan evaluation with dotted nested-field lookup.
+- comparison operators: equality/inequality, greater/less comparisons, `between`, null checks.
+- AND/OR boolean groups.
+- deterministic record-key ordering before pagination.
+- native scan support for plaintext and encrypted boxes.
+- persisted `index_definitions` + `index_entries` tables under `full`.
+- index create/backfill/list/drop lifecycle.
+- transactional index maintenance coupled to `put`, `putAll`, `delete`, `deleteAll`, and `clear`.
+- encrypted boxes explicitly reject persisted index creation until a secure encrypted-index representation exists.
+- plaintext -> encrypted migration rejects boxes that still have persisted index definitions.
+
+The query planner does **not** consume persisted indexes yet. Native scan remains the authoritative execution path.
+
+## Current validation state
+
+PR #14 final implementation was green on the normal CI and Platform Builds workflows before the final documentation-only refresh.
+
+Validation surface:
+
+```text
+Minimum SDK / Ubuntu
+  Flutter 3.22.0 + Dart 3.4.0
+  pub get -> analyze -> tests
+
+Current Flutter / Ubuntu
+  format -> analyze -> unit tests
+
+FRB generated bindings / Ubuntu
+  regenerate with flutter_rust_bridge_codegen 2.8.0
+  fail on drift
+
+Native / Linux
+  release build
+  Dart -> FRB -> Rust -> redb round trip
+  encrypted close/reopen
+  plaintext -> encrypted migration
+  watch / deleteAll / compact integration
+
+Rust / Ubuntu + macOS + Windows
+  rustfmt
+  clippy -D warnings
+  minimal profile tests
+  encryption profile tests
+  full profile tests
+  query/index integration in full
+
+Native size / Linux x86_64
+  minimal/encryption/full release measurements
+  repeated same-commit measurements
+  zero-byte-spread reproducibility gate
+
+Platform Builds
+  Android
+  iOS --no-codesign
+  macOS
+  Linux
+  Windows
+```
+
+## Public native profile contract
+
+Keep exactly these three public product profiles:
+
+```text
+minimal
+  CRUD + lifecycle + native watch
+
+encryption
+  minimal + encrypted create/open/read/write
+
+full
+  encryption + maintenance + query/index implementation
+```
+
+`full` remains the default production build used by normal Flutter/Cargokit integration.
+
+Do **not** add a fourth public query profile. Internal optional dependencies required by full-profile query/index work are allowed; currently `rmpv` is included through `full`.
+
+Reduced profiles retain a stable FRB-facing API and fail explicitly when a capability requires `full`.
 
 ## Minimum SDK policy
 
-Current compatibility floor:
+Current floor:
 
 ```text
 Dart >= 3.4.0 < 4.0.0
 Flutter >= 3.22.0
 ```
 
-Flutter 3.22.0 carries Dart 3.4.0, so this is a real compatibility floor rather than a pubspec-only Dart bound hidden behind a newer Flutter minimum.
+Do not raise this floor casually. Dependency/toolchain upgrades that require a newer SDK are explicit compatibility decisions.
 
-CI includes a dedicated minimum-SDK lane using Flutter 3.22.0 / Dart 3.4.0 in addition to the current-stable lane. Do not raise the minimum SDK casually. Dependency upgrades that require a newer floor are explicit compatibility decisions.
+Dart 3.13 recorded-use/native tree shaking remains future-only. It must not become required for correctness or force the current minimum upward.
 
-Dart 3.13 native tree shaking is **not** a reason to raise the SDK floor now.
+## Native naming/build invariant
 
-## Native naming invariant
-
-FRB 2.8 and Cargokit must agree on one native artifact name:
+FRB and Cargokit must agree on:
 
 ```text
 rust_lib_dxtr_box
 ```
 
-Cargo package name, Cargo `[lib]` name, Cargokit package, and generated FRB loader stem must stay aligned.
+Cargo package/lib name, `rust_builder/`, generated loader, and built artifact stem must remain aligned.
 
-## Native integration architecture
+The root Flutter package is the Dart-facing facade. `rust_builder/` is the sole native build owner; do not reintroduce duplicate root platform FFI scaffolding.
 
-The root `dxtr_box` package is the Dart-facing facade, not a second FFI plugin.
+## Storage architecture
 
-Native build ownership belongs exclusively to the nested `rust_lib_dxtr_box` package under `rust_builder/`, generated by FRB 2.8/Cargokit. Checked-in generated bindings live under `lib/src/rust/` and `rust/src/frb_generated.rs`.
-
-CI runs `flutter_rust_bridge_codegen 2.8.0`, uploads regenerated bindings for debugging, and fails when generated output differs from committed files.
-
-`tool/scaffold_platforms.sh` is a binding-refresh helper. It must not recreate duplicate root FFI ownership.
-
-## Native watch architecture
+One box maps to:
 
 ```text
-box name -> watcher id -> StreamSink<NativeBoxEvent>
+{base_path}/{box_name}.dxtr
 ```
 
-Mutation ordering:
+Core redb tables:
 
 ```text
-Dart mutation
-  -> FRB
-  -> redb transaction
-  -> commit succeeds
-  -> Rust emits NativeBoxEvent
-  -> FRB stream
-  -> every open Box handle
-  -> cached key metadata update + public BoxEvent
+data
+meta
 ```
 
-For encrypted boxes, watch events still contain the original plaintext MessagePack payload after the storage commit. Encryption remains confined to the storage layer.
+Full-profile query/index adds:
 
-`deleteAll()` emits one delete event only for keys that were actually present and committed as removed.
+```text
+index_definitions
+index_entries
+```
 
-## Compaction contract
+Primary `data` is always authoritative. Secondary indexes are derived state and must never become the sole copy of user data.
 
-`Box.compact()` is an explicit maintenance operation. Native code temporarily takes the box out of the open-database registry while redb compaction runs. Concurrent access during compaction fails explicitly and may be retried after compaction finishes.
+## Mutation atomicity invariant
 
-Compaction returns redb's boolean result. It is not run implicitly on every close/write. Automatic scheduling and thresholds remain future work.
+For primary data + persisted indexes:
+
+```text
+put / putAll / delete / deleteAll / clear
+  -> compute required index changes
+  -> update primary DATA
+  -> update derived index entries
+  -> same redb write transaction
+  -> one commit
+  -> emit public/native watch events after commit only
+```
+
+A committed mutation must never leave persisted indexes describing a different committed state than primary data.
+
+Index creation also backfills and persists definition + derived entries atomically.
+
+## Query architecture
+
+Public execution path:
+
+```text
+Box.query(BoxQuery)
+  -> serialize query AST with DxtrCodec
+  -> NativeQueryApi.scanQuery
+  -> one FRB call
+  -> Rust decode query once
+  -> enumerate committed records
+  -> decrypt record if needed
+  -> decode MessagePack value
+  -> dotted nested-field lookup
+  -> comparison / boolean-group evaluation
+  -> deterministic key ordering
+  -> offset / limit
+  -> one FRB response containing matched key + payload records
+  -> Dart decode result payloads
+```
+
+Important invariant: **one FRB call per query, not one FRB call per record**.
+
+Current internal scan shape still uses key enumeration + per-record native reads rather than one redb read transaction spanning the full scan. That is a future performance/architecture improvement, not a semantic blocker.
+
+Legacy `Box.where(predicate)` remains Dart-side and must not be confused with the declarative native engine.
+
+## Persisted index architecture
+
+Public Dart API:
+
+```dart
+await box.createIndex(
+  const IndexDefinition(name: 'by-status', field: 'status'),
+);
+
+final indexes = await box.listIndexes();
+final removed = await box.dropIndex('by-status');
+```
+
+Current first-slice constraints:
+
+- named index;
+- one dotted field path;
+- scalar values only;
+- no uniqueness contract;
+- no composite index;
+- no full text;
+- no list expansion;
+- no custom collation;
+- plaintext boxes only for persisted indexes.
+
+Index entry encoding uses a binary composite representation rather than delimiter concatenation.
+
+## Encrypted query/index security policy
+
+Encrypted boxes **may use native scan query**.
+
+Encrypted boxes **may not create persisted secondary indexes yet**.
+
+Reason: persisting plaintext-derived scalar keys would leak values that primary storage protects with encryption.
+
+Do not bypass this rejection for convenience. A secure encrypted-index representation must be designed explicitly.
+
+Also, plaintext -> encrypted migration is rejected while persisted index definitions exist. This prevents migration from producing encrypted primary data beside plaintext-derived index state.
 
 ## Encryption architecture
 
-`rust/src/db.rs` uses two tables:
+Metadata persists storage format and encryption mode. Encrypted boxes use a unique random salt, Argon2 key derivation, encrypted key-check sentinel, and ChaCha20Poly1305 values with fresh nonces and record-key AAD.
 
-```text
-data: key -> stored value bytes
-meta: storage format + encryption metadata
-```
+Wrong keys, tampering, and swapped ciphertext are rejected before plaintext reaches Dart.
 
-Encrypted metadata:
+Plaintext data is never silently reinterpreted as encrypted.
 
-```text
-format_version   = "dxtr_box/1"
-encryption_mode  = "chacha20poly1305"
-encryption_salt  = unique random salt
-key_check         = encrypted known sentinel
-```
+## Plaintext -> encrypted migration
 
-Plain boxes store:
-
-```text
-format_version   = "dxtr_box/1"
-encryption_mode  = "none"
-```
-
-Encrypted open sequence:
-
-```text
-read persisted salt
-  -> Argon2(password, salt)
-  -> derive key
-  -> decrypt/authenticate key_check
-  -> reject missing/wrong key
-  -> cache encryption state with open database handle
-```
-
-Value write:
-
-```text
-MessagePack bytes
-  -> validate
-  -> random nonce
-  -> ChaCha20Poly1305 encrypt using record key as AAD
-  -> store authenticated ciphertext
-  -> commit
-```
-
-Existing plaintext data is never encrypted implicitly.
-
-## Plaintext -> encrypted migration contract
-
-Public API after PR #11:
+Public API:
 
 ```dart
 await DxtrBox.encryptBox(
@@ -169,118 +267,64 @@ await DxtrBox.encryptBox(
 );
 ```
 
-Preconditions:
+Migration requires no live handles and performs value rewrite + encryption metadata transition atomically in one redb write transaction.
 
-- dxtr_box initialized;
-- valid box name;
-- non-empty key;
-- no live Dart handles for the box;
-- configured native engine supports `NativeEncryptionMigrationApi`;
-- persisted box exists and is plaintext;
-- no conflicting native maintenance operation.
+Additional 0.3 guard: migration rejects boxes with persisted indexes until encrypted index semantics exist.
 
-Rust migration flow:
+## Native watch/event ordering
 
 ```text
-close all handles
-  -> per-box mutation lock
-  -> mark box MIGRATING
-  -> verify format + encryption_mode=none
-  -> generate fresh salt + derive key
-  -> validate every plaintext MessagePack value
-  -> encrypt every value with fresh nonce + record-key AAD
-  -> in one redb write transaction:
-       replace all values
-       set encryption_mode=chacha20poly1305
-       persist salt
-       persist key_check
-  -> commit once
-  -> clear MIGRATING state
+Dart mutation
+  -> FRB
+  -> redb write transaction
+  -> primary/index changes
+  -> commit succeeds
+  -> Rust emits NativeBoxEvent
+  -> FRB stream
+  -> open Box handles
 ```
 
-Durable states are intentionally binary:
+Failed writes do not emit successful public events.
 
-```text
-before commit: plaintext values + encryption_mode=none
-after commit:  ciphertext values + encrypted metadata
-```
-
-A pre-commit validation/encryption/write failure leaves the original plaintext box readable. Missing, open, already-encrypted, unsupported-format, or empty-key cases are rejected.
-
-Migration emits no watch events because live handles are forbidden.
-
-A dedicated process-kill fault-injection test that kills a migration while the transaction is in-flight remains future hardening. Do not claim that exact test exists yet.
-
-## Crash durability contract
-
-Process-boundary durability coverage guarantees only acknowledged commits:
-
-- only operations whose API calls completed successfully before process termination are considered committed;
-- the test kills the writer process without graceful `Box.close()`;
-- a fresh process reopens the database and verifies acknowledged plaintext and encrypted commits;
-- no claim is made for an in-flight operation that had not returned before termination.
+For encrypted boxes, event payloads still represent the public plaintext MessagePack value after storage commit; encryption remains an at-rest storage concern.
 
 ## Benchmark policy
 
-The `benchmark/` package compares equal logical workloads against current Hive CE while remaining outside the root package minimum-SDK dependency surface.
+The separate `benchmark/` package compares equal logical workloads with Hive CE without raising the root package SDK floor.
 
-Current scenarios include:
+Existing shared-runner measurements are informational only. Do not make claims that redb itself is hundreds of times slower based on the old end-to-end microbenchmark: those numbers include Dart serialization, FRB overhead, Rust API work, and storage work.
 
-- sequential put;
-- batch put / putAll;
-- point get;
-- contains;
-- deleteAll;
-- reopen + read.
-
-Benchmark timing is informational. CI verifies that the harness executes successfully but does not gate merges on absolute timing from shared runners.
-
-### Current smoke baseline — CI #105 / PR #8
-
-The first real comparative smoke run used Ubuntu 24.04 on a GitHub-hosted x86_64 runner, Flutter 3.47.0, Rust 1.97.1, 100 logical operations per scenario, and five samples per engine. Median timings were:
-
-| Scenario | dxtr_box median | hive_ce median | dxtr_box / hive_ce |
-| --- | ---: | ---: | ---: |
-| sequential put | 75.314 ms | 38.026 ms | 1.98x |
-| batch put | 11.444 ms | 1.520 ms | 7.53x |
-| point get | 28.289 ms | 0.051 ms | 554.69x |
-| contains | 25.936 ms | 0.033 ms | 785.94x |
-| deleteAll | 6.946 ms | 2.464 ms | 2.82x |
-| reopen + read | 25.315 ms | 4.198 ms | 6.03x |
-
-Interpretation rules:
-
-- These are **smoke/informational measurements**, not publishable performance claims and not merge gates.
-- Shared-runner timing, small operation counts, engine architecture differences, warm-cache behavior, serialization, and FFI crossings can dominate microbenchmarks.
-- The result is nevertheless large enough to justify focused investigation of `point_get` and `contains` before making any performance claim.
-- Do not state that redb itself is hundreds of times slower than Hive CE. The current benchmark measures the complete Dart API path, not raw redb.
-
-Recommended performance investigation sequence:
+Performance investigation should isolate:
 
 ```text
-Dart public API
-  -> Dart serialization / MessagePack cost
-  -> FRB/FFI boundary cost
-  -> Rust API cost
-  -> raw redb operation cost
+Dart API
+  -> codec
+  -> FRB boundary
+  -> Rust API
+  -> redb
 ```
 
-Add focused benchmarks that isolate each layer, especially `point_get` and `contains`, and determine whether the dominant cost comes from repeated FFI crossings, serialization/deserialization, transaction/open-handle behavior, or the storage engine itself. Preserve correctness and durable-storage semantics while optimizing; do not introduce a fake Dart-side value cache merely to win a microbenchmark unless its lifecycle/coherency contract is explicitly designed.
+Do not add a fake Dart whole-box value cache merely to improve benchmark numbers unless a coherent lifecycle/coherency contract is deliberately designed.
 
-Future benchmark work should also add retained result artifacts, file-size reporting, multiple payload sizes and key distributions, larger operation counts, warm/cold runs, release/AOT-representative execution where practical, and environment/build metadata before performance claims are published.
+## Binary-size policy
+
+PR #12 established the three profile measurements. PR #13 established same-commit reproducibility.
+
+Cross-commit binary-size regression policy remains a separate future hardening task. Do not block query/index work on inventing that policy, and do not silently introduce a threshold inside feature work.
 
 ## Developer workflow
 
-Preferred local entry points:
+Preferred Make targets:
 
 ```text
 make preflight
+make frb-generate
 make native-test
+make query-index-test
 make process-crash
 make benchmark-smoke
 make benchmark-full
 make rust-check
-make frb-generate
 make native-build-minimal
 make native-build-encryption
 make native-size-baseline
@@ -292,146 +336,55 @@ make example-macos
 make example-ios
 ```
 
-Generated FRB bindings stay checked in whenever native APIs change. `make native-size-baseline` records one minimal/encryption/full release-size baseline; `make native-size-stability` repeats those measurements to validate same-commit reproducibility before any regression budget is considered.
+Generated FRB bindings must remain checked in whenever native API shape changes.
 
-## Current validation state
+## 0.3 next implementation sequence
 
-After PR #12 CI #144 and Platform Builds #88 are green, the validation surface is:
+After PR #14:
 
-```text
-Minimum SDK / Ubuntu
-  Flutter 3.22.0 + Dart 3.4.0
-  pub get -> analyze -> tests
+1. Add an explicit native query planner.
+2. Define planner eligibility for the first scalar persisted-index operators.
+3. Add scan-vs-index equivalence tests before enabling index-backed execution broadly.
+4. Preserve deterministic ordering/pagination independent of whether scan or index is selected.
+5. Keep encrypted persisted indexes disabled until a non-leaking representation is designed.
+6. Consider improving native scan to use one redb read transaction after planner correctness is established.
+7. Add query/index benchmark scenarios only after semantic equivalence is proven; do not optimize against incorrect behavior.
+8. Continue layered `point_get` / `contains` performance diagnosis independently.
+9. Keep cross-commit size-budget policy separate.
+10. Keep Dart 3.13 tree shaking deferred.
 
-Current Flutter / Ubuntu
-  format -> analyze -> unit tests
+## Later roadmap
 
-FRB generated bindings / Ubuntu
-  regenerate with FRB 2.8.0
-  fail on generated drift
+### 0.3.x
 
-Native / Linux
-  cargo release build
-  plaintext Dart/FRB/Rust/redb round trip
-  encrypted close/reopen round trip
-  explicit plaintext -> encrypted migration round trip
-  live-handle migration rejection
-  cross-handle native watch delivery
-  deleteAll + compact integration
-  benchmark smoke harness
+- planner/index-backed query execution
+- explicit sort contract / `sortBy`
+- scan/index equivalence hardening
+- Hive CE migration design/implementation
 
-Native size / Linux x86_64
-  isolated minimal release build
-  isolated encryption release build
-  isolated full release build
-  repeat each profile three times on the same commit/toolchain
-  require zero-byte same-commit spread
-  retain native-size-baseline.tsv + native-size-stability.tsv only
+### 0.4.x
 
-Rust / Ubuntu + macOS + Windows
-  rustfmt -> clippy -D warnings
-  minimal profile tests
-  encryption profile tests
-  full/default profile tests
-  process-kill crash/reopen coverage appropriate to enabled features
-  migration unit/failure-safety tests in feature-capable profiles
+- production/package hardening
+- controlled cross-commit native-size policy
+- broader comparison with other Flutter local databases
 
-Example compilation
-  Android -> Linux -> Windows -> macOS -> iOS --no-codesign
-```
+### 0.9.x
 
-## PR #12 validated — Cargo feature splitting + binary-size baseline
+Execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.
 
-PR #12 establishes three maintainable native profiles without changing Dart/Flutter compatibility:
+### 1.0.0
 
-```text
-minimal     = CRUD + lifecycle + native watch
-encryption  = minimal + encrypted create/open/read/write
-full        = encryption + maintenance (compact + plaintext migration)
-```
+- no practical parity gaps
+- stable storage/API contract
+- Web/IndexedDB strategy complete
+- pub.dev release readiness
 
-`full` remains the default so normal Cargokit/Flutter builds preserve current behavior. Reduced profiles retain the stable FRB surface and fail explicitly for unavailable maintenance capabilities.
+## Non-negotiable rules
 
-Validated Linux x86_64 release-library baseline from CI #144:
-
-| Profile | Bytes | Delta vs minimal |
-| --- | ---: | ---: |
-| minimal | 1,893,736 | baseline |
-| encryption | 1,992,296 | +98,560 (+5.2%) |
-| full | 2,032,312 | +138,576 (+7.3%) |
-
-The size job retains only the machine-readable baseline and stability TSV files. PR #13 CI #151 proved zero-byte spread across three repeated builds of each profile on Linux x86_64 with rustc/cargo 1.97.1. No cross-commit regression threshold is enabled yet; same-commit reproducibility is now a CI prerequisite rather than a size budget.
-
-## PR #13 validated — native size measurement stability
-
-CI #151 repeated release-library measurement three times per profile on the same Linux x86_64 commit/toolchain:
-
-| Profile | Runs | Min bytes | Max bytes | Spread |
-| --- | ---: | ---: | ---: | ---: |
-| minimal | 3 | 1,893,736 | 1,893,736 | 0 |
-| encryption | 3 | 1,992,296 | 1,992,296 | 0 |
-| full | 3 | 2,032,312 | 2,032,312 | 0 |
-
-This validates the measurement harness, not a cross-commit size budget. A later regression policy must compare controlled baselines deliberately and account for toolchain/platform changes.
-
-## Next implementation sequence
-
-1. Merge PR #13 after final documentation CI remains green.
-2. Add layered performance diagnostics for `point_get` and `contains` so Dart/serialization/FRB/Rust/redb costs are measured separately; treat the existing PR #8 smoke numbers as informational only.
-3. Begin 0.3 query/index work while preserving the validated minimal/encryption/full profile contract; performance diagnostics may proceed independently and must not justify correctness regressions.
-4. Design cross-commit binary-size regression policy separately; do not block query/index work on it.
-5. Keep Dart 3.13 recorded-use/native tree shaking deferred.
-6. Before 1.0 RC, execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.
-
-## Dart 3.13 native tree-shaking — FUTURE ONLY
-
-**Do not implement Dart 3.13 recorded-use/native tree shaking now. Do not raise the minimum SDK for it.**
-
-The rationale and future acceptance gate are documented in `docs/FUTURE_NATIVE_TREE_SHAKING.md`.
-
-Current policy:
-
-```text
-Dart 3.4 / Flutter 3.22 baseline compatibility
-  -> required now
-
-Cargo feature profiles + first Linux x86_64 size baseline
-  -> validated in PR #12
-
-Same-commit repeated size measurement stability
-  -> validated in PR #13
-
-Cross-commit regression budget
-  -> future size-hardening policy; not enabled yet
-
-Dart 3.13+ record-use/link-hook optimization
-  -> future progressive optimization only
-  -> must have a safe fallback for supported older toolchains
-  -> must not affect storage/API correctness
-```
-
-Revisit native tree shaking only after the Dart/Flutter hook ecosystem, FRB/Cargokit integration, fallback behavior, and cross-platform symbol retention are proven. No `<1 MB` or similar native-size claim may be made without measured evidence per platform, architecture, and feature profile.
-
-## Hive Functional Parity release policy
-
-Classifications:
-
-- `Exact`
-- `Compatible`
-- `Superseded`
-- `Not applicable`
-- `Gap`
-
-The audit must cover CRUD/batch operations, lazy behavior, events, encryption, compaction, custom objects/schema evolution, isolate access, lifecycle semantics, crash durability, migration, Web/IndexedDB behavior, and practical Flutter integration.
-
-## Security rules
-
-- Never derive a key from a fixed global salt.
-- Persist a unique random salt per encrypted box.
-- Use Argon2 to derive the encryption key.
-- Use a unique random nonce for every encrypted value.
-- Bind encrypted values to their record keys with AAD.
-- ChaCha20Poly1305 authentication failure must reject wrong keys and modified/swapped payloads.
-- Never persist the derived key or plaintext password.
-- Never silently reinterpret plaintext data as encrypted data.
-- Migration must never expose a durable state where metadata and stored-value encryption mode disagree.
+- Never silently weaken storage durability for benchmark speed.
+- Never introduce a Dart whole-box cache without an explicit coherency contract.
+- Never leak encrypted indexed fields through plaintext persisted index keys.
+- Never add another public native profile casually.
+- Never raise the minimum Flutter/Dart floor incidentally.
+- Never merge native API changes with stale FRB generated bindings.
+- Keep README, this handoff, `CODE_WALKTHROUGH.md`, and query/index design docs aligned with actual implementation state.
