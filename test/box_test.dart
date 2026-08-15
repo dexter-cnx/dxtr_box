@@ -15,6 +15,14 @@ void main() {
     await DxtrBox.init(path: '/tmp/dxtr_box_test');
   });
 
+  test('lazy mode is rejected before native open', () async {
+    await expectLater(
+      DxtrBox.open('lazy', lazy: true),
+      throwsA(isA<UnsupportedError>()),
+    );
+    expect(await DxtrBox.boxExists('lazy'), isFalse);
+  });
+
   test('open hydrates metadata and CRUD keeps metadata in sync', () async {
     api.seed('people', <String, Uint8List>{
       'alice': _bytes(<int>[1]),
