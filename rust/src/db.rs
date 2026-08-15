@@ -9,12 +9,82 @@ use std::{
 };
 
 use crate::codec::validate_message_pack;
+#[cfg(feature = "encryption")]
+use crate::crypto;
 
 const DATA: TableDefinition<&str, &[u8]> = TableDefinition::new("data");
+const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
+const META_FORMAT_VERSION: &str = "format_version";
+const META_ENCRYPTION_MODE: &str = "encryption_mode";
+#[cfg(feature = "encryption")]
+const META_ENCRYPTION_SALT: &str = "encryption_salt";
+#[cfg(feature = "encryption")]
+const META_KEY_CHECK: &str = "key_check";
+const FORMAT_VERSION: &[u8] = b"dxtr_box/1";
+const ENCRYPTION_NONE: &[u8] = b"none";
+const ENCRYPTION_CHACHA20POLY1305: &[u8] = b"chacha20poly1305";
+#[cfg(feature = "encryption")]
+const KEY_CHECK_PLAINTEXT: &[u8] = b"dxtr_box:key-check:v1";
+
+#[derive(Debug)]
+enum EncryptionState {
+    Plain,
+    #[cfg(feature = "encryption")]
+    Encrypted {
+        key: [u8; 32],
+        salt: [u8; crypto::SALT_LEN],
+    },
+}
+
+impl EncryptionState {
+    fn validate_requested_key(&self, encryption_key: Option<&str>) -> Result<(), String> {
+        match self {
+            Self::Plain => {
+                if encryption_key.is_some() {
+                    Err("box is not encrypted; omit encryptionKey".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+            #[cfg(feature = "encryption")]
+            Self::Encrypted { key, salt } => {
+                let password = encryption_key
+                    .ok_or_else(|| "encryption key is required for encrypted box".to_string())?;
+                if password.is_empty() {
+                    return Err("encryption key cannot be empty".to_string());
+                }
+                let candidate = crypto::derive_key(password, salt)?;
+                if &candidate == key {
+                    Ok(())
+                } else {
+                    Err("invalid encryption key".to_string())
+                }
+            }
+        }
+    }
+
+    fn encode_value(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Plain => Ok(plaintext.to_vec()),
+            #[cfg(feature = "encryption")]
+            Self::Encrypted { key, .. } => crypto::encrypt(key, plaintext),
+        }
+    }
+
+    fn decode_value(&self, stored: &[u8]) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Plain => Ok(stored.to_vec()),
+            #[cfg(feature = "encryption")]
+            Self::Encrypted { key, .. } => crypto::decrypt(key, stored)
+                .map_err(|_| "encrypted value authentication failed".to_string()),
+        }
+    }
+}
 
 struct OpenDatabase {
     db: Arc<Database>,
     handles: usize,
+    encryption: Arc<EncryptionState>,
 }
 
 static BASE_PATH: Lazy<RwLock<Option<PathBuf>>> = Lazy::new(|| RwLock::new(None));
@@ -81,12 +151,152 @@ fn file_path(name: &str) -> Result<PathBuf, String> {
     Ok(base_path()?.join(format!("{name}.dxtr")))
 }
 
-fn database(name: &str) -> Result<Arc<Database>, String> {
+fn database(name: &str) -> Result<(Arc<Database>, Arc<EncryptionState>), String> {
     DATABASES
         .read()
         .get(name)
-        .map(|entry| Arc::clone(&entry.db))
+        .map(|entry| (Arc::clone(&entry.db), Arc::clone(&entry.encryption)))
         .ok_or_else(|| format!("box '{name}' is not open"))
+}
+
+fn read_meta(db: &Database, key: &str) -> Result<Option<Vec<u8>>, String> {
+    let read = db.begin_read().map_err(|e| e.to_string())?;
+    let table = read.open_table(META).map_err(|e| e.to_string())?;
+    Ok(table
+        .get(key)
+        .map_err(|e| e.to_string())?
+        .map(|value| value.value().to_vec()))
+}
+
+fn write_plain_metadata(db: &Database) -> Result<(), String> {
+    let write = db.begin_write().map_err(|e| e.to_string())?;
+    {
+        let mut meta = write.open_table(META).map_err(|e| e.to_string())?;
+        meta.insert(META_FORMAT_VERSION, FORMAT_VERSION)
+            .map_err(|e| e.to_string())?;
+        meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_NONE)
+            .map_err(|e| e.to_string())?;
+    }
+    write.commit().map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "encryption")]
+fn write_encrypted_metadata(
+    db: &Database,
+    salt: &[u8; crypto::SALT_LEN],
+    key_check: &[u8],
+) -> Result<(), String> {
+    let write = db.begin_write().map_err(|e| e.to_string())?;
+    {
+        let mut meta = write.open_table(META).map_err(|e| e.to_string())?;
+        meta.insert(META_FORMAT_VERSION, FORMAT_VERSION)
+            .map_err(|e| e.to_string())?;
+        meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_CHACHA20POLY1305)
+            .map_err(|e| e.to_string())?;
+        meta.insert(META_ENCRYPTION_SALT, salt.as_slice())
+            .map_err(|e| e.to_string())?;
+        meta.insert(META_KEY_CHECK, key_check)
+            .map_err(|e| e.to_string())?;
+    }
+    write.commit().map_err(|e| e.to_string())
+}
+
+fn initialize_new_box(
+    db: &Database,
+    encryption_key: Option<&str>,
+) -> Result<EncryptionState, String> {
+    match encryption_key {
+        None => {
+            write_plain_metadata(db)?;
+            Ok(EncryptionState::Plain)
+        }
+        Some(password) => {
+            if password.is_empty() {
+                return Err("encryption key cannot be empty".to_string());
+            }
+            #[cfg(feature = "encryption")]
+            {
+                let salt = crypto::new_salt();
+                let key = crypto::derive_key(password, &salt)?;
+                let key_check = crypto::encrypt(&key, KEY_CHECK_PLAINTEXT)?;
+                write_encrypted_metadata(db, &salt, &key_check)?;
+                Ok(EncryptionState::Encrypted { key, salt })
+            }
+            #[cfg(not(feature = "encryption"))]
+            {
+                let _ = password;
+                Err("this native build was compiled without encryption support".to_string())
+            }
+        }
+    }
+}
+
+fn resolve_existing_box(
+    db: &Database,
+    encryption_key: Option<&str>,
+) -> Result<EncryptionState, String> {
+    let format = read_meta(db, META_FORMAT_VERSION)?;
+
+    // Files created before metadata support are known plaintext boxes. Persist
+    // the v1 marker on first reopen, but never reinterpret existing plaintext
+    // data as encrypted just because a caller supplied a key.
+    if format.is_none() {
+        if encryption_key.is_some() {
+            return Err(
+                "cannot enable encryption on an existing plaintext box; migrate explicitly"
+                    .to_string(),
+            );
+        }
+        write_plain_metadata(db)?;
+        return Ok(EncryptionState::Plain);
+    }
+
+    if format.as_deref() != Some(FORMAT_VERSION) {
+        return Err("unsupported dxtr_box storage format".to_string());
+    }
+
+    let mode = read_meta(db, META_ENCRYPTION_MODE)?
+        .ok_or_else(|| "box metadata is missing encryption mode".to_string())?;
+
+    if mode == ENCRYPTION_NONE {
+        if encryption_key.is_some() {
+            return Err("box is not encrypted; omit encryptionKey".to_string());
+        }
+        return Ok(EncryptionState::Plain);
+    }
+
+    if mode == ENCRYPTION_CHACHA20POLY1305 {
+        #[cfg(feature = "encryption")]
+        {
+            let password = encryption_key
+                .ok_or_else(|| "encryption key is required for encrypted box".to_string())?;
+            if password.is_empty() {
+                return Err("encryption key cannot be empty".to_string());
+            }
+
+            let salt_bytes = read_meta(db, META_ENCRYPTION_SALT)?
+                .ok_or_else(|| "encrypted box metadata is missing salt".to_string())?;
+            let salt: [u8; crypto::SALT_LEN] = salt_bytes
+                .try_into()
+                .map_err(|_| "encrypted box metadata has invalid salt length".to_string())?;
+            let key_check = read_meta(db, META_KEY_CHECK)?
+                .ok_or_else(|| "encrypted box metadata is missing key check".to_string())?;
+            let key = crypto::derive_key(password, &salt)?;
+            let plaintext = crypto::decrypt(&key, &key_check)
+                .map_err(|_| "invalid encryption key".to_string())?;
+            if plaintext != KEY_CHECK_PLAINTEXT {
+                return Err("invalid encryption key".to_string());
+            }
+            return Ok(EncryptionState::Encrypted { key, salt });
+        }
+        #[cfg(not(feature = "encryption"))]
+        {
+            let _ = encryption_key;
+            return Err("this native build was compiled without encryption support".to_string());
+        }
+    }
+
+    Err("unsupported box encryption mode".to_string())
 }
 
 pub fn init(path: &str) -> Result<(), String> {
@@ -108,12 +318,18 @@ pub fn init(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn open(name: &str) -> Result<(), String> {
+pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
     validate_name(name)?;
+    if matches!(encryption_key, Some("")) {
+        return Err("encryption key cannot be empty".to_string());
+    }
+
     let path = file_path(name)?;
+    let existed = path.exists();
     let mut databases = DATABASES.write();
 
     if let Some(entry) = databases.get_mut(name) {
+        entry.encryption.validate_requested_key(encryption_key)?;
         entry.handles += 1;
         return Ok(());
     }
@@ -122,9 +338,35 @@ pub fn open(name: &str) -> Result<(), String> {
     {
         let write = db.begin_write().map_err(|e| e.to_string())?;
         write.open_table(DATA).map_err(|e| e.to_string())?;
+        write.open_table(META).map_err(|e| e.to_string())?;
         write.commit().map_err(|e| e.to_string())?;
     }
-    databases.insert(name.to_string(), OpenDatabase { db, handles: 1 });
+
+    let encryption = if existed {
+        resolve_existing_box(&db, encryption_key)
+    } else {
+        initialize_new_box(&db, encryption_key)
+    };
+
+    let encryption = match encryption {
+        Ok(state) => Arc::new(state),
+        Err(error) => {
+            drop(db);
+            if !existed {
+                let _ = fs::remove_file(&path);
+            }
+            return Err(error);
+        }
+    };
+
+    databases.insert(
+        name.to_string(),
+        OpenDatabase {
+            db,
+            handles: 1,
+            encryption,
+        },
+    );
     Ok(())
 }
 
@@ -164,26 +406,33 @@ pub fn box_exists(name: &str) -> Result<bool, String> {
 
 pub fn put(name: &str, key: &str, value: &[u8]) -> Result<(), String> {
     validate_message_pack(value)?;
-    let db = database(name)?;
+    let (db, encryption) = database(name)?;
+    let stored = encryption.encode_value(value)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
-        table.insert(key, value).map_err(|e| e.to_string())?;
+        table
+            .insert(key, stored.as_slice())
+            .map_err(|e| e.to_string())?;
     }
     write.commit().map_err(|e| e.to_string())
 }
 
 pub fn put_all(name: &str, entries: &[(String, Vec<u8>)]) -> Result<(), String> {
-    for (_, value) in entries {
+    let (_, encryption) = database(name)?;
+    let mut stored_entries = Vec::with_capacity(entries.len());
+    for (key, value) in entries {
         validate_message_pack(value)?;
+        stored_entries.push((key.as_str(), encryption.encode_value(value)?));
     }
-    let db = database(name)?;
+
+    let (db, _) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
-        for (key, value) in entries {
+        for (key, value) in &stored_entries {
             table
-                .insert(key.as_str(), value.as_slice())
+                .insert(*key, value.as_slice())
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -191,21 +440,35 @@ pub fn put_all(name: &str, entries: &[(String, Vec<u8>)]) -> Result<(), String> 
 }
 
 pub fn get(name: &str, key: &str) -> Result<Option<Vec<u8>>, String> {
-    let db = database(name)?;
+    let (db, encryption) = database(name)?;
     let read = db.begin_read().map_err(|e| e.to_string())?;
     let table = read.open_table(DATA).map_err(|e| e.to_string())?;
-    Ok(table
+    let stored = table
         .get(key)
         .map_err(|e| e.to_string())?
-        .map(|guard| guard.value().to_vec()))
+        .map(|guard| guard.value().to_vec());
+    drop(table);
+    drop(read);
+
+    match stored {
+        None => Ok(None),
+        Some(payload) => {
+            let plaintext = encryption.decode_value(&payload)?;
+            validate_message_pack(&plaintext)?;
+            Ok(Some(plaintext))
+        }
+    }
 }
 
 pub fn contains_key(name: &str, key: &str) -> Result<bool, String> {
-    Ok(get(name, key)?.is_some())
+    let (db, _) = database(name)?;
+    let read = db.begin_read().map_err(|e| e.to_string())?;
+    let table = read.open_table(DATA).map_err(|e| e.to_string())?;
+    Ok(table.get(key).map_err(|e| e.to_string())?.is_some())
 }
 
 pub fn delete(name: &str, key: &str) -> Result<(), String> {
-    let db = database(name)?;
+    let (db, _) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
@@ -215,7 +478,7 @@ pub fn delete(name: &str, key: &str) -> Result<(), String> {
 }
 
 pub fn clear(name: &str) -> Result<(), String> {
-    let db = database(name)?;
+    let (db, _) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
@@ -235,7 +498,7 @@ pub fn clear(name: &str) -> Result<(), String> {
 }
 
 pub fn all_keys(name: &str) -> Result<Vec<String>, String> {
-    let db = database(name)?;
+    let (db, _) = database(name)?;
     let read = db.begin_read().map_err(|e| e.to_string())?;
     let table = read.open_table(DATA).map_err(|e| e.to_string())?;
     table
@@ -249,7 +512,7 @@ pub fn all_keys(name: &str) -> Result<Vec<String>, String> {
 }
 
 pub fn len(name: &str) -> Result<u64, String> {
-    let db = database(name)?;
+    let (db, _) = database(name)?;
     let read = db.begin_read().map_err(|e| e.to_string())?;
     let table = read.open_table(DATA).map_err(|e| e.to_string())?;
     table.len().map_err(|e| e.to_string())
@@ -274,7 +537,7 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-        open("people").unwrap();
+        open("people", None).unwrap();
         put("people", "alice", &pack(&42_i64)).unwrap();
         assert_eq!(get("people", "alice").unwrap(), Some(pack(&42_i64)));
         assert!(contains_key("people", "alice").unwrap());
@@ -291,7 +554,7 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-        open("items").unwrap();
+        open("items", None).unwrap();
         put_all(
             "items",
             &[("a".into(), pack(&1_i64)), ("b".into(), pack(&2_i64))],
@@ -307,11 +570,11 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-        open("persistent").unwrap();
+        open("persistent", None).unwrap();
         put("persistent", "answer", &pack(&42_i64)).unwrap();
         close("persistent");
 
-        open("persistent").unwrap();
+        open("persistent", None).unwrap();
         assert_eq!(get("persistent", "answer").unwrap(), Some(pack(&42_i64)));
         assert_eq!(len("persistent").unwrap(), 1);
         close("persistent");
@@ -322,7 +585,7 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-        open("atomic").unwrap();
+        open("atomic", None).unwrap();
 
         let entries = vec![
             ("good".to_string(), pack(&1_i64)),
@@ -352,7 +615,10 @@ mod tests {
             "con.txt",
             "LPT9",
         ] {
-            assert!(open(name).is_err(), "name should be rejected: {name:?}");
+            assert!(
+                open(name, None).is_err(),
+                "name should be rejected: {name:?}"
+            );
         }
     }
 
@@ -364,7 +630,7 @@ mod tests {
         init(first.path().to_str().unwrap()).unwrap();
         init(first.path().to_str().unwrap()).unwrap();
 
-        open("active").unwrap();
+        open("active", None).unwrap();
         assert!(init(second.path().to_str().unwrap()).is_err());
         close("active");
 
@@ -376,8 +642,8 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-        open("shared").unwrap();
-        open("shared").unwrap();
+        open("shared", None).unwrap();
+        open("shared", None).unwrap();
         put("shared", "k", &pack(&1_i64)).unwrap();
 
         close("shared");
@@ -392,7 +658,7 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
-        open("temporary").unwrap();
+        open("temporary", None).unwrap();
         put("temporary", "k", &pack(&1_i64)).unwrap();
         assert!(box_exists("temporary").unwrap());
 
@@ -403,5 +669,116 @@ mod tests {
         delete_box("temporary").unwrap();
         assert!(!box_exists("temporary").unwrap());
         assert!(get("temporary", "k").is_err());
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn encrypted_values_round_trip_and_remain_encrypted_on_disk() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("secure", Some("correct horse battery staple")).unwrap();
+        let plaintext = pack(&"secret-value");
+        put("secure", "token", &plaintext).unwrap();
+        assert_eq!(get("secure", "token").unwrap(), Some(plaintext.clone()));
+
+        let (db, _) = database("secure").unwrap();
+        let read = db.begin_read().unwrap();
+        let table = read.open_table(DATA).unwrap();
+        let stored = table.get("token").unwrap().unwrap().value().to_vec();
+        assert_ne!(stored, plaintext);
+        close("secure");
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn encrypted_box_requires_the_same_key_after_reopen() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("secure-reopen", Some("first-key")).unwrap();
+        put("secure-reopen", "answer", &pack(&42_i64)).unwrap();
+        close("secure-reopen");
+
+        assert!(open("secure-reopen", None).is_err());
+        assert!(open("secure-reopen", Some("wrong-key")).is_err());
+        open("secure-reopen", Some("first-key")).unwrap();
+        assert_eq!(
+            get("secure-reopen", "answer").unwrap(),
+            Some(pack(&42_i64))
+        );
+        close("secure-reopen");
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn encrypted_boxes_use_unique_persisted_salts() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+
+        open("secure-a", Some("password")).unwrap();
+        let (db_a, _) = database("secure-a").unwrap();
+        let salt_a = read_meta(&db_a, META_ENCRYPTION_SALT).unwrap().unwrap();
+        close("secure-a");
+
+        open("secure-b", Some("password")).unwrap();
+        let (db_b, _) = database("secure-b").unwrap();
+        let salt_b = read_meta(&db_b, META_ENCRYPTION_SALT).unwrap().unwrap();
+        close("secure-b");
+
+        assert_eq!(salt_a.len(), crypto::SALT_LEN);
+        assert_eq!(salt_b.len(), crypto::SALT_LEN);
+        assert_ne!(salt_a, salt_b);
+
+        open("secure-a", Some("password")).unwrap();
+        let (db_a_reopened, _) = database("secure-a").unwrap();
+        assert_eq!(
+            read_meta(&db_a_reopened, META_ENCRYPTION_SALT)
+                .unwrap()
+                .unwrap(),
+            salt_a
+        );
+        close("secure-a");
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn tampered_encrypted_value_is_rejected() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("tamper", Some("password")).unwrap();
+        put("tamper", "key", &pack(&"value")).unwrap();
+
+        let (db, _) = database("tamper").unwrap();
+        let write = db.begin_write().unwrap();
+        {
+            let mut table = write.open_table(DATA).unwrap();
+            let mut stored = table.get("key").unwrap().unwrap().value().to_vec();
+            let last = stored.len() - 1;
+            stored[last] ^= 0x01;
+            table.insert("key", stored.as_slice()).unwrap();
+        }
+        write.commit().unwrap();
+
+        assert!(get("tamper", "key").is_err());
+        close("tamper");
+    }
+
+    #[cfg(feature = "encryption")]
+    #[test]
+    fn plaintext_box_cannot_be_reopened_as_encrypted() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("plain", None).unwrap();
+        put("plain", "key", &pack(&1_i64)).unwrap();
+        close("plain");
+
+        assert!(open("plain", Some("password")).is_err());
+        open("plain", None).unwrap();
+        assert_eq!(get("plain", "key").unwrap(), Some(pack(&1_i64)));
+        close("plain");
     }
 }
