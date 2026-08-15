@@ -23,16 +23,17 @@ final class UnavailableNativeDxtrApi implements NativeDxtrApi {
   const UnavailableNativeDxtrApi();
 
   Never _missing() => throw StateError(
-    'dxtr_box Rust bindings are not generated. Run '
-    '`flutter_rust_bridge_codegen generate` and wire lib/src/rust via '
-    'tool/wire_generated_api.sh.',
-  );
+        'dxtr_box Rust bindings are not generated. Run '
+        '`flutter_rust_bridge_codegen generate` and wire lib/src/rust via '
+        'tool/wire_generated_api.sh.',
+      );
 
   @override
   Future<void> initDb(String path) async => _missing();
 
   @override
-  Future<void> openBox(String name, {String? encryptionKey}) async => _missing();
+  Future<void> openBox(String name, {String? encryptionKey}) async =>
+      _missing();
 
   @override
   Future<void> closeBox(String name) async => _missing();
@@ -51,7 +52,8 @@ final class UnavailableNativeDxtrApi implements NativeDxtrApi {
   Future<void> putAll(
     String boxName,
     Map<String, Uint8List> values,
-  ) async => _missing();
+  ) async =>
+      _missing();
 
   @override
   Future<Uint8List?> get(String boxName, String key) async => _missing();
