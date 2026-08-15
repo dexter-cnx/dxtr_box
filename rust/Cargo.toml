@@ -1,10 +1,11 @@
 [package]
-name = "dxtr_box_rust"
+name = "rust_lib_dxtr_box"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [lib]
+name = "rust_lib_dxtr_box"
 crate-type = ["cdylib", "staticlib"]
 
 [lints.rust]

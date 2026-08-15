@@ -27,17 +27,3 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   integration_test:
     sdk: flutter
-
-flutter:
-  plugin:
-    platforms:
-      android:
-        ffiPlugin: true
-      ios:
-        ffiPlugin: true
-      macos:
-        ffiPlugin: true
-      linux:
-        ffiPlugin: true
-      windows:
-        ffiPlugin: true
