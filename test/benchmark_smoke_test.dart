@@ -28,8 +28,10 @@ void main() {
         }
       });
 
-      final dxtrRoot = Directory('${root.path}/dxtr')..createSync(recursive: true);
-      final hiveRoot = Directory('${root.path}/hive')..createSync(recursive: true);
+      final dxtrRoot = Directory('${root.path}/dxtr')
+        ..createSync(recursive: true);
+      final hiveRoot = Directory('${root.path}/hive')
+        ..createSync(recursive: true);
 
       await DxtrBox.init(path: dxtrRoot.path);
       Hive.init(hiveRoot.path);
