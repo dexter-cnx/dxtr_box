@@ -1,0 +1,56 @@
+name: Temporary FRB Query Sync
+
+on:
+  push:
+    branches:
+      - feature/0.3-query-index-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.repository == 'dexter-cnx/dxtr_box'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-query-index-foundation
+          fetch-depth: 0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install flutter_rust_bridge_codegen 2.8.0
+        run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
+
+      - name: Regenerate bindings
+        run: |
+          flutter_rust_bridge_codegen generate
+          dart format lib/src/rust
+
+      - name: Commit exact generated output
+        run: |
+          if git diff --quiet -- lib/src/rust rust/src/frb_generated.rs; then
+            echo 'FRB bindings already synchronized.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/src/rust rust/src/frb_generated.rs
+          git commit -m 'chore: regenerate query FRB bindings'
+          git push origin HEAD:feature/0.3-query-index-foundation
