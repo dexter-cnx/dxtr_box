@@ -60,5 +60,30 @@ replace_once(
     '''        for key in keys {\n            table.remove(key.as_str()).map_err(|e| e.to_string())?;\n        }\n    }\n    write.commit().map_err(|e| e.to_string())\n}\n\n#[cfg(feature = "maintenance")]''',
     '''        for key in keys {\n            table.remove(key.as_str()).map_err(|e| e.to_string())?;\n        }\n        #[cfg(feature = "full")]\n        index::clear_entries(&write)?;\n    }\n    write.commit().map_err(|e| e.to_string())\n}\n\n#[cfg(feature = "maintenance")]''',
 )
-
 path.write_text(text)
+
+api_path = Path('rust/src/api.rs')
+api = api_path.read_text()
+
+
+def api_replace_once(old: str, new: str) -> None:
+    global api
+    count = api.count(old)
+    if count != 1:
+        raise SystemExit(f'api expected one match, got {count}: {old[:120]!r}')
+    api = api.replace(old, new, 1)
+
+
+api_replace_once(
+    '#[cfg(feature = "full")]\nuse crate::query;\nuse crate::{db, frb_generated::StreamSink};',
+    '#[cfg(feature = "full")]\nuse crate::{index, query};\nuse crate::{db, frb_generated::StreamSink};',
+)
+api_replace_once(
+    '''pub struct NativeQueryRecord {\n    pub key: String,\n    pub value: Vec<u8>,\n}\n''',
+    '''pub struct NativeQueryRecord {\n    pub key: String,\n    pub value: Vec<u8>,\n}\n\npub struct NativeIndexDefinition {\n    pub name: String,\n    pub field: String,\n}\n''',
+)
+api_replace_once(
+    '''pub fn get_all_keys(box_name: String) -> Result<Vec<String>, String> {\n    db::all_keys(&box_name)\n}''',
+    '''pub fn create_index(box_name: String, name: String, field: String) -> Result<(), String> {\n    #[cfg(feature = "full")]\n    {\n        let mutation_lock = mutation_lock(&box_name);\n        let _mutation_guard = mutation_lock.lock();\n        let (db, encryption) = db::database(&box_name)?;\n        index::create(&db, &encryption, &name, &field)\n    }\n\n    #[cfg(not(feature = "full"))]\n    {\n        let _ = (box_name, name, field);\n        Err("persisted indexes require the full profile".to_string())\n    }\n}\n\npub fn list_indexes(box_name: String) -> Result<Vec<NativeIndexDefinition>, String> {\n    #[cfg(feature = "full")]\n    {\n        let (db, _) = db::database(&box_name)?;\n        return index::list(&db).map(|definitions| {\n            definitions\n                .into_iter()\n                .map(|(name, field)| NativeIndexDefinition { name, field })\n                .collect()\n        });\n    }\n\n    #[cfg(not(feature = "full"))]\n    {\n        let _ = box_name;\n        Err("persisted indexes require the full profile".to_string())\n    }\n}\n\npub fn drop_index(box_name: String, name: String) -> Result<bool, String> {\n    #[cfg(feature = "full")]\n    {\n        let mutation_lock = mutation_lock(&box_name);\n        let _mutation_guard = mutation_lock.lock();\n        let (db, _) = db::database(&box_name)?;\n        index::drop_index(&db, &name)\n    }\n\n    #[cfg(not(feature = "full"))]\n    {\n        let _ = (box_name, name);\n        Err("persisted indexes require the full profile".to_string())\n    }\n}\n\npub fn get_all_keys(box_name: String) -> Result<Vec<String>, String> {\n    db::all_keys(&box_name)\n}''',
+)
+api_path.write_text(api)
