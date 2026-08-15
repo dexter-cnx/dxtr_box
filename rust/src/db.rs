@@ -16,6 +16,9 @@ use crate::index;
 
 pub(crate) const DATA: TableDefinition<&str, &[u8]> = TableDefinition::new("data");
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
+#[cfg(not(feature = "full"))]
+const INDEX_DEFINITIONS_GUARD: TableDefinition<&str, &str> =
+    TableDefinition::new("index_definitions");
 const META_FORMAT_VERSION: &str = "format_version";
 const META_ENCRYPTION_MODE: &str = "encryption_mode";
 #[cfg(feature = "encryption")]
@@ -333,6 +336,20 @@ pub fn init(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(feature = "full"))]
+fn reject_persisted_indexes_without_full(db: &Database) -> Result<(), String> {
+    let read = db.begin_read().map_err(|e| e.to_string())?;
+    if let Ok(table) = read.open_table(INDEX_DEFINITIONS_GUARD) {
+        if table.len().map_err(|e| e.to_string())? > 0 {
+            return Err(
+                "box has persisted indexes and requires the full native profile for safe mutation"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
     validate_name(name)?;
     if matches!(encryption_key, Some("")) {
@@ -385,6 +402,9 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
             return Err(error);
         }
     };
+
+    #[cfg(not(feature = "full"))]
+    reject_persisted_indexes_without_full(&db)?;
 
     #[cfg(feature = "full")]
     index::ensure_tables(&db)?;
