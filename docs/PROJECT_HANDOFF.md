@@ -235,7 +235,39 @@ Current scenarios include:
 
 Benchmark timing is informational. CI verifies that the harness executes successfully but does not gate merges on absolute timing from shared runners.
 
-Future benchmark work should add retained result artifacts, file-size reporting, more payload sizes, and environment/build metadata before performance claims are published.
+### Current smoke baseline — CI #105 / PR #8
+
+The first real comparative smoke run used Ubuntu 24.04 on a GitHub-hosted x86_64 runner, Flutter 3.47.0, Rust 1.97.1, 100 logical operations per scenario, and five samples per engine. Median timings were:
+
+| Scenario | dxtr_box median | hive_ce median | dxtr_box / hive_ce |
+| --- | ---: | ---: | ---: |
+| sequential put | 75.314 ms | 38.026 ms | 1.98x |
+| batch put | 11.444 ms | 1.520 ms | 7.53x |
+| point get | 28.289 ms | 0.051 ms | 554.69x |
+| contains | 25.936 ms | 0.033 ms | 785.94x |
+| deleteAll | 6.946 ms | 2.464 ms | 2.82x |
+| reopen + read | 25.315 ms | 4.198 ms | 6.03x |
+
+Interpretation rules:
+
+- These are **smoke/informational measurements**, not publishable performance claims and not merge gates.
+- Shared-runner timing, small operation counts, engine architecture differences, warm-cache behavior, serialization, and FFI crossings can dominate microbenchmarks.
+- The result is nevertheless large enough to justify focused investigation of `point_get` and `contains` before making any performance claim.
+- Do not state that redb itself is hundreds of times slower than Hive CE. The current benchmark measures the complete Dart API path, not raw redb.
+
+Recommended performance investigation sequence:
+
+```text
+Dart public API
+  -> Dart serialization / MessagePack cost
+  -> FRB/FFI boundary cost
+  -> Rust API cost
+  -> raw redb operation cost
+```
+
+Add focused benchmarks that isolate each layer, especially `point_get` and `contains`, and determine whether the dominant cost comes from repeated FFI crossings, serialization/deserialization, transaction/open-handle behavior, or the storage engine itself. Preserve correctness and durable-storage semantics while optimizing; do not introduce a fake Dart-side value cache merely to win a microbenchmark unless its lifecycle/coherency contract is explicitly designed.
+
+Future benchmark work should also add retained result artifacts, file-size reporting, multiple payload sizes and key distributions, larger operation counts, warm/cold runs, release/AOT-representative execution where practical, and environment/build metadata before performance claims are published.
 
 ## Developer workflow
 
@@ -345,10 +377,11 @@ This validates the measurement harness, not a cross-commit size budget. A later 
 ## Next implementation sequence
 
 1. Merge PR #13 after final documentation CI remains green.
-2. Begin 0.3 query/index work while preserving the validated minimal/encryption/full profile contract.
-3. Design cross-commit binary-size regression policy separately; do not block query/index work on it.
-4. Keep Dart 3.13 recorded-use/native tree shaking deferred.
-5. Before 1.0 RC, execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.
+2. Add layered performance diagnostics for `point_get` and `contains` so Dart/serialization/FRB/Rust/redb costs are measured separately; treat the existing PR #8 smoke numbers as informational only.
+3. Begin 0.3 query/index work while preserving the validated minimal/encryption/full profile contract; performance diagnostics may proceed independently and must not justify correctness regressions.
+4. Design cross-commit binary-size regression policy separately; do not block query/index work on it.
+5. Keep Dart 3.13 recorded-use/native tree shaking deferred.
+6. Before 1.0 RC, execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.
 
 ## Dart 3.13 native tree-shaking — FUTURE ONLY
 
