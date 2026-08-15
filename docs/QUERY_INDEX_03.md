@@ -1,5 +1,20 @@
 # Query / Index 0.3 Design Contract
 
+## Status after PR #14
+
+The first executable 0.3 query/index slice is implemented and validated:
+
+- `Box.query(BoxQuery)` serializes the public Dart AST with `DxtrCodec` and performs one FRB call per query.
+- Rust decodes the query once, evaluates comparisons/groups against committed native records, supports dotted nested-field lookup, and applies deterministic key ordering before pagination.
+- Native scans work for plaintext and encrypted boxes. Encrypted records are decrypted only inside the trusted native storage path.
+- Persisted named scalar secondary-index definitions and entries exist in redb under the `full` profile.
+- Index create/backfill/drop and primary mutation maintenance are transactionally coupled to redb writes.
+- Encrypted boxes intentionally reject persisted index creation until a non-leaking encrypted-index representation is designed; native scan queries remain available.
+- Plaintext -> encrypted migration is rejected while persisted index definitions exist, preventing a security-mode transition that would leave plaintext-derived index state behind.
+- The query planner does **not** consume persisted indexes yet. Native scan remains the authoritative execution path, so scan/index equivalence is the next milestone rather than an implicit assumption.
+
+PR #14 final head was validated by the normal CI and Platform Builds workflows across the existing supported toolchains and native profile matrix.
+
 ## Scope
 
 0.3 introduces structured query and secondary-index capabilities without weakening the existing storage, encryption, durability, lifecycle, or Cargo profile contracts.
@@ -8,17 +23,19 @@ The milestone is intentionally split into layers so the public Dart query model 
 
 ## Profile contract remains unchanged
 
-The established native profiles remain:
+The established native profiles remain exactly three public product profiles:
 
 ```text
 minimal     = CRUD + lifecycle + native watch
 encryption  = minimal + encrypted create/open/read/write
-full        = encryption + maintenance (compact + plaintext migration)
+full        = encryption + maintenance + query/index implementation
 ```
+
+`full` may include internal optional dependencies needed by query/index execution (currently `rmpv`) without introducing a fourth public profile.
 
 Do not add a fourth public build profile just for query/index work.
 
-During 0.3, query/index implementation must preserve these three named profiles and their ordering. Query/index capability must not silently redefine `minimal`, `encryption`, or `full`. Any future decision to conditionally compile query/index machinery requires an explicit profile-contract review rather than an incidental Cargo edit.
+During 0.3, query/index implementation must preserve these three named profiles and their ordering. Reduced builds retain the stable FRB symbol surface and fail explicitly when a query/index operation requires `full`.
 
 ## Binary-size regression policy is separate
 
@@ -48,7 +65,7 @@ This keeps call sites readable while retaining enough domain context to avoid ov
 
 ## Dart query model
 
-The foundation exposes a declarative AST:
+The public declarative AST is:
 
 ```text
 BoxQuery
@@ -84,7 +101,7 @@ profile.age
 address.country
 ```
 
-The Dart AST is intentionally execution-agnostic. It can be serialized across FRB and evaluated by a native scan before secondary indexes exist, then planned against indexes later without changing normal call-site query construction.
+The Dart AST is execution-agnostic. It is serialized across FRB and currently evaluated by the native scan executor. The planner can consume persisted indexes later without changing normal query construction.
 
 ## Initial index contract
 
@@ -97,17 +114,18 @@ IndexDefinition(
 )
 ```
 
-Initial constraints:
+Current constraints:
 
 - one indexed dotted field path per index;
 - scalar index keys only;
 - no implicit full-text semantics;
 - no composite indexes yet;
 - no multi-value/list expansion yet;
-- no uniqueness guarantee in the first implementation;
-- index names are explicit and stable.
+- no uniqueness guarantee;
+- index names are explicit and stable;
+- persisted index creation is currently plaintext-only.
 
-Composite, text, unique, list/multi-value, and collation-aware indexes are follow-up capabilities and must not be smuggled into the first storage format.
+Composite, text, unique, list/multi-value, collation-aware, and encrypted persisted-index representations are follow-up capabilities and must not be smuggled into the first storage format.
 
 ## Storage architecture
 
@@ -117,57 +135,89 @@ The existing primary record table remains authoritative:
 data: record key -> MessagePack payload or encrypted payload
 ```
 
-Secondary indexes are derived state. They must never become the only copy of user data.
+Secondary indexes are derived state. They never become the only copy of user data.
 
-The target persisted-index layout is conceptually:
+The persisted-index layout is:
 
 ```text
 data
 meta
-index_definitions
-index_entries
+index_definitions   # name -> dotted field path
+index_entries       # encoded composite index entry -> record key payload
 ```
 
-Index mutation must be transactionally coupled to primary-record mutation. A committed `put`, `putAll`, `delete`, `deleteAll`, or `clear` must not leave an index representing a different committed database state.
+Index entry keys use an encoded binary composite representation rather than delimiter concatenation.
+
+Index mutation is transactionally coupled to primary-record mutation. A committed `put`, `putAll`, `delete`, `deleteAll`, or `clear` cannot leave an index representing a different committed database state.
+
+Index creation validates the definition, backfills current primary data, persists the definition, and commits derived entries atomically. Dropping an index removes its definition and derived entries.
 
 ## Encryption semantics
 
 For encrypted boxes:
 
 - primary payloads remain authenticated ciphertext at rest;
-- query/index code may inspect decrypted MessagePack only inside the native trusted storage path;
+- native scan code may inspect decrypted MessagePack only inside the trusted storage path;
 - persisted secondary index keys must not silently leak plaintext indexed values.
 
-Therefore the first persisted-index implementation must explicitly choose and document an encrypted-index representation before encrypted-box indexes are enabled. Until that representation is implemented, encrypted query execution may use a native scan and encrypted boxes must reject persisted index creation rather than leaking fields.
+Therefore encrypted boxes currently reject persisted index creation. This is intentional, not an implementation gap to bypass. Native scan queries remain supported for encrypted boxes.
 
-## Query execution sequence
+A plaintext box with persisted index definitions also cannot be migrated to encrypted storage until an encrypted-index representation and migration semantics are designed.
 
-Implementation sequence:
+## Query execution
+
+Current execution path:
+
+```text
+Box.query(BoxQuery)
+  -> validate/serialize AST with DxtrCodec
+  -> NativeQueryApi.scanQuery
+  -> one FRB call
+  -> Rust decode query once
+  -> enumerate committed native records
+  -> decrypt when box is encrypted
+  -> decode MessagePack value
+  -> evaluate comparison/group predicate
+  -> deterministic record-key ordering
+  -> apply offset/limit
+  -> return matching key + payload records in one FRB response
+  -> Dart decode payloads
+```
+
+This satisfies the one-FRB-call-per-query requirement. The current scan implementation is not yet a single-redb-read-transaction executor; improving internal scan transaction shape is a performance/architecture follow-up and must preserve semantics.
+
+## Planner sequence
+
+Completed:
 
 1. Dart query/index AST and validation.
 2. Stable native transport representation for the AST.
 3. Native scan query returning matching record keys and payloads in one FRB boundary crossing.
-4. Query semantics tests against plaintext and encrypted boxes.
+4. Query semantics coverage for plaintext and encrypted boxes.
 5. Persisted index definition metadata.
 6. Transactional index maintenance for put/putAll/delete/deleteAll/clear.
-7. Index backfill/create/drop operations with deterministic busy/lifecycle behavior.
-8. Query planner choosing eligible index vs native scan while preserving identical results.
-9. Explain/diagnostic metadata only after planner behavior is stable.
+7. Index create/backfill/list/drop lifecycle.
+
+Next:
+
+8. Query planner choosing an eligible persisted index vs native scan while preserving identical logical results and deterministic ordering.
+9. Add explicit scan/index equivalence tests for every planner-eligible operator.
+10. Explain/diagnostic metadata only after planner behavior is stable.
 
 ## Correctness rules
 
 - Query results are based on native committed truth, not stale Dart key metadata.
 - No Dart whole-box value cache is introduced to make queries appear fast.
-- Scan and indexed execution must return equivalent logical results.
-- Pagination is applied deterministically after predicate evaluation according to the defined result ordering.
-- Result ordering must be documented before indexed execution is exposed publicly. Do not rely on accidental redb iteration order as an API guarantee.
+- Scan and indexed execution must return equivalent logical results once the planner is enabled.
+- Pagination is applied deterministically after predicate evaluation according to documented record-key ordering unless a future explicit sort contract supersedes it.
 - Index creation/backfill failure must not corrupt primary data.
-- Opening an older box without index metadata must continue to work.
+- Opening an older box without index metadata continues to work.
 - Index format changes require explicit persisted-version handling.
+- Reduced profiles must fail explicitly for unavailable query/index operations rather than silently changing behavior.
 
 ## Testing gates
 
-Before 0.3 query/index is considered complete:
+Current PR #14 coverage includes:
 
 ```text
 Dart
@@ -175,35 +225,39 @@ Dart
   nested field paths
   boolean groups
   pagination validation
+  Box.query facade behavior
+  index facade capability behavior
 
 Rust/native scan
-  all comparison operators
+  comparison/group evaluation
   nested map lookup
-  missing field vs null semantics
-  encrypted scan parity
-  one native call per query, not one FFI call per record
+  encrypted scan support
+  one native call per query
+  deterministic record ordering before pagination
 
 Persisted indexes
-  create/backfill/drop
-  put/putAll maintenance
-  delete/deleteAll/clear maintenance
-  reopen persistence
-  scan/index result equivalence
-  failure safety
-  unsupported encrypted-index behavior until secure representation exists
+  create/backfill/list/drop
+  mutation maintenance
+  reopen definition persistence
+  encrypted-index rejection
+  migration guard when persisted indexes exist
 
 Profiles
-  minimal remains green
-  encryption remains green
-  full remains green
+  minimal green
+  encryption green
+  full green
 ```
+
+Before planner/index execution is considered complete, add comprehensive scan/index result-equivalence and planner-selection tests across supported operators and nested fields.
 
 ## Out of scope for this slice
 
+- query planner/index-backed execution;
 - cross-commit binary-size regression policy;
 - Dart 3.13 recorded-use/native tree shaking;
 - full-text search;
 - composite or unique indexes;
+- encrypted persisted-index representation;
 - schema migration/custom-object work;
 - Hive-file migration implementation.
 
