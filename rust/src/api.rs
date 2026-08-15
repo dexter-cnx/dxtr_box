@@ -4,7 +4,7 @@ use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 
-#[cfg(feature = "query")]
+#[cfg(feature = "full")]
 use crate::query;
 use crate::{db, frb_generated::StreamSink};
 
@@ -268,7 +268,7 @@ pub fn scan_query(
     box_name: String,
     query_payload: Vec<u8>,
 ) -> Result<Vec<NativeQueryRecord>, String> {
-    #[cfg(feature = "query")]
+    #[cfg(feature = "full")]
     {
         let spec = query::decode_query(&query_payload)?;
         let mut keys = db::all_keys(&box_name)?;
@@ -295,7 +295,7 @@ pub fn scan_query(
         Ok(results)
     }
 
-    #[cfg(not(feature = "query"))]
+    #[cfg(not(feature = "full"))]
     {
         let _ = (box_name, query_payload);
         Err("native query execution requires the full profile".to_string())
