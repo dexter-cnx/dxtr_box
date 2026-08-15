@@ -104,6 +104,13 @@ pub fn delete_box(name: String) -> Result<(), String> {
 }
 
 #[frb(sync)]
+pub fn encrypt_box(name: String, encryption_key: String) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&name);
+    let _mutation_guard = mutation_lock.lock();
+    db::encrypt_box(&name, &encryption_key)
+}
+
+#[frb(sync)]
 pub fn box_exists(name: String) -> Result<bool, String> {
     db::box_exists(&name)
 }
