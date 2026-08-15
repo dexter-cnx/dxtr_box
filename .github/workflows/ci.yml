@@ -191,7 +191,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-size-linux-x64
-          path: build/native-size
+          path: build/native-size/native-size-baseline.tsv
           if-no-files-found: error
           retention-days: 14
 
