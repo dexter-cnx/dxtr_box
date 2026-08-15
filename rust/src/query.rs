@@ -47,10 +47,7 @@ pub fn decode_query(bytes: &[u8]) -> Result<QuerySpec, String> {
     let value = decode_dxtr(bytes)?;
     let map = as_map(&value)?;
     let filter = parse_filter(required(map, "where")?)?;
-    let limit = optional(map, "limit")
-        .map(as_usize)
-        .transpose()?
-        .flatten();
+    let limit = optional(map, "limit").map(as_usize).transpose()?.flatten();
     let offset = optional(map, "offset")
         .map(as_usize)
         .transpose()?
@@ -69,36 +66,6 @@ pub fn decode_query(bytes: &[u8]) -> Result<QuerySpec, String> {
 pub fn matches_record(payload: &[u8], filter: &Filter) -> Result<bool, String> {
     let record = decode_dxtr(payload)?;
     matches_filter(&record, filter)
-}
-
-pub fn index_scalar_key(payload: &[u8], field: &str) -> Result<Option<String>, String> {
-    let record = decode_dxtr(payload)?;
-    let Some(value) = lookup_field(&record, field) else {
-        return Ok(None);
-    };
-    if !is_index_scalar(value) {
-        return Err(format!(
-            "field '{field}' contains a value unsupported by scalar indexes"
-        ));
-    }
-    let mut encoded = Vec::new();
-    rmpv::encode::write_value(&mut encoded, value).map_err(|e| e.to_string())?;
-    Ok(Some(to_hex(&encoded)))
-}
-
-pub fn validate_index_definition(name: &str, field: &str) -> Result<(), String> {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() => {}
-        _ => return Err("index name must start with a letter".to_string()),
-    }
-    if !name
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-    {
-        return Err("index name may contain only letters, digits, _ or -".to_string());
-    }
-    validate_field(field)
 }
 
 fn parse_filter(value: &Value) -> Result<Filter, String> {
@@ -183,14 +150,24 @@ fn matches_comparison(record: &Value, comparison: &Comparison) -> Result<bool, S
     let result = match comparison.op {
         CompareOp::IsNull => actual.is_nil(),
         CompareOp::IsNotNull => !actual.is_nil(),
-        CompareOp::Equal => comparison.value.as_ref().is_some_and(|value| values_equal(actual, value)),
-        CompareOp::NotEqual => comparison.value.as_ref().is_some_and(|value| !values_equal(actual, value)),
-        CompareOp::GreaterThan => compare(actual, comparison.value.as_ref())? == Some(Ordering::Greater),
+        CompareOp::Equal => comparison
+            .value
+            .as_ref()
+            .is_some_and(|value| values_equal(actual, value)),
+        CompareOp::NotEqual => comparison
+            .value
+            .as_ref()
+            .is_some_and(|value| !values_equal(actual, value)),
+        CompareOp::GreaterThan => {
+            compare(actual, comparison.value.as_ref())? == Some(Ordering::Greater)
+        }
         CompareOp::GreaterThanOrEqual => matches!(
             compare(actual, comparison.value.as_ref())?,
             Some(Ordering::Greater | Ordering::Equal)
         ),
-        CompareOp::LessThan => compare(actual, comparison.value.as_ref())? == Some(Ordering::Less),
+        CompareOp::LessThan => {
+            compare(actual, comparison.value.as_ref())? == Some(Ordering::Less)
+        }
         CompareOp::LessThanOrEqual => matches!(
             compare(actual, comparison.value.as_ref())?,
             Some(Ordering::Less | Ordering::Equal)
@@ -229,9 +206,9 @@ fn lookup_field<'a>(record: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = record;
     for segment in path.split('.') {
         let map = current.as_map()?;
-        current = map.iter().find_map(|(key, value)| {
-            (key.as_str() == Some(segment)).then_some(value)
-        })?;
+        current = map
+            .iter()
+            .find_map(|(key, value)| (key.as_str() == Some(segment)).then_some(value))?;
     }
     Some(current)
 }
@@ -344,15 +321,6 @@ fn as_f64(value: &Value) -> Option<f64> {
         .or_else(|| value.as_u64().map(|value| value as f64))
 }
 
-fn is_index_scalar(value: &Value) -> bool {
-    value.is_nil()
-        || value.is_bool()
-        || value.is_i64()
-        || value.is_u64()
-        || value.is_f64()
-        || value.is_str()
-}
-
 fn validate_field(field: &str) -> Result<(), String> {
     if field.is_empty()
         || field.starts_with('.')
@@ -364,27 +332,13 @@ fn validate_field(field: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn to_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn evaluates_nested_and_group() {
-        let payload = rmp_serde::to_vec(&vec![
-            "@dxtr:map",
-            "placeholder",
-        ])
-        .unwrap();
+    fn rejects_invalid_dxtr_map_payload() {
+        let payload = rmp_serde::to_vec(&vec!["@dxtr:map", "placeholder"]).unwrap();
         assert!(decode_dxtr(&payload).is_err());
     }
 }
