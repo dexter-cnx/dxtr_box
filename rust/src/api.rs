@@ -5,6 +5,8 @@ use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 
 use crate::{db, frb_generated::StreamSink};
+#[cfg(feature = "query")]
+use crate::query;
 
 #[derive(Clone)]
 pub enum NativeBoxEventType {
@@ -19,6 +21,11 @@ pub struct NativeBoxEvent {
     pub event_type: NativeBoxEventType,
     pub key: Option<String>,
     pub value: Option<Vec<u8>>,
+}
+
+pub struct NativeQueryRecord {
+    pub key: String,
+    pub value: Vec<u8>,
 }
 
 type Watchers = HashMap<String, HashMap<String, StreamSink<NativeBoxEvent>>>;
@@ -139,10 +146,6 @@ pub fn watch_box(
 
     let mutation_lock = mutation_lock(&box_name);
     let _mutation_guard = mutation_lock.lock();
-
-    // The mutation lock makes registration an ordering boundary: a watcher is
-    // either present before a committed mutation is published or is registered
-    // only after that mutation and its event have completed.
     db::len(&box_name)?;
     WATCHERS
         .write()
@@ -258,6 +261,44 @@ pub fn compact(box_name: String) -> Result<bool, String> {
     {
         let _ = box_name;
         Err("compaction requires native feature 'maintenance'".to_string())
+    }
+}
+
+pub fn scan_query(
+    box_name: String,
+    query_payload: Vec<u8>,
+) -> Result<Vec<NativeQueryRecord>, String> {
+    #[cfg(feature = "query")]
+    {
+        let spec = query::decode_query(&query_payload)?;
+        let mut keys = db::all_keys(&box_name)?;
+        keys.sort();
+        let mut matched = 0usize;
+        let mut results = Vec::new();
+        for key in keys {
+            let Some(value) = db::get(&box_name, &key)? else {
+                continue;
+            };
+            if !query::matches_record(&value, &spec.filter)? {
+                continue;
+            }
+            if matched < spec.offset {
+                matched += 1;
+                continue;
+            }
+            results.push(NativeQueryRecord { key, value });
+            matched += 1;
+            if spec.limit.is_some_and(|limit| results.len() >= limit) {
+                break;
+            }
+        }
+        Ok(results)
+    }
+
+    #[cfg(not(feature = "query"))]
+    {
+        let _ = (box_name, query_payload);
+        Err("native query execution requires the full profile".to_string())
     }
 }
 
