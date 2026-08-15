@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 
 use crate::{db, frb_generated::StreamSink};
 
@@ -22,8 +22,22 @@ pub struct NativeBoxEvent {
 }
 
 type Watchers = HashMap<String, HashMap<String, StreamSink<NativeBoxEvent>>>;
+type MutationLocks = HashMap<String, Arc<Mutex<()>>>;
 
 static WATCHERS: Lazy<RwLock<Watchers>> = Lazy::new(|| RwLock::new(HashMap::new()));
+static MUTATION_LOCKS: Lazy<RwLock<MutationLocks>> = Lazy::new(|| RwLock::new(HashMap::new()));
+
+fn mutation_lock(box_name: &str) -> Arc<Mutex<()>> {
+    if let Some(lock) = MUTATION_LOCKS.read().get(box_name).cloned() {
+        return lock;
+    }
+
+    MUTATION_LOCKS
+        .write()
+        .entry(box_name.to_string())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 fn emit_event(event: NativeBoxEvent) {
     let subscribers = WATCHERS
@@ -47,13 +61,16 @@ fn emit_event(event: NativeBoxEvent) {
     }
 
     let mut all_watchers = WATCHERS.write();
-    if let Some(watchers) = all_watchers.get_mut(&event.box_name) {
+    let remove_box = if let Some(watchers) = all_watchers.get_mut(&event.box_name) {
         for id in failed {
             watchers.remove(&id);
         }
-        if watchers.is_empty() {
-            all_watchers.remove(&event.box_name);
-        }
+        watchers.is_empty()
+    } else {
+        false
+    };
+    if remove_box {
+        all_watchers.remove(&event.box_name);
     }
 }
 
@@ -80,6 +97,8 @@ pub fn close_box(name: String) -> Result<(), String> {
 
 #[frb(sync)]
 pub fn delete_box(name: String) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&name);
+    let _mutation_guard = mutation_lock.lock();
     db::delete_box(&name)?;
     WATCHERS.write().remove(&name);
     Ok(())
@@ -100,7 +119,12 @@ pub fn watch_box(
         return Err("watcher id cannot be empty".to_string());
     }
 
-    // Validate that the box is currently open before publishing a stream.
+    let mutation_lock = mutation_lock(&box_name);
+    let _mutation_guard = mutation_lock.lock();
+
+    // The mutation lock makes registration an ordering boundary: a watcher is
+    // either present before a committed mutation is published or is registered
+    // only after that mutation and its event have completed.
     db::len(&box_name)?;
     WATCHERS
         .write()
@@ -112,17 +136,24 @@ pub fn watch_box(
 
 #[frb(sync)]
 pub fn unwatch_box(box_name: String, watcher_id: String) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&box_name);
+    let _mutation_guard = mutation_lock.lock();
     let mut all_watchers = WATCHERS.write();
-    if let Some(watchers) = all_watchers.get_mut(&box_name) {
+    let remove_box = if let Some(watchers) = all_watchers.get_mut(&box_name) {
         watchers.remove(&watcher_id);
-        if watchers.is_empty() {
-            all_watchers.remove(&box_name);
-        }
+        watchers.is_empty()
+    } else {
+        false
+    };
+    if remove_box {
+        all_watchers.remove(&box_name);
     }
     Ok(())
 }
 
 pub fn put(box_name: String, key: String, value: Vec<u8>) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&box_name);
+    let _mutation_guard = mutation_lock.lock();
     db::put(&box_name, &key, &value)?;
     emit_event(NativeBoxEvent {
         box_name,
@@ -134,6 +165,8 @@ pub fn put(box_name: String, key: String, value: Vec<u8>) -> Result<(), String> 
 }
 
 pub fn put_all(box_name: String, entries: Vec<(String, Vec<u8>)>) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&box_name);
+    let _mutation_guard = mutation_lock.lock();
     db::put_all(&box_name, &entries)?;
     for (key, value) in entries {
         emit_event(NativeBoxEvent {
@@ -155,6 +188,8 @@ pub fn contains_key(box_name: String, key: String) -> Result<bool, String> {
 }
 
 pub fn delete(box_name: String, key: String) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&box_name);
+    let _mutation_guard = mutation_lock.lock();
     db::delete(&box_name, &key)?;
     emit_event(NativeBoxEvent {
         box_name,
@@ -166,6 +201,8 @@ pub fn delete(box_name: String, key: String) -> Result<(), String> {
 }
 
 pub fn clear(box_name: String) -> Result<(), String> {
+    let mutation_lock = mutation_lock(&box_name);
+    let _mutation_guard = mutation_lock.lock();
     db::clear(&box_name)?;
     emit_event(NativeBoxEvent {
         box_name,
