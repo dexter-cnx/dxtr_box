@@ -118,7 +118,15 @@ Native watch remains part of `minimal` because the current public `DxtrBox.open(
 
 The FRB symbol surface stays stable across profiles. If a reduced native build receives a call for functionality it does not contain, the operation fails explicitly rather than silently no-oping. In particular, `compact()` requires `maintenance`, and plaintext -> encrypted migration requires both `encryption` and `maintenance`.
 
-CI builds/tests all three profiles and records a same-run Linux x86_64 native binary-size comparison. Absolute size thresholds are intentionally not enforced yet; measured baselines will be documented only after the size harness produces a reproducible artifact.
+PR #12 CI #144 validated the first same-run Linux x86_64 release-library baseline:
+
+| Profile | Bytes | Delta vs minimal |
+| --- | ---: | ---: |
+| `minimal` | 1,893,736 | baseline |
+| `encryption` | 1,992,296 | +98,560 (+5.2%) |
+| `full` | 2,032,312 | +138,576 (+7.3%) |
+
+These measurements are specific to that Linux x86_64 CI environment and are informational, not cross-platform package-size claims. CI retains only the `native-size-baseline.tsv` metadata artifact; Cargo target directories are not uploaded. No absolute size threshold is enforced until repeated controlled measurements are stable enough to justify a regression gate.
 
 See [`docs/NATIVE_FEATURE_PROFILES.md`](docs/NATIVE_FEATURE_PROFILES.md) and [`docs/CARGO_FEATURE_SIZE_HANDOFF.md`](docs/CARGO_FEATURE_SIZE_HANDOFF.md).
 
@@ -155,8 +163,8 @@ Additional targets cover FRB regeneration, Rust-only checks, a larger local benc
 
 - [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, encryption, deleteAll, compaction, migration, and native profile flow.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmark methodology, local commands, profile matrix, and CI gates.
-- [Native feature profiles](docs/NATIVE_FEATURE_PROFILES.md) — minimal/encryption/full Cargo contracts and reduced-profile behavior.
-- [Cargo feature + size handoff](docs/CARGO_FEATURE_SIZE_HANDOFF.md) — active binary-size baseline milestone and acceptance gate.
+- [Native feature profiles](docs/NATIVE_FEATURE_PROFILES.md) — minimal/encryption/full Cargo contracts, measured Linux x86_64 baseline, and reduced-profile behavior.
+- [Cargo feature + size handoff](docs/CARGO_FEATURE_SIZE_HANDOFF.md) — feature/profile design and binary-size baseline acceptance trail.
 - [Plaintext -> encrypted migration](docs/PLAINTEXT_ENCRYPTION_MIGRATION.md) — explicit API, atomicity, lifecycle, and recovery contract.
 - [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
 - [Future native tree shaking](docs/FUTURE_NATIVE_TREE_SHAKING.md) — why Dart 3.13 native tree shaking is useful later, why it is deferred now, and the compatibility gate for revisiting it.
@@ -208,9 +216,9 @@ Current coverage includes:
 
 ### 0.2.0 — Hive parity foundation
 
-- Cargo feature splitting for optional functionality
+- Cargo feature splitting for optional functionality — implemented in PR #12
 - retained benchmark result format and file-size reporting
-- binary-size baselines for minimal CRUD, CRUD+encryption, and full feature builds
+- binary-size baselines for minimal CRUD, CRUD+encryption, and full feature builds — first Linux x86_64 baseline implemented in PR #12
 
 ### 0.3.0 — Query & migration
 
@@ -221,7 +229,7 @@ Current coverage includes:
 
 ### 0.4.0 — Production hardening
 
-- binary-size regression checks
+- binary-size regression checks after repeated baseline validation
 - package-quality hardening
 - comparison vs hive_ce / isar_community / objectbox / drift
 
