@@ -165,9 +165,7 @@ fn matches_comparison(record: &Value, comparison: &Comparison) -> Result<bool, S
             compare(actual, comparison.value.as_ref())?,
             Some(Ordering::Greater | Ordering::Equal)
         ),
-        CompareOp::LessThan => {
-            compare(actual, comparison.value.as_ref())? == Some(Ordering::Less)
-        }
+        CompareOp::LessThan => compare(actual, comparison.value.as_ref())? == Some(Ordering::Less),
         CompareOp::LessThanOrEqual => matches!(
             compare(actual, comparison.value.as_ref())?,
             Some(Ordering::Less | Ordering::Equal)
