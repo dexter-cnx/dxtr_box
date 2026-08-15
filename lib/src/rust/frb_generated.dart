@@ -609,47 +609,71 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
     return AnyhowException(raw as String);
   }
 
   @protected
   RustStreamSink<NativeBoxEvent> dco_decode_StreamSink_native_box_event_Sse(
       dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
     throw UnimplementedError();
   }
 
   @protected
-  String dco_decode_String(dynamic raw) => raw as String;
+  String dco_decode_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as String;
+  }
 
   @protected
-  bool dco_decode_bool(dynamic raw) => raw as bool;
+  bool dco_decode_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
 
   @protected
-  int dco_decode_i_32(dynamic raw) => raw as int;
+  int dco_decode_i_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
 
   @protected
-  List<String> dco_decode_list_String(dynamic raw) =>
-      (raw as List<dynamic>).map(dco_decode_String).toList();
+  List<String> dco_decode_list_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
 
   @protected
-  List<NativeQueryRecord> dco_decode_list_native_query_record(dynamic raw) =>
-      (raw as List<dynamic>).map(dco_decode_native_query_record).toList();
+  List<NativeQueryRecord> dco_decode_list_native_query_record(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_native_query_record).toList();
+  }
 
   @protected
-  List<int> dco_decode_list_prim_u_8_loose(dynamic raw) => raw as List<int>;
+  List<int> dco_decode_list_prim_u_8_loose(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as List<int>;
+  }
 
   @protected
-  Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) => raw as Uint8List;
+  Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as Uint8List;
+  }
 
   @protected
   List<(String, Uint8List)> dco_decode_list_record_string_list_prim_u_8_strict(
-      dynamic raw) =>
-      (raw as List<dynamic>)
-          .map(dco_decode_record_string_list_prim_u_8_strict)
-          .toList();
+      dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_record_string_list_prim_u_8_strict)
+        .toList();
+  }
 
   @protected
   NativeBoxEvent dco_decode_native_box_event(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 4)
       throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
@@ -662,11 +686,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  NativeBoxEventType dco_decode_native_box_event_type(dynamic raw) =>
-      NativeBoxEventType.values[raw as int];
+  NativeBoxEventType dco_decode_native_box_event_type(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return NativeBoxEventType.values[raw as int];
+  }
 
   @protected
   NativeQueryRecord dco_decode_native_query_record(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 2)
       throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
@@ -677,16 +704,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  String? dco_decode_opt_String(dynamic raw) =>
-      raw == null ? null : dco_decode_String(raw);
+  String? dco_decode_opt_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_String(raw);
+  }
 
   @protected
-  Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw) =>
-      raw == null ? null : dco_decode_list_prim_u_8_strict(raw);
+  Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_prim_u_8_strict(raw);
+  }
 
   @protected
   (String, Uint8List) dco_decode_record_string_list_prim_u_8_strict(
       dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 2) {
       throw Exception('Expected 2 elements, got ${arr.length}');
@@ -698,16 +730,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BigInt dco_decode_u_64(dynamic raw) => dcoDecodeU64(raw);
+  BigInt dco_decode_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeU64(raw);
+  }
 
   @protected
-  int dco_decode_u_8(dynamic raw) => raw as int;
+  int dco_decode_u_8(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
 
   @protected
-  void dco_decode_unit(dynamic raw) {}
+  void dco_decode_unit(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return;
+  }
 
   @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_String(deserializer);
     return AnyhowException(inner);
   }
@@ -715,25 +757,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   RustStreamSink<NativeBoxEvent> sse_decode_StreamSink_native_box_event_Sse(
       SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     throw UnimplementedError('Unreachable ()');
   }
 
   @protected
   String sse_decode_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
     return utf8.decoder.convert(inner);
   }
 
   @protected
-  bool sse_decode_bool(SseDeserializer deserializer) =>
-      deserializer.buffer.getUint8() != 0;
+  bool sse_decode_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint8() != 0;
+  }
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer) =>
-      deserializer.buffer.getInt32();
+  int sse_decode_i_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getInt32();
+  }
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
     var len_ = sse_decode_i_32(deserializer);
     var ans_ = <String>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
@@ -745,6 +795,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   List<NativeQueryRecord> sse_decode_list_native_query_record(
       SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
     var len_ = sse_decode_i_32(deserializer);
     var ans_ = <NativeQueryRecord>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
@@ -755,12 +807,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
   }
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
   }
@@ -768,6 +822,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   List<(String, Uint8List)> sse_decode_list_record_string_list_prim_u_8_strict(
       SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
     var len_ = sse_decode_i_32(deserializer);
     var ans_ = <(String, Uint8List)>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
@@ -778,6 +834,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   NativeBoxEvent sse_decode_native_box_event(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     var var_boxName = sse_decode_String(deserializer);
     var var_eventType = sse_decode_native_box_event_type(deserializer);
     var var_key = sse_decode_opt_String(deserializer);
@@ -792,6 +849,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   NativeBoxEventType sse_decode_native_box_event_type(
       SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return NativeBoxEventType.values[inner];
   }
@@ -799,6 +857,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   NativeQueryRecord sse_decode_native_query_record(
       SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     var var_key = sse_decode_String(deserializer);
     var var_value = sse_decode_list_prim_u_8_strict(deserializer);
     return NativeQueryRecord(key: var_key, value: var_value);
@@ -806,6 +865,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_String(deserializer));
     } else {
@@ -814,8 +875,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  Uint8List? sse_decode_opt_list_prim_u_8_strict(
-      SseDeserializer deserializer) {
+  Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_list_prim_u_8_strict(deserializer));
     } else {
@@ -826,31 +888,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   (String, Uint8List) sse_decode_record_string_list_prim_u_8_strict(
       SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     var var_field0 = sse_decode_String(deserializer);
     var var_field1 = sse_decode_list_prim_u_8_strict(deserializer);
     return (var_field0, var_field1);
   }
 
   @protected
-  BigInt sse_decode_u_64(SseDeserializer deserializer) =>
-      deserializer.buffer.getBigUint64();
+  BigInt sse_decode_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getBigUint64();
+  }
 
   @protected
-  int sse_decode_u_8(SseDeserializer deserializer) =>
-      deserializer.buffer.getUint8();
+  int sse_decode_u_8(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint8();
+  }
 
   @protected
-  void sse_decode_unit(SseDeserializer deserializer) {}
+  void sse_decode_unit(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+  }
 
   @protected
   void sse_encode_AnyhowException(
       AnyhowException self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.message, serializer);
   }
 
   @protected
   void sse_encode_StreamSink_native_box_event_Sse(
       RustStreamSink<NativeBoxEvent> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(
         self.setupAndSerialize(
             codec: SseCodec(
@@ -862,21 +933,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
   }
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
   }
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putInt32(self);
   }
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_String(item, serializer);
@@ -886,6 +961,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_list_native_query_record(
       List<NativeQueryRecord> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_native_query_record(item, serializer);
@@ -895,6 +971,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_list_prim_u_8_loose(
       List<int> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer
         .putUint8List(self is Uint8List ? self : Uint8List.fromList(self));
@@ -903,6 +980,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_list_prim_u_8_strict(
       Uint8List self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
   }
@@ -910,6 +988,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_list_record_string_list_prim_u_8_strict(
       List<(String, Uint8List)> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_record_string_list_prim_u_8_strict(item, serializer);
@@ -919,6 +998,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_native_box_event(
       NativeBoxEvent self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.boxName, serializer);
     sse_encode_native_box_event_type(self.eventType, serializer);
     sse_encode_opt_String(self.key, serializer);
@@ -928,18 +1008,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_native_box_event_type(
       NativeBoxEventType self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
   }
 
   @protected
   void sse_encode_native_query_record(
       NativeQueryRecord self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.key, serializer);
     sse_encode_list_prim_u_8_strict(self.value, serializer);
   }
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_String(self, serializer);
@@ -949,6 +1033,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_opt_list_prim_u_8_strict(
       Uint8List? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_list_prim_u_8_strict(self, serializer);
@@ -958,20 +1044,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_record_string_list_prim_u_8_strict(
       (String, Uint8List) self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.$1, serializer);
     sse_encode_list_prim_u_8_strict(self.$2, serializer);
   }
 
   @protected
   void sse_encode_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putBigUint64(self);
   }
 
   @protected
   void sse_encode_u_8(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self);
   }
 
   @protected
-  void sse_encode_unit(void self, SseSerializer serializer) {}
+  void sse_encode_unit(void self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+  }
 }
