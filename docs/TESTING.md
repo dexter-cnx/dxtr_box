@@ -11,6 +11,7 @@ make preflight
 make native-test
 make process-crash
 make benchmark-smoke
+make native-size-stability
 ```
 
 Run the Dart/Flutter checks directly:
@@ -208,6 +209,7 @@ Run the CI-sized smoke workload:
 
 ```bash
 make benchmark-smoke
+make native-size-stability
 ```
 
 Run a larger local workload:
@@ -310,6 +312,18 @@ Each host runs:
 
 Linux x86_64 builds minimal, encryption, and full release libraries into isolated Cargo target directories and records exact bytes plus toolchain/environment metadata in `native-size-baseline.tsv`. PR #12 CI #144 measured 1,893,736 / 1,992,296 / 2,032,312 bytes respectively. The artifact contains only the TSV metadata file, not Cargo target directories.
 
+### Native size stability job — Linux x86_64
+
+The size job first records the normal minimal/encryption/full release-library baseline, then runs `tool/native_size_stability.sh` with three isolated builds per profile. The job fails if `min_bytes != max_bytes` for any profile on the same commit/toolchain.
+
+CI #151 validated:
+
+- minimal: 3 runs, 1,893,736 bytes each, spread 0;
+- encryption: 3 runs, 1,992,296 bytes each, spread 0;
+- full: 3 runs, 2,032,312 bytes each, spread 0.
+
+This is a reproducibility gate, not a cross-commit binary-size budget. The artifact retains only `native-size-baseline.tsv` and `native-size-stability.tsv`.
+
 ## Platform build validation
 
 The example app is compiled on Android, iOS without code signing, macOS, Linux, and Windows through the existing build matrix/workflows. Native build ownership remains in `rust_builder/`.
@@ -320,7 +334,7 @@ The following remain future hardening work:
 
 - benchmark absolute performance thresholds
 - long-duration benchmark trend regression policy
-- release binary-size regression measurement
+- cross-commit binary-size regression budget/threshold
 - dedicated process-kill interruption injection during plaintext -> encrypted migration
 - Dart 3.13 native symbol tree-shaking verification (future-only; do not implement now)
 

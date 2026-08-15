@@ -397,7 +397,7 @@ rust/tests/process_crash.rs
   acknowledged-commit process-kill recovery
 ```
 
-CI also runs generated-FRB drift detection, Rust fmt/clippy plus minimal/encryption/full profile tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, a Linux x86_64 native-size baseline job, and the five-platform Flutter example build matrix.
+CI also runs generated-FRB drift detection, Rust fmt/clippy plus minimal/encryption/full profile tests on Ubuntu/macOS/Windows, the minimum Flutter 3.22/Dart 3.4 lane, and a Linux x86_64 native-size job that records a baseline and repeats each profile three times to verify same-commit reproducibility.
 
 ## 13. Developer entry points
 
@@ -414,6 +414,7 @@ make rust-check
 make native-build-minimal
 make native-build-encryption
 make native-size-baseline
+make native-size-stability
 make example-android
 make example-linux
 make example-windows
@@ -433,13 +434,13 @@ encryption  = minimal + encrypted create/open/read/write
 full        = encryption + maintenance (compact + plaintext migration)
 ```
 
-The validated Linux x86_64 release-library baseline is 1,893,736 bytes for minimal, 1,992,296 bytes for encryption, and 2,032,312 bytes for full. These measurements are informational and platform-specific.
+The validated Linux x86_64 release-library baseline is 1,893,736 bytes for minimal, 1,992,296 bytes for encryption, and 2,032,312 bytes for full. PR #13 CI #151 repeated each profile three times with zero-byte spread, proving the harness is deterministic on that commit/toolchain. These measurements remain informational and platform-specific.
 
 The active sequence after PR #12 is:
 
-1. collect repeated size measurements before introducing a regression threshold;
-2. begin 0.3 query/index work while preserving the three-profile contract;
-3. add binary-size regression CI only when the baseline is stable enough to be meaningful;
+1. begin 0.3 query/index work while preserving the three-profile contract;
+2. design any cross-commit binary-size regression budget separately from the now-validated same-commit stability gate;
+3. keep the size artifacts machine-readable so future policy can compare controlled baselines;
 4. before 1.0 RC, execute the full Hive Functional Parity Audit and close every practical `Gap`.
 
 Dart 3.13 recorded-use/native tree shaking remains future-only and must not raise the Dart 3.4 / Flutter 3.22 compatibility floor. See `docs/FUTURE_NATIVE_TREE_SHAKING.md`.
