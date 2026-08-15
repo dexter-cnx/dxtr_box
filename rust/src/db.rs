@@ -105,7 +105,9 @@ pub fn put_all(name: &str, entries: &[(String, Vec<u8>)]) -> Result<(), String> 
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
         for (key, value) in entries {
-            table.insert(key.as_str(), value.as_slice()).map_err(|e| e.to_string())?;
+            table
+                .insert(key.as_str(), value.as_slice())
+                .map_err(|e| e.to_string())?;
         }
     }
     write.commit().map_err(|e| e.to_string())
@@ -115,7 +117,10 @@ pub fn get(name: &str, key: &str) -> Result<Option<Vec<u8>>, String> {
     let db = database(name)?;
     let read = db.begin_read().map_err(|e| e.to_string())?;
     let table = read.open_table(DATA).map_err(|e| e.to_string())?;
-    Ok(table.get(key).map_err(|e| e.to_string())?.map(|guard| guard.value().to_vec()))
+    Ok(table
+        .get(key)
+        .map_err(|e| e.to_string())?
+        .map(|guard| guard.value().to_vec()))
 }
 
 pub fn contains_key(name: &str, key: &str) -> Result<bool, String> {
@@ -140,7 +145,10 @@ pub fn clear(name: &str) -> Result<(), String> {
         let keys: Vec<String> = table
             .iter()
             .map_err(|e| e.to_string())?
-            .map(|item| item.map(|(key, _)| key.value().to_string()).map_err(|e| e.to_string()))
+            .map(|item| {
+                item.map(|(key, _)| key.value().to_string())
+                    .map_err(|e| e.to_string())
+            })
             .collect::<Result<_, _>>()?;
         for key in keys {
             table.remove(key.as_str()).map_err(|e| e.to_string())?;
@@ -156,7 +164,10 @@ pub fn all_keys(name: &str) -> Result<Vec<String>, String> {
     table
         .iter()
         .map_err(|e| e.to_string())?
-        .map(|item| item.map(|(key, _)| key.value().to_string()).map_err(|e| e.to_string()))
+        .map(|item| {
+            item.map(|(key, _)| key.value().to_string())
+                .map_err(|e| e.to_string())
+        })
         .collect()
 }
 
@@ -203,7 +214,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init(dir.path().to_str().unwrap()).unwrap();
         open("items").unwrap();
-        put_all("items", &[("a".into(), pack(&1_i64)), ("b".into(), pack(&2_i64))]).unwrap();
+        put_all(
+            "items",
+            &[("a".into(), pack(&1_i64)), ("b".into(), pack(&2_i64))],
+        )
+        .unwrap();
         clear("items").unwrap();
         assert_eq!(len("items").unwrap(), 0);
     }
