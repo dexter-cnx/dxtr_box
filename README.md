@@ -8,6 +8,17 @@ A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model c
 
 > Status: **0.1.x native foundation / active development**. Public API and storage format are not stable yet.
 
+## Compatibility
+
+Current minimum supported toolchain:
+
+```text
+Dart >= 3.4.0 < 4.0.0
+Flutter >= 3.22.0
+```
+
+The minimum is verified in CI using Flutter 3.22.0 / Dart 3.4.0, while the normal CI lane continues to test the current stable Flutter toolchain. Minimum SDK increases are treated as explicit compatibility decisions rather than incidental dependency upgrades.
+
 ## Why
 
 `dxtr_box` targets Hive-like ergonomics while moving persistence, transactions, encryption, maintenance, and native event fan-out into Rust. Values are not retained wholesale in the Dart heap just to imitate Hive's synchronous read model.
@@ -26,7 +37,9 @@ A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model c
 - Android, iOS, macOS, Linux, Windows first; Web fallback later.
 - No `build_runner` for normal usage.
 - Avoid loading an entire box into Dart RAM.
-- Aggressive native binary-size control, including Dart 3.13 `record_use` / native tree-shaking work.
+- Control native binary size without sacrificing the supported SDK floor.
+
+Dart 3.13 recorded-use/native tree shaking is intentionally **future-only**. It must not raise the minimum SDK or become required for correctness. See [`docs/FUTURE_NATIVE_TREE_SHAKING.md`](docs/FUTURE_NATIVE_TREE_SHAKING.md).
 
 ## Intended API
 
@@ -54,7 +67,7 @@ await secure.put('token', 'secret');
 await secure.close();
 ```
 
-An encrypted box must be reopened with the same key. Missing or incorrect keys are rejected. A plaintext box is never silently reinterpreted as encrypted; explicit migration will be required for that transition.
+An encrypted box must be reopened with the same key. Missing or incorrect keys are rejected. A plaintext box is never silently reinterpreted as encrypted; explicit migration is the next storage-hardening milestone.
 
 Native reads are asynchronous by design: unlike Hive's in-memory read model, `dxtr_box` may perform real storage I/O and should not block Flutter's UI isolate.
 
@@ -78,7 +91,7 @@ Encrypted boxes persist metadata in a dedicated redb `meta` table:
 
 - storage format marker: `dxtr_box/1`
 - encryption mode: `none` or `chacha20poly1305`
-- unique random 16-byte salt per encrypted box
+- unique random salt per encrypted box
 - encrypted key-check sentinel for early wrong-key rejection
 
 Values are validated as MessagePack before storage, encrypted with a fresh random nonce per value, and authenticated by ChaCha20Poly1305. Reads decrypt and authenticate before returning bytes to Dart.
@@ -103,14 +116,16 @@ Additional targets cover FRB regeneration, Rust-only checks, a larger local benc
 - [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, encryption, deleteAll, and compaction flow.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmark methodology, local commands, and CI gates.
 - [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
+- [Future native tree shaking](docs/FUTURE_NATIVE_TREE_SHAKING.md) — why Dart 3.13 native tree shaking is useful later, why it is deferred now, and the compatibility gate for revisiting it.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
-- [CI workflow](.github/workflows/ci.yml) — Flutter analyze/test, native Linux round-trip + benchmark smoke, and Rust host-matrix checks.
+- [CI workflow](.github/workflows/ci.yml) — minimum-SDK compatibility, current Flutter analyze/test, native Linux round-trip + benchmark smoke, and Rust host-matrix checks.
 - [Platform builds](.github/workflows/platform_builds.yml) — Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Test suite
 
 Current coverage includes:
 
+- minimum-SDK pub get/analyze/tests on Flutter 3.22.0 / Dart 3.4.0.
 - Dart dynamic codec round trips and invalid-map validation.
 - `Box`/`DxtrBox` behavior through an in-memory native API fake.
 - multi-handle lifecycle, concurrent close serialization, delete-while-open policy, base-path switching, and Windows-safe box-name validation.
@@ -140,15 +155,16 @@ Current coverage includes:
 - lifecycle and multi-handle hardening
 - native `watch()` stream
 - persisted per-box encryption metadata + encrypted value path
+- process crash/reopen durability foundation
+- Hive CE benchmark foundation
 - developer Makefile
 
 ### 0.2.0 — Hive parity foundation
 
-- process-level crash/reopen durability tests
-- reproducible benchmark against `hive_ce`
-- benchmark file-size reporting and retained result format
-- explicit plaintext -> encrypted migration path
+- explicit plaintext -> encrypted migration path with recovery semantics
 - Cargo feature splitting for optional functionality
+- retained benchmark result format and file-size reporting
+- binary-size baselines for minimal CRUD, CRUD+encryption, and full feature builds
 
 ### 0.3.0 — Query & migration
 
@@ -160,10 +176,10 @@ Current coverage includes:
 ### 0.4.0 — Production hardening
 
 - binary-size regression checks
-- Dart 3.13 native tree-shaking investigation using `record_use` + link hooks
-- target minimal native binary under 1 MB where technically achievable
-- README comparison vs hive_ce / isar_community / objectbox / drift
 - package-quality hardening
+- comparison vs hive_ce / isar_community / objectbox / drift
+
+Dart 3.13 native tree shaking is **not assigned to the active roadmap**. Revisit it only after the conditions in `docs/FUTURE_NATIVE_TREE_SHAKING.md` are satisfied.
 
 ### 0.9.0 — Hive Functional Parity Audit
 
