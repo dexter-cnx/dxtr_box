@@ -10,7 +10,7 @@ A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model c
 
 ## Why
 
-`dxtr_box` targets Hive-like ergonomics while moving persistence, transactions, encryption, and native event fan-out into Rust. Values are not retained wholesale in the Dart heap just to imitate Hive's synchronous read model.
+`dxtr_box` targets Hive-like ergonomics while moving persistence, transactions, encryption, maintenance, and native event fan-out into Rust. Values are not retained wholesale in the Dart heap just to imitate Hive's synchronous read model.
 
 ## Design goals
 
@@ -22,6 +22,7 @@ A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model c
 - MessagePack value encoding.
 - Per-box encryption with Argon2 + ChaCha20Poly1305.
 - Native cross-handle `watch()` fan-out through FRB streams.
+- Explicit native `deleteAll()` and `compact()` maintenance paths.
 - Android, iOS, macOS, Linux, Windows first; Web fallback later.
 - No `build_runner` for normal usage.
 - Avoid loading an entire box into Dart RAM.
@@ -36,7 +37,8 @@ final box = await DxtrBox.open('settings');
 await box.put('theme', 'dark');
 final theme = await box.get('theme');
 
-await box.delete('theme');
+await box.deleteAll(['theme', 'legacy']);
+await box.compact();
 await box.close();
 ```
 
@@ -83,13 +85,26 @@ Values are validated as MessagePack before storage, encrypted with a fresh rando
 
 Legacy boxes without metadata are treated as known plaintext boxes and gain explicit plaintext metadata when normally reopened. Existing plaintext data is never encrypted in place implicitly.
 
+## Developer workflow
+
+The root `Makefile` is the preferred entry point:
+
+```bash
+make preflight
+make native-test
+make process-crash
+make benchmark-smoke
+```
+
+Additional targets cover FRB regeneration, Rust-only checks, a larger local benchmark run, and per-platform example builds.
+
 ## Engineering docs
 
-- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, and encryption flow.
-- [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, local commands, CI gates, and deferred integration tiers.
+- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB seam -> Rust API -> redb transaction, watch, encryption, deleteAll, and compaction flow.
+- [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmark methodology, local commands, and CI gates.
 - [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
-- [CI workflow](.github/workflows/ci.yml) — Flutter analyze/test, native Linux round-trip, and Rust host-matrix checks.
+- [CI workflow](.github/workflows/ci.yml) — Flutter analyze/test, native Linux round-trip + benchmark smoke, and Rust host-matrix checks.
 - [Platform builds](.github/workflows/platform_builds.yml) — Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Test suite
@@ -102,7 +117,10 @@ Current coverage includes:
 - native cross-handle watch fan-out and watcher teardown semantics.
 - real Dart -> FRB -> Rust -> redb Linux round-trip with close/reopen persistence.
 - real encrypted Dart -> FRB -> Rust -> redb close/reopen round-trip with wrong/missing-key rejection.
-- real redb CRUD, clear, persistence-after-reopen, malformed `putAll`, unsafe box names, and delete-box behavior.
+- transactional `deleteAll()` with exact removed-key event behavior.
+- explicit redb-backed `compact()` lifecycle coverage.
+- process-kill crash/reopen recovery for acknowledged plaintext and encrypted commits.
+- a `hive_ce` benchmark smoke harness for equal logical workloads; timing is informational, not a CI pass/fail threshold.
 - encryption tests for unique persisted salts, authenticated value round-trip, on-disk ciphertext, wrong keys, tampering, and plaintext/encrypted mode mismatch.
 - Rust fmt/clippy/tests on Ubuntu, macOS, and Windows.
 - example compilation on Android, iOS without code signing, macOS, Linux, and Windows.
@@ -113,7 +131,8 @@ Current coverage includes:
 
 - init / open
 - put / get / delete / clear
-- putAll
+- putAll / deleteAll
+- compact
 - length / keys / values
 - deleteBox / boxExists
 - Android / iOS / macOS / Linux / Windows
@@ -121,13 +140,13 @@ Current coverage includes:
 - lifecycle and multi-handle hardening
 - native `watch()` stream
 - persisted per-box encryption metadata + encrypted value path
+- developer Makefile
 
 ### 0.2.0 — Hive parity foundation
 
-- deleteAll
-- compact
-- benchmark against `hive_ce`
-- crash/reopen durability tests
+- process-level crash/reopen durability tests
+- reproducible benchmark against `hive_ce`
+- benchmark file-size reporting and retained result format
 - explicit plaintext -> encrypted migration path
 - Cargo feature splitting for optional functionality
 
