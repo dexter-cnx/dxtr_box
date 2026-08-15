@@ -8,32 +8,14 @@ abstract final class DxtrBox {
   static NativeDxtrApi _api = const FrbNativeDxtrApi();
   static String? _basePath;
   static int _openHandleCount = 0;
+  static final Map<String, int> _openHandlesByName = <String, int>{};
   static final Map<String, BoxMetadata> _metadataByName =
       <String, BoxMetadata>{};
 
   static const Set<String> _windowsReservedNames = <String>{
-    'CON',
-    'PRN',
-    'AUX',
-    'NUL',
-    'COM1',
-    'COM2',
-    'COM3',
-    'COM4',
-    'COM5',
-    'COM6',
-    'COM7',
-    'COM8',
-    'COM9',
-    'LPT1',
-    'LPT2',
-    'LPT3',
-    'LPT4',
-    'LPT5',
-    'LPT6',
-    'LPT7',
-    'LPT8',
-    'LPT9',
+    'CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
   };
 
   static final RegExp _unsafeWindowsNameCharacters =
@@ -46,6 +28,7 @@ abstract final class DxtrBox {
     _api = api;
     _basePath = null;
     _openHandleCount = 0;
+    _openHandlesByName.clear();
     _metadataByName.clear();
   }
 
@@ -84,7 +67,15 @@ abstract final class DxtrBox {
       api: _api,
       lazy: lazy,
       metadata: metadata,
-      onClose: () => _openHandleCount -= 1,
+      onClose: () {
+        _openHandleCount -= 1;
+        final remaining = (_openHandlesByName[name] ?? 1) - 1;
+        if (remaining == 0) {
+          _openHandlesByName.remove(name);
+        } else {
+          _openHandlesByName[name] = remaining;
+        }
+      },
     );
 
     try {
@@ -95,12 +86,16 @@ abstract final class DxtrBox {
     }
 
     _openHandleCount += 1;
+    _openHandlesByName[name] = (_openHandlesByName[name] ?? 0) + 1;
     return box;
   }
 
   static Future<void> deleteBox(String name) async {
     _ensureInitialized();
     _validateBoxName(name);
+    if ((_openHandlesByName[name] ?? 0) > 0) {
+      throw StateError('Cannot delete box "$name" while it is open.');
+    }
     await _api.deleteBox(name);
     _metadataByName.remove(name);
   }
