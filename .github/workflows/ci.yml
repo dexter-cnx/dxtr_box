@@ -22,23 +22,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Set up minimum Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.0'
           channel: stable
           cache: true
-
       - name: Verify minimum toolchain
         run: flutter --version
-
       - name: Install dependencies at minimum SDK
         run: flutter pub get
-
       - name: Analyze at minimum SDK
         run: flutter analyze
-
       - name: Test at minimum SDK
         run: flutter test --reporter expanded
 
@@ -49,34 +44,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
       - name: Flutter version
         run: flutter --version
-
       - name: Install dependencies
         run: flutter pub get
-
       - name: Check formatting
         run: |
           dart format lib test example benchmark/test
           git diff --exit-code -- lib test example benchmark/test
-
       - name: Analyze
         run: flutter analyze
-
       - name: Test
         run: flutter test --reporter expanded
-
       - name: Install benchmark dependencies
         working-directory: benchmark
         run: flutter pub get
-
       - name: Analyze benchmark package
         working-directory: benchmark
         run: flutter analyze
@@ -88,29 +75,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-
       - name: Install dependencies
         run: flutter pub get
-
       - name: Install flutter_rust_bridge_codegen 2.8.0
         run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
-
       - name: Regenerate FRB bindings
         run: flutter_rust_bridge_codegen generate
-
       - name: Upload regenerated bindings
         if: always()
         uses: actions/upload-artifact@v4
@@ -121,7 +102,6 @@ jobs:
             rust/src/frb_generated.rs
           if-no-files-found: error
           retention-days: 3
-
       - name: Verify generated bindings are committed
         run: git diff --exit-code -- lib/src/rust rust/src/frb_generated.rs
 
@@ -132,35 +112,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-
       - name: Install dependencies
         run: flutter pub get
-
       - name: Build Rust release library
         run: cargo build --manifest-path rust/Cargo.toml --release
-
       - name: Native round-trip test
         env:
           DXTR_BOX_NATIVE_TEST: '1'
         run: flutter test test/native_integration_test.dart --reporter expanded
-
       - name: Install benchmark dependencies
         working-directory: benchmark
         run: flutter pub get
-
       - name: Benchmark smoke harness
         working-directory: benchmark
         env:
@@ -170,28 +143,31 @@ jobs:
         run: flutter test test/benchmark_smoke_test.dart --reporter expanded
 
   native-size:
-    name: Native size / Linux x64 profiles
+    name: Native size / Linux x64 stability
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-
       - name: Measure minimal, encryption, and full profiles
         run: bash tool/native_size_baseline.sh
-
-      - name: Upload native size baseline
+      - name: Verify same-commit size reproducibility
+        env:
+          DXTR_BOX_SIZE_RUNS: '3'
+        run: bash tool/native_size_stability.sh
+      - name: Upload native size measurements
         uses: actions/upload-artifact@v4
         with:
           name: native-size-linux-x64
-          path: build/native-size/native-size-baseline.tsv
+          path: |
+            build/native-size/native-size-baseline.tsv
+            build/native-size-stability/native-size-stability.tsv
           if-no-files-found: error
           retention-days: 14
 
@@ -206,7 +182,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -214,18 +189,13 @@ jobs:
           components: rustfmt, clippy
           cache: true
           cache-workspaces: rust
-
       - name: Check formatting
         run: cargo fmt --manifest-path rust/Cargo.toml -- --check
-
       - name: Clippy full profile
         run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
-
       - name: Test minimal profile
         run: cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features
-
       - name: Test encryption profile
         run: cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
-
       - name: Test full profile
         run: cargo test --manifest-path rust/Cargo.toml --all-targets
