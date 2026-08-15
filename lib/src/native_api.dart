@@ -25,6 +25,7 @@ abstract interface class NativeDxtrApi {
   Future<void> openBox(String name, {String? encryptionKey});
   Future<void> closeBox(String name);
   Future<void> deleteBox(String name);
+  Future<void> encryptBox(String name, String encryptionKey);
   Future<bool> boxExists(String name);
   Future<Stream<NativeWatchEvent>> watchBox(String boxName, String watcherId);
   Future<void> unwatchBox(String boxName, String watcherId);
@@ -71,6 +72,12 @@ final class FrbNativeDxtrApi implements NativeDxtrApi {
   Future<void> deleteBox(String name) async {
     await _ensureInitialized();
     frb.deleteBox(name: name);
+  }
+
+  @override
+  Future<void> encryptBox(String name, String encryptionKey) async {
+    await _ensureInitialized();
+    frb.encryptBox(name: name, encryptionKey: encryptionKey);
   }
 
   @override
@@ -198,6 +205,9 @@ final class UnavailableNativeDxtrApi implements NativeDxtrApi {
 
   @override
   Future<void> deleteBox(String name) async => _missing();
+
+  @override
+  Future<void> encryptBox(String name, String encryptionKey) async => _missing();
 
   @override
   Future<bool> boxExists(String name) async => _missing();
