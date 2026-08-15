@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:dxtr_box/src/box.dart';
 import 'package:dxtr_box/src/box_event.dart';
 import 'package:dxtr_box/src/dxtr_box.dart';
 import 'package:dxtr_box/src/native_api.dart';
