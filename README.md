@@ -126,7 +126,9 @@ PR #12 CI #144 validated the first same-run Linux x86_64 release-library baselin
 | `encryption` | 1,992,296 | +98,560 (+5.2%) |
 | `full` | 2,032,312 | +138,576 (+7.3%) |
 
-These measurements are specific to that Linux x86_64 CI environment and are informational, not cross-platform package-size claims. CI retains only the `native-size-baseline.tsv` metadata artifact; Cargo target directories are not uploaded. No absolute size threshold is enforced until repeated controlled measurements are stable enough to justify a regression gate.
+PR #13 CI #151 then repeated each profile three times on the same Linux x86_64 commit/toolchain and measured **zero-byte spread** for all three profiles. This establishes a same-commit reproducibility gate for the measurement system; it is not yet a cross-commit size budget.
+
+These measurements are specific to that Linux x86_64 CI environment and are informational, not cross-platform package-size claims. CI retains only the `native-size-baseline.tsv` and `native-size-stability.tsv` metadata artifacts; Cargo target directories are not uploaded. No cross-commit absolute size threshold is enforced yet.
 
 See [`docs/NATIVE_FEATURE_PROFILES.md`](docs/NATIVE_FEATURE_PROFILES.md) and [`docs/CARGO_FEATURE_SIZE_HANDOFF.md`](docs/CARGO_FEATURE_SIZE_HANDOFF.md).
 
@@ -155,6 +157,7 @@ make benchmark-smoke
 make native-build-minimal
 make native-build-encryption
 make native-size-baseline
+make native-size-stability
 ```
 
 Additional targets cover FRB regeneration, Rust-only checks, a larger local benchmark run, and per-platform example builds.
@@ -169,7 +172,7 @@ Additional targets cover FRB regeneration, Rust-only checks, a larger local benc
 - [Hive functional parity audit](docs/HIVE_FUNCTIONAL_PARITY.md) — 1.0 release gate for replacing practical Hive/Hive CE workloads.
 - [Future native tree shaking](docs/FUTURE_NATIVE_TREE_SHAKING.md) — why Dart 3.13 native tree shaking is useful later, why it is deferred now, and the compatibility gate for revisiting it.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and milestone sequencing.
-- [CI workflow](.github/workflows/ci.yml) — minimum-SDK compatibility, current Flutter analyze/test, native Linux round-trip + benchmark smoke, FRB drift detection, native profile matrix, and Linux size baseline capture.
+- [CI workflow](.github/workflows/ci.yml) — minimum-SDK compatibility, current Flutter analyze/test, native Linux round-trip + benchmark smoke, FRB drift detection, native profile matrix, and Linux size baseline/stability capture.
 - [Platform builds](.github/workflows/platform_builds.yml) — Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Test suite
@@ -191,7 +194,7 @@ Current coverage includes:
 - encryption tests for unique persisted salts, authenticated value round-trip, on-disk ciphertext, wrong keys, tampering, plaintext/encrypted mode mismatch, and migration failure safety.
 - generated FRB binding drift detection in CI.
 - minimal, encryption, and full Rust profile builds/tests on Ubuntu, macOS, and Windows.
-- Linux x86_64 same-run native binary-size capture for all three profiles.
+- Linux x86_64 same-run native binary-size capture plus three-run same-commit stability verification for all three profiles.
 - example compilation on Android, iOS without code signing, macOS, Linux, and Windows.
 
 ## Roadmap
@@ -219,6 +222,7 @@ Current coverage includes:
 - Cargo feature splitting for optional functionality — implemented in PR #12
 - retained benchmark result format and file-size reporting
 - binary-size baselines for minimal CRUD, CRUD+encryption, and full feature builds — first Linux x86_64 baseline implemented in PR #12
+- same-commit native size reproducibility gate — implemented in PR #13
 
 ### 0.3.0 — Query & migration
 
@@ -229,7 +233,7 @@ Current coverage includes:
 
 ### 0.4.0 — Production hardening
 
-- binary-size regression checks after repeated baseline validation
+- cross-commit binary-size regression budget after controlled-baseline policy is defined
 - package-quality hardening
 - comparison vs hive_ce / isar_community / objectbox / drift
 
