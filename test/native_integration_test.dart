@@ -47,16 +47,18 @@ void main() {
       expect(await box.get('map'), <String, dynamic>{'nested': 7});
       expect(await box.containsKey('int'), isTrue);
       expect(box.length, 8);
-      expect(box.keys.toSet(), containsAll(<String>{
-        'int',
-        'string',
-        'bytes',
-        'time',
-        'bool',
-        'double',
-        'list',
-        'map',
-      }));
+      expect(
+          box.keys.toSet(),
+          containsAll(<String>{
+            'int',
+            'string',
+            'bytes',
+            'time',
+            'bool',
+            'double',
+            'list',
+            'map',
+          }));
 
       await box.close();
       box = await DxtrBox.open('native');
@@ -74,6 +76,7 @@ void main() {
       await DxtrBox.deleteBox('native');
       expect(await DxtrBox.boxExists('native'), isFalse);
     },
-    skip: nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
+    skip:
+        nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
   );
 }
