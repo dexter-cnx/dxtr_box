@@ -1,4 +1,4 @@
-name: Temporary FRB Query Sync
+name: Temporary Query Index Finalize
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  sync:
+  finalize:
     if: github.repository == 'dexter-cnx/dxtr_box'
     runs-on: ubuntu-latest
     steps:
@@ -29,28 +29,47 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
+          components: rustfmt, clippy
           cache: true
           cache-workspaces: rust
 
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Apply transactional index integration
+        run: python3 tool/apply_query_index_db_patch.py
+
+      - name: Format native sources
+        run: cargo fmt --manifest-path rust/Cargo.toml
+
+      - name: Validate Rust profiles
+        run: |
+          cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features
+          cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
+          cargo test --manifest-path rust/Cargo.toml --all-targets
+
       - name: Install flutter_rust_bridge_codegen 2.8.0
         run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
 
-      - name: Regenerate bindings
+      - name: Regenerate exact bindings
         run: |
           flutter_rust_bridge_codegen generate
-          dart format lib/src/rust
+          dart format lib/src/rust lib/src/box.dart lib/src/native_api.dart
 
-      - name: Commit exact generated output
+      - name: Validate Flutter facade
         run: |
-          if git diff --quiet -- lib/src/rust rust/src/frb_generated.rs; then
-            echo 'FRB bindings already synchronized.'
-            exit 0
-          fi
+          flutter analyze
+          flutter test --reporter expanded
+
+      - name: Remove temporary finalize tooling
+        run: git rm .github/workflows/frb_sync_query_temp.yml tool/apply_query_index_db_patch.py
+
+      - name: Commit finalized query/index implementation
+        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add lib/src/rust rust/src/frb_generated.rs
-          git commit -m 'chore: regenerate query FRB bindings'
+          git add rust/src/db.rs rust/src/api.rs rust/src/index.rs rust/src/query.rs rust/src/lib.rs rust/Cargo.toml lib/src/rust lib/src/box.dart lib/src/native_api.dart
+          git add -u .github/workflows tool
+          git commit -m 'feat: add native query scan and persisted indexes'
           git push origin HEAD:feature/0.3-query-index-foundation
