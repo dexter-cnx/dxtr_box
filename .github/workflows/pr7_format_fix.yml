@@ -1,0 +1,36 @@
+name: PR7 Format Fix
+
+on:
+  push:
+    branches: [feature/delete-all-compact]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/delete-all-compact
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Format Dart sources
+        run: |
+          flutter pub get
+          dart format lib test example
+          git diff --check
+
+      - name: Commit formatting
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib test example
+          git diff --cached --quiet && exit 0
+          git commit -m "style: format Dart sources"
+          git push origin HEAD:feature/delete-all-compact
