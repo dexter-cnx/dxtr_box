@@ -40,6 +40,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<NativeQueryRecord> dco_decode_list_native_query_record(dynamic raw);
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
 
   @protected
@@ -54,6 +57,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   NativeBoxEventType dco_decode_native_box_event_type(dynamic raw);
+
+  @protected
+  NativeQueryRecord dco_decode_native_query_record(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -94,6 +100,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<NativeQueryRecord> sse_decode_list_native_query_record(
+      SseDeserializer deserializer);
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
 
   @protected
@@ -108,6 +118,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   NativeBoxEventType sse_decode_native_box_event_type(
+      SseDeserializer deserializer);
+
+  @protected
+  NativeQueryRecord sse_decode_native_query_record(
       SseDeserializer deserializer);
 
   @protected
@@ -150,6 +164,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_native_query_record(
+      List<NativeQueryRecord> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
@@ -167,6 +185,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_native_box_event_type(
       NativeBoxEventType self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_native_query_record(
+      NativeQueryRecord self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
