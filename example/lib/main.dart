@@ -21,10 +21,15 @@ class DxtrBoxExample extends StatelessWidget {
               final box = await DxtrBox.open('demo');
               final sw = Stopwatch()..start();
               for (var i = 0; i < 1000; i++) {
-                await box.put('key_$i', <String, dynamic>{'index': i, 'active': true});
+                await box.put('key_$i', <String, dynamic>{
+                  'index': i,
+                  'active': true,
+                });
               }
               sw.stop();
-              debugPrint('dxtr_box: 1000 puts in ${sw.elapsedMilliseconds} ms');
+              debugPrint(
+                'dxtr_box: 1000 puts in ${sw.elapsedMilliseconds} ms',
+              );
             },
             child: const Text('Run dxtr_box smoke benchmark'),
           ),
