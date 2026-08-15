@@ -1,0 +1,47 @@
+name: Example Scaffold
+
+on:
+  push:
+    branches: [feature/example-platform-builds]
+    paths:
+      - .github/workflows/example_scaffold.yml
+
+permissions:
+  contents: write
+
+jobs:
+  scaffold:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/example-platform-builds
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Scaffold runnable example
+        shell: bash
+        run: |
+          cp example/lib/main.dart /tmp/dxtr_box_example_main.dart
+          rm -rf example
+          flutter create --org com.dxtr --platforms=android,ios,macos,linux,windows example
+          cp /tmp/dxtr_box_example_main.dart example/lib/main.dart
+          rm -rf example/test
+          cd example
+          flutter pub add dxtr_box --path=../
+          flutter pub get
+          dart format lib
+
+      - name: Commit example project
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add example
+          git commit -m "feat: scaffold runnable multi-platform example"
+          git push origin feature/example-platform-builds
