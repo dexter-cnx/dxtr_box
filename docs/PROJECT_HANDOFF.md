@@ -10,7 +10,7 @@ The 1.0 product claim is **functional replacement for practical Hive/Hive CE loc
 
 ## Current snapshot — 0.1.x native foundation
 
-Implemented on `main` through PR #11, with PR #12 validating Cargo feature profiles and the first reproducible Linux x86_64 native-size baseline:
+Implemented on `main` through PR #12, with PR #13 validating same-commit native-size reproducibility before any cross-commit regression budget is introduced:
 
 - Public Dart facade: `DxtrBox`, `Box`, `BoxEvent`.
 - Minimum compatibility floor: Dart >= 3.4.0 / Flutter >= 3.22.0, verified by dedicated CI.
@@ -43,6 +43,7 @@ Implemented on `main` through PR #11, with PR #12 validating Cargo feature profi
 - Native feature profiles: `minimal`, `encryption`, and default `full`.
 - CI validates all three Rust profiles on Ubuntu, macOS, and Windows.
 - Linux x86_64 release-library baseline: minimal 1,893,736 bytes; encryption 1,992,296 bytes; full 2,032,312 bytes.
+- PR #13 CI #151 repeated each profile three times on the same commit/toolchain and measured zero-byte spread for all profiles.
 
 ## Minimum SDK policy
 
@@ -234,7 +235,39 @@ Current scenarios include:
 
 Benchmark timing is informational. CI verifies that the harness executes successfully but does not gate merges on absolute timing from shared runners.
 
-Future benchmark work should add retained result artifacts, file-size reporting, more payload sizes, and environment/build metadata before performance claims are published.
+### Current smoke baseline — CI #105 / PR #8
+
+The first real comparative smoke run used Ubuntu 24.04 on a GitHub-hosted x86_64 runner, Flutter 3.47.0, Rust 1.97.1, 100 logical operations per scenario, and five samples per engine. Median timings were:
+
+| Scenario | dxtr_box median | hive_ce median | dxtr_box / hive_ce |
+| --- | ---: | ---: | ---: |
+| sequential put | 75.314 ms | 38.026 ms | 1.98x |
+| batch put | 11.444 ms | 1.520 ms | 7.53x |
+| point get | 28.289 ms | 0.051 ms | 554.69x |
+| contains | 25.936 ms | 0.033 ms | 785.94x |
+| deleteAll | 6.946 ms | 2.464 ms | 2.82x |
+| reopen + read | 25.315 ms | 4.198 ms | 6.03x |
+
+Interpretation rules:
+
+- These are **smoke/informational measurements**, not publishable performance claims and not merge gates.
+- Shared-runner timing, small operation counts, engine architecture differences, warm-cache behavior, serialization, and FFI crossings can dominate microbenchmarks.
+- The result is nevertheless large enough to justify focused investigation of `point_get` and `contains` before making any performance claim.
+- Do not state that redb itself is hundreds of times slower than Hive CE. The current benchmark measures the complete Dart API path, not raw redb.
+
+Recommended performance investigation sequence:
+
+```text
+Dart public API
+  -> Dart serialization / MessagePack cost
+  -> FRB/FFI boundary cost
+  -> Rust API cost
+  -> raw redb operation cost
+```
+
+Add focused benchmarks that isolate each layer, especially `point_get` and `contains`, and determine whether the dominant cost comes from repeated FFI crossings, serialization/deserialization, transaction/open-handle behavior, or the storage engine itself. Preserve correctness and durable-storage semantics while optimizing; do not introduce a fake Dart-side value cache merely to win a microbenchmark unless its lifecycle/coherency contract is explicitly designed.
+
+Future benchmark work should also add retained result artifacts, file-size reporting, multiple payload sizes and key distributions, larger operation counts, warm/cold runs, release/AOT-representative execution where practical, and environment/build metadata before performance claims are published.
 
 ## Developer workflow
 
@@ -251,6 +284,7 @@ make frb-generate
 make native-build-minimal
 make native-build-encryption
 make native-size-baseline
+make native-size-stability
 make example-android
 make example-linux
 make example-windows
@@ -258,7 +292,7 @@ make example-macos
 make example-ios
 ```
 
-Generated FRB bindings stay checked in whenever native APIs change. `make native-size-baseline` is the canonical local entry point for the same minimal/encryption/full release-size measurement contract used by CI.
+Generated FRB bindings stay checked in whenever native APIs change. `make native-size-baseline` records one minimal/encryption/full release-size baseline; `make native-size-stability` repeats those measurements to validate same-commit reproducibility before any regression budget is considered.
 
 ## Current validation state
 
@@ -290,7 +324,9 @@ Native size / Linux x86_64
   isolated minimal release build
   isolated encryption release build
   isolated full release build
-  retain native-size-baseline.tsv only
+  repeat each profile three times on the same commit/toolchain
+  require zero-byte same-commit spread
+  retain native-size-baseline.tsv + native-size-stability.tsv only
 
 Rust / Ubuntu + macOS + Windows
   rustfmt -> clippy -D warnings
@@ -324,15 +360,28 @@ Validated Linux x86_64 release-library baseline from CI #144:
 | encryption | 1,992,296 | +98,560 (+5.2%) |
 | full | 2,032,312 | +138,576 (+7.3%) |
 
-The size job retains only `native-size-baseline.tsv`. No regression threshold is enabled yet because repeated controlled measurements are required before a size gate is defensible.
+The size job retains only the machine-readable baseline and stability TSV files. PR #13 CI #151 proved zero-byte spread across three repeated builds of each profile on Linux x86_64 with rustc/cargo 1.97.1. No cross-commit regression threshold is enabled yet; same-commit reproducibility is now a CI prerequisite rather than a size budget.
+
+## PR #13 validated — native size measurement stability
+
+CI #151 repeated release-library measurement three times per profile on the same Linux x86_64 commit/toolchain:
+
+| Profile | Runs | Min bytes | Max bytes | Spread |
+| --- | ---: | ---: | ---: | ---: |
+| minimal | 3 | 1,893,736 | 1,893,736 | 0 |
+| encryption | 3 | 1,992,296 | 1,992,296 | 0 |
+| full | 3 | 2,032,312 | 2,032,312 | 0 |
+
+This validates the measurement harness, not a cross-commit size budget. A later regression policy must compare controlled baselines deliberately and account for toolchain/platform changes.
 
 ## Next implementation sequence
 
-1. Merge PR #12 after final documentation CI remains green.
-2. Collect repeated size measurements and only then define a binary-size regression policy.
-3. Begin 0.3 query/index work while preserving the validated profile contract.
-4. Keep Dart 3.13 recorded-use/native tree shaking deferred.
-5. Before 1.0 RC, execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.
+1. Merge PR #13 after final documentation CI remains green.
+2. Add layered performance diagnostics for `point_get` and `contains` so Dart/serialization/FRB/Rust/redb costs are measured separately; treat the existing PR #8 smoke numbers as informational only.
+3. Begin 0.3 query/index work while preserving the validated minimal/encryption/full profile contract; performance diagnostics may proceed independently and must not justify correctness regressions.
+4. Design cross-commit binary-size regression policy separately; do not block query/index work on it.
+5. Keep Dart 3.13 recorded-use/native tree shaking deferred.
+6. Before 1.0 RC, execute the full Hive Functional Parity Audit against the then-current Hive CE release and close every practical `Gap`.
 
 ## Dart 3.13 native tree-shaking — FUTURE ONLY
 
@@ -349,8 +398,11 @@ Dart 3.4 / Flutter 3.22 baseline compatibility
 Cargo feature profiles + first Linux x86_64 size baseline
   -> validated in PR #12
 
-Repeated controlled size measurements + regression policy
-  -> next size-hardening step
+Same-commit repeated size measurement stability
+  -> validated in PR #13
+
+Cross-commit regression budget
+  -> future size-hardening policy; not enabled yet
 
 Dart 3.13+ record-use/link-hook optimization
   -> future progressive optimization only
