@@ -5,12 +5,12 @@ import 'box.dart';
 import 'native_api.dart';
 
 abstract final class DxtrBox {
-  static NativeDxtrApi _api = const UnavailableNativeDxtrApi();
+  static NativeDxtrApi _api = const FrbNativeDxtrApi();
   static String? _basePath;
 
   static bool get isInitialized => _basePath != null;
 
-  /// Package-internal injection point used by generated bindings and tests.
+  /// Package-internal injection point used by tests and alternate engines.
   static void bindNativeApi(NativeDxtrApi api) => _api = api;
 
   static Future<void> init({String? path}) async {
