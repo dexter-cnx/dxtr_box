@@ -3,8 +3,8 @@ use serde::de::IgnoredAny;
 /// Validate that payload is syntactically valid MessagePack before persisting it.
 /// Dart owns public dynamic type adaptation; Rust owns durable bytes.
 pub fn validate_message_pack(bytes: &[u8]) -> Result<(), String> {
-    let _: IgnoredAny = rmp_serde::from_slice(bytes)
-        .map_err(|e| format!("invalid MessagePack: {e}"))?;
+    let _: IgnoredAny =
+        rmp_serde::from_slice(bytes).map_err(|e| format!("invalid MessagePack: {e}"))?;
     Ok(())
 }
 
