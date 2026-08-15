@@ -9,3 +9,4 @@
 - Added deterministic isolation for tests that mutate process-global Rust engine state.
 - Added GitHub Actions CI for Flutter format/analyze/test and Rust host-matrix fmt/clippy/tests.
 - Added code walkthrough and testing-strategy documentation.
+- Added `docs/HIVE_FUNCTIONAL_PARITY.md` and made completion of the Hive/Hive CE functional-parity audit a 1.0 release gate.
