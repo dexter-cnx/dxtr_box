@@ -43,7 +43,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C feature/frb-native-integration
-          git add analysis_options.yaml pubspec.yaml pubspec.lock \
+          git add analysis_options.yaml pubspec.yaml \
             rust/src/lib.rs rust/src/frb_generated.rs rust/.gitignore \
             lib/src/rust rust_builder \
             android ios macos linux windows
