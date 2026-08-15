@@ -2,18 +2,18 @@ import 'package:dxtr_box/dxtr_box.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  group('Dxtr query contract', () {
+  group('query contract', () {
     test('supports nested field comparisons and pagination', () {
-      final query = DxtrQuery(
-        where: DxtrAnd(<DxtrCondition>[
-          DxtrCompare(
+      final query = BoxQuery(
+        where: QueryGroup.and(<QueryFilter>[
+          QueryComparison(
             field: 'profile.age',
-            operator: DxtrCompareOperator.greaterThanOrEqual,
+            operator: QueryOperator.greaterThanOrEqual,
             value: 18,
           ),
-          DxtrCompare(
+          QueryComparison(
             field: 'status',
-            operator: DxtrCompareOperator.equal,
+            operator: QueryOperator.equal,
             value: 'active',
           ),
         ]),
@@ -23,14 +23,18 @@ void main() {
 
       expect(query.limit, 25);
       expect(query.offset, 50);
-      expect((query.where as DxtrAnd).conditions, hasLength(2));
+      expect((query.where as QueryGroup).filters, hasLength(2));
+      expect(
+        (query.where as QueryGroup).operator,
+        QueryLogicalOperator.and,
+      );
     });
 
     test('between requires an upper value', () {
       expect(
-        () => DxtrCompare(
+        () => QueryComparison(
           field: 'score',
-          operator: DxtrCompareOperator.between,
+          operator: QueryOperator.between,
           value: 10,
         ),
         throwsArgumentError,
@@ -40,9 +44,9 @@ void main() {
     test('rejects malformed field paths', () {
       for (final field in <String>['', '.name', 'name.', 'profile..name']) {
         expect(
-          () => DxtrCompare(
+          () => QueryComparison(
             field: field,
-            operator: DxtrCompareOperator.equal,
+            operator: QueryOperator.equal,
             value: 'Dxtr',
           ),
           throwsArgumentError,
@@ -51,16 +55,16 @@ void main() {
     });
 
     test('requires non-empty boolean groups', () {
-      expect(() => DxtrAnd(const <DxtrCondition>[]), throwsArgumentError);
-      expect(() => DxtrOr(const <DxtrCondition>[]), throwsArgumentError);
+      expect(() => QueryGroup.and(const <QueryFilter>[]), throwsArgumentError);
+      expect(() => QueryGroup.or(const <QueryFilter>[]), throwsArgumentError);
     });
 
     test('validates pagination', () {
       expect(
-        () => DxtrQuery(
-          where: DxtrCompare(
+        () => BoxQuery(
+          where: QueryComparison(
             field: 'age',
-            operator: DxtrCompareOperator.equal,
+            operator: QueryOperator.equal,
             value: 18,
           ),
           limit: 0,
@@ -68,10 +72,10 @@ void main() {
         throwsArgumentError,
       );
       expect(
-        () => DxtrQuery(
-          where: DxtrCompare(
+        () => BoxQuery(
+          where: QueryComparison(
             field: 'age',
-            operator: DxtrCompareOperator.equal,
+            operator: QueryOperator.equal,
             value: 18,
           ),
           offset: -1,
@@ -81,9 +85,9 @@ void main() {
     });
   });
 
-  group('Dxtr index contract', () {
+  group('index contract', () {
     test('supports a named scalar field index', () {
-      final index = DxtrIndexDefinition(
+      final index = IndexDefinition(
         name: 'by-status',
         field: 'status',
       );
@@ -94,11 +98,11 @@ void main() {
 
     test('rejects unsafe index identifiers', () {
       expect(
-        () => DxtrIndexDefinition(name: '1status', field: 'status'),
+        () => IndexDefinition(name: '1status', field: 'status'),
         throwsArgumentError,
       );
       expect(
-        () => DxtrIndexDefinition(name: 'by status', field: 'status'),
+        () => IndexDefinition(name: 'by status', field: 'status'),
         throwsArgumentError,
       );
     });
