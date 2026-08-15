@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `emit_event`
+// These functions are ignored because they are not marked as `pub`: `emit_event`, `mutation_lock`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`
 
 void initDb({required String path}) =>
@@ -54,8 +54,15 @@ Future<bool> containsKey({required String boxName, required String key}) =>
 Future<void> delete({required String boxName, required String key}) =>
     RustLib.instance.api.crateApiDelete(boxName: boxName, key: key);
 
+Future<List<String>> deleteAll(
+        {required String boxName, required List<String> keys}) =>
+    RustLib.instance.api.crateApiDeleteAll(boxName: boxName, keys: keys);
+
 Future<void> clear({required String boxName}) =>
     RustLib.instance.api.crateApiClear(boxName: boxName);
+
+Future<bool> compact({required String boxName}) =>
+    RustLib.instance.api.crateApiCompact(boxName: boxName);
 
 Future<List<String>> getAllKeys({required String boxName}) =>
     RustLib.instance.api.crateApiGetAllKeys(boxName: boxName);

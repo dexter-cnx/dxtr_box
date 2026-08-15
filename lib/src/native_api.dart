@@ -33,7 +33,9 @@ abstract interface class NativeDxtrApi {
   Future<Uint8List?> get(String boxName, String key);
   Future<bool> containsKey(String boxName, String key);
   Future<void> delete(String boxName, String key);
+  Future<List<String>> deleteAll(String boxName, List<String> keys);
   Future<void> clear(String boxName);
+  Future<bool> compact(String boxName);
   Future<List<String>> getAllKeys(String boxName);
   Future<int> length(String boxName);
 }
@@ -143,9 +145,21 @@ final class FrbNativeDxtrApi implements NativeDxtrApi {
   }
 
   @override
+  Future<List<String>> deleteAll(String boxName, List<String> keys) async {
+    await _ensureInitialized();
+    return frb.deleteAll(boxName: boxName, keys: keys);
+  }
+
+  @override
   Future<void> clear(String boxName) async {
     await _ensureInitialized();
     await frb.clear(boxName: boxName);
+  }
+
+  @override
+  Future<bool> compact(String boxName) async {
+    await _ensureInitialized();
+    return frb.compact(boxName: boxName);
   }
 
   @override
@@ -222,7 +236,14 @@ final class UnavailableNativeDxtrApi implements NativeDxtrApi {
   Future<void> delete(String boxName, String key) async => _missing();
 
   @override
+  Future<List<String>> deleteAll(String boxName, List<String> keys) async =>
+      _missing();
+
+  @override
   Future<void> clear(String boxName) async => _missing();
+
+  @override
+  Future<bool> compact(String boxName) async => _missing();
 
   @override
   Future<List<String>> getAllKeys(String boxName) async => _missing();

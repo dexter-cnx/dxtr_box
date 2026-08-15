@@ -490,6 +490,26 @@ pub fn delete(name: &str, key: &str) -> Result<(), String> {
     write.commit().map_err(|e| e.to_string())
 }
 
+pub fn delete_all(name: &str, keys: &[String]) -> Result<Vec<String>, String> {
+    let (db, _) = database(name)?;
+    let write = db.begin_write().map_err(|e| e.to_string())?;
+    let mut deleted = Vec::new();
+    {
+        let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
+        for key in keys {
+            if table
+                .remove(key.as_str())
+                .map_err(|e| e.to_string())?
+                .is_some()
+            {
+                deleted.push(key.clone());
+            }
+        }
+    }
+    write.commit().map_err(|e| e.to_string())?;
+    Ok(deleted)
+}
+
 pub fn clear(name: &str) -> Result<(), String> {
     let (db, _) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
@@ -508,6 +528,24 @@ pub fn clear(name: &str) -> Result<(), String> {
         }
     }
     write.commit().map_err(|e| e.to_string())
+}
+
+pub fn compact(name: &str) -> Result<bool, String> {
+    let mut databases = DATABASES.write();
+    let entry = databases
+        .get_mut(name)
+        .ok_or_else(|| format!("box '{name}' is not open"))?;
+    if entry.handles != 1 {
+        return Err("compact requires exactly one open box handle".to_string());
+    }
+    let db = Arc::get_mut(&mut entry.db)
+        .ok_or_else(|| "box is busy; retry compact when no operations are in flight".to_string())?;
+
+    let mut compacted = false;
+    while db.compact().map_err(|e| e.to_string())? {
+        compacted = true;
+    }
+    Ok(compacted)
 }
 
 pub fn all_keys(name: &str) -> Result<Vec<String>, String> {
@@ -560,6 +598,54 @@ mod tests {
         assert!(!contains_key("people", "alice").unwrap());
         assert_eq!(len("people").unwrap(), 0);
         close("people");
+    }
+
+    #[test]
+    fn delete_all_is_atomic_and_reports_existing_keys() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("batch-delete", None).unwrap();
+        put_all(
+            "batch-delete",
+            &[
+                ("a".into(), pack(&1_i64)),
+                ("b".into(), pack(&2_i64)),
+                ("c".into(), pack(&3_i64)),
+            ],
+        )
+        .unwrap();
+
+        let deleted = delete_all(
+            "batch-delete",
+            &["a".to_string(), "missing".to_string(), "c".to_string()],
+        )
+        .unwrap();
+        assert_eq!(deleted, vec!["a".to_string(), "c".to_string()]);
+        assert_eq!(all_keys("batch-delete").unwrap(), vec!["b".to_string()]);
+        close("batch-delete");
+    }
+
+    #[test]
+    fn compact_requires_a_single_idle_handle() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("compact", None).unwrap();
+        put_all(
+            "compact",
+            &(0..128)
+                .map(|index| (format!("key-{index}"), pack(&vec![index as u8; 1024])))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        clear("compact").unwrap();
+
+        assert!(compact("compact").is_ok());
+        open("compact", None).unwrap();
+        assert!(compact("compact").is_err());
+        close("compact");
+        close("compact");
     }
 
     #[test]

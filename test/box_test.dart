@@ -161,6 +161,24 @@ void main() {
     await subscription.cancel();
   });
 
+  test('deleteAll removes existing keys and keeps metadata coherent', () async {
+    final box = await DxtrBox.open('batch');
+    await box.putAll({'a': 1, 'b': 2, 'c': 3});
+
+    await box.deleteAll(['a', 'missing', 'c', 'a']);
+
+    expect(box.keys, ['b']);
+    expect(await box.get('a'), isNull);
+    expect(await box.get('b'), 2);
+    await box.close();
+  });
+
+  test('compact delegates to native engine', () async {
+    final box = await DxtrBox.open('compact');
+    expect(await box.compact(), isFalse);
+    await box.close();
+  });
+
   test('close is idempotent and rejects later operations', () async {
     final box = await DxtrBox.open('closable');
     await box.close();
@@ -388,12 +406,38 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   }
 
   @override
+  @override
+  Future<List<String>> deleteAll(String boxName, List<String> keys) async {
+    final box = _boxes[boxName];
+    if (box == null) throw StateError('box not open');
+    final deleted = <String>[];
+    for (final key in keys) {
+      if (box.remove(key) != null) {
+        deleted.add(key);
+        _emit(NativeWatchEvent(
+          boxName: boxName,
+          type: NativeWatchEventType.delete,
+          key: key,
+        ));
+      }
+    }
+    return deleted;
+  }
+
+  @override
   Future<void> clear(String boxName) async {
     _requireOpen(boxName);
     _box(boxName).clear();
     _emit(
       NativeWatchEvent(boxName: boxName, type: NativeWatchEventType.clear),
     );
+  }
+
+  @override
+  @override
+  Future<bool> compact(String boxName) async {
+    if (!_boxes.containsKey(boxName)) throw StateError('box not open');
+    return false;
   }
 
   @override
