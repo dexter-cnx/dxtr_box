@@ -11,8 +11,10 @@ use std::{
 use crate::codec::validate_message_pack;
 #[cfg(feature = "encryption")]
 use crate::crypto;
+#[cfg(feature = "full")]
+use crate::index;
 
-const DATA: TableDefinition<&str, &[u8]> = TableDefinition::new("data");
+pub(crate) const DATA: TableDefinition<&str, &[u8]> = TableDefinition::new("data");
 const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 const META_FORMAT_VERSION: &str = "format_version";
 const META_ENCRYPTION_MODE: &str = "encryption_mode";
@@ -27,7 +29,7 @@ const ENCRYPTION_CHACHA20POLY1305: &[u8] = b"chacha20poly1305";
 const KEY_CHECK_PLAINTEXT: &[u8] = b"dxtr_box:key-check:v1";
 
 #[derive(Debug)]
-enum EncryptionState {
+pub(crate) enum EncryptionState {
     Plain,
     #[cfg(feature = "encryption")]
     Encrypted {
@@ -37,6 +39,11 @@ enum EncryptionState {
 }
 
 impl EncryptionState {
+    #[cfg(feature = "full")]
+    pub(crate) fn is_encrypted(&self) -> bool {
+        !matches!(self, Self::Plain)
+    }
+
     fn validate_requested_key(&self, encryption_key: Option<&str>) -> Result<(), String> {
         match self {
             Self::Plain => {
@@ -157,7 +164,7 @@ fn file_path(name: &str) -> Result<PathBuf, String> {
     Ok(base_path()?.join(format!("{name}.dxtr")))
 }
 
-fn database(name: &str) -> Result<(Arc<Database>, Arc<EncryptionState>), String> {
+pub(crate) fn database(name: &str) -> Result<(Arc<Database>, Arc<EncryptionState>), String> {
     if let Some(entry) = DATABASES.read().get(name) {
         return Ok((Arc::clone(&entry.db), Arc::clone(&entry.encryption)));
     }
@@ -379,6 +386,9 @@ pub fn open(name: &str, encryption_key: Option<&str>) -> Result<(), String> {
         }
     };
 
+    #[cfg(feature = "full")]
+    index::ensure_tables(&db)?;
+
     databases.insert(
         name.to_string(),
         OpenDatabase {
@@ -489,6 +499,17 @@ pub fn encrypt_box(name: &str, encryption_key: &str) -> Result<(), String> {
                 return Err("unsupported box encryption mode".to_string());
             }
 
+            #[cfg(feature = "full")]
+            {
+                index::ensure_tables(&db)?;
+                if index::has_definitions(&db)? {
+                    return Err(
+                        "cannot encrypt a box with persisted indexes until encrypted index storage is supported"
+                            .to_string(),
+                    );
+                }
+            }
+
             let salt = crypto::new_salt();
             let key = crypto::derive_key(encryption_key, &salt)?;
             let key_check = crypto::encrypt(&key, KEY_CHECK_PLAINTEXT)?;
@@ -543,6 +564,12 @@ pub fn put(name: &str, key: &str, value: &[u8]) -> Result<(), String> {
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
+        let _old = table
+            .get(key)
+            .map_err(|e| e.to_string())?
+            .map(|value| value.value().to_vec());
+        #[cfg(feature = "full")]
+        index::maintain_put(&write, key, _old.as_deref(), value)?;
         table
             .insert(key, stored.as_slice())
             .map_err(|e| e.to_string())?;
@@ -555,16 +582,26 @@ pub fn put_all(name: &str, entries: &[(String, Vec<u8>)]) -> Result<(), String> 
     let mut stored_entries = Vec::with_capacity(entries.len());
     for (key, value) in entries {
         validate_message_pack(value)?;
-        stored_entries.push((key.as_str(), encryption.encode_value(key, value)?));
+        stored_entries.push((
+            key.as_str(),
+            value.as_slice(),
+            encryption.encode_value(key, value)?,
+        ));
     }
 
     let (db, _) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
-        for (key, value) in &stored_entries {
+        for (key, _plaintext, stored) in &stored_entries {
+            let _old = table
+                .get(*key)
+                .map_err(|e| e.to_string())?
+                .map(|value| value.value().to_vec());
+            #[cfg(feature = "full")]
+            index::maintain_put(&write, key, _old.as_deref(), _plaintext)?;
             table
-                .insert(*key, value.as_slice())
+                .insert(*key, stored.as_slice())
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -604,6 +641,14 @@ pub fn delete(name: &str, key: &str) -> Result<(), String> {
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
+        let _old = table
+            .get(key)
+            .map_err(|e| e.to_string())?
+            .map(|value| value.value().to_vec());
+        #[cfg(feature = "full")]
+        if let Some(_old) = _old.as_deref() {
+            index::maintain_delete(&write, key, _old)?;
+        }
         table.remove(key).map_err(|e| e.to_string())?;
     }
     write.commit().map_err(|e| e.to_string())
@@ -616,11 +661,14 @@ pub fn delete_all(name: &str, keys: &[String]) -> Result<Vec<String>, String> {
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
         for key in keys {
-            if table
-                .remove(key.as_str())
+            let _old = table
+                .get(key.as_str())
                 .map_err(|e| e.to_string())?
-                .is_some()
-            {
+                .map(|value| value.value().to_vec());
+            if let Some(_old) = _old {
+                #[cfg(feature = "full")]
+                index::maintain_delete(&write, key, &_old)?;
+                table.remove(key.as_str()).map_err(|e| e.to_string())?;
                 deleted.push(key.clone());
             }
         }
@@ -645,6 +693,8 @@ pub fn clear(name: &str) -> Result<(), String> {
         for key in keys {
             table.remove(key.as_str()).map_err(|e| e.to_string())?;
         }
+        #[cfg(feature = "full")]
+        index::clear_entries(&write)?;
     }
     write.commit().map_err(|e| e.to_string())
 }

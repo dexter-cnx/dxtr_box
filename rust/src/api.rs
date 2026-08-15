@@ -4,9 +4,9 @@ use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 
-#[cfg(feature = "full")]
-use crate::query;
 use crate::{db, frb_generated::StreamSink};
+#[cfg(feature = "full")]
+use crate::{index, query};
 
 #[derive(Clone)]
 pub enum NativeBoxEventType {
@@ -26,6 +26,11 @@ pub struct NativeBoxEvent {
 pub struct NativeQueryRecord {
     pub key: String,
     pub value: Vec<u8>,
+}
+
+pub struct NativeIndexDefinition {
+    pub name: String,
+    pub field: String,
 }
 
 type Watchers = HashMap<String, HashMap<String, StreamSink<NativeBoxEvent>>>;
@@ -299,6 +304,57 @@ pub fn scan_query(
     {
         let _ = (box_name, query_payload);
         Err("native query execution requires the full profile".to_string())
+    }
+}
+
+pub fn create_index(box_name: String, name: String, field: String) -> Result<(), String> {
+    #[cfg(feature = "full")]
+    {
+        let mutation_lock = mutation_lock(&box_name);
+        let _mutation_guard = mutation_lock.lock();
+        let (db, encryption) = db::database(&box_name)?;
+        index::create(&db, &encryption, &name, &field)
+    }
+
+    #[cfg(not(feature = "full"))]
+    {
+        let _ = (box_name, name, field);
+        Err("persisted indexes require the full profile".to_string())
+    }
+}
+
+pub fn list_indexes(box_name: String) -> Result<Vec<NativeIndexDefinition>, String> {
+    #[cfg(feature = "full")]
+    {
+        let (db, _) = db::database(&box_name)?;
+        index::list(&db).map(|definitions| {
+            definitions
+                .into_iter()
+                .map(|(name, field)| NativeIndexDefinition { name, field })
+                .collect()
+        })
+    }
+
+    #[cfg(not(feature = "full"))]
+    {
+        let _ = box_name;
+        Err("persisted indexes require the full profile".to_string())
+    }
+}
+
+pub fn drop_index(box_name: String, name: String) -> Result<bool, String> {
+    #[cfg(feature = "full")]
+    {
+        let mutation_lock = mutation_lock(&box_name);
+        let _mutation_guard = mutation_lock.lock();
+        let (db, _) = db::database(&box_name)?;
+        index::drop_index(&db, &name)
+    }
+
+    #[cfg(not(feature = "full"))]
+    {
+        let _ = (box_name, name);
+        Err("persisted indexes require the full profile".to_string())
     }
 }
 

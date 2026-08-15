@@ -73,6 +73,19 @@ Future<List<NativeQueryRecord>> scanQuery(
     RustLib.instance.api
         .crateApiScanQuery(boxName: boxName, queryPayload: queryPayload);
 
+Future<void> createIndex(
+        {required String boxName,
+        required String name,
+        required String field}) =>
+    RustLib.instance.api
+        .crateApiCreateIndex(boxName: boxName, name: name, field: field);
+
+Future<List<NativeIndexDefinition>> listIndexes({required String boxName}) =>
+    RustLib.instance.api.crateApiListIndexes(boxName: boxName);
+
+Future<bool> dropIndex({required String boxName, required String name}) =>
+    RustLib.instance.api.crateApiDropIndex(boxName: boxName, name: name);
+
 Future<List<String>> getAllKeys({required String boxName}) =>
     RustLib.instance.api.crateApiGetAllKeys(boxName: boxName);
 
@@ -112,6 +125,27 @@ enum NativeBoxEventType {
   delete,
   clear,
   ;
+}
+
+class NativeIndexDefinition {
+  final String name;
+  final String field;
+
+  const NativeIndexDefinition({
+    required this.name,
+    required this.field,
+  });
+
+  @override
+  int get hashCode => name.hashCode ^ field.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NativeIndexDefinition &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          field == other.field;
 }
 
 class NativeQueryRecord {

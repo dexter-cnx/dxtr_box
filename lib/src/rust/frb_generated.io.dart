@@ -38,6 +38,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<NativeIndexDefinition> dco_decode_list_native_index_definition(
+      dynamic raw);
+
+  @protected
   List<NativeQueryRecord> dco_decode_list_native_query_record(dynamic raw);
 
   @protected
@@ -55,6 +59,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   NativeBoxEventType dco_decode_native_box_event_type(dynamic raw);
+
+  @protected
+  NativeIndexDefinition dco_decode_native_index_definition(dynamic raw);
 
   @protected
   NativeQueryRecord dco_decode_native_query_record(dynamic raw);
@@ -98,6 +105,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<NativeIndexDefinition> sse_decode_list_native_index_definition(
+      SseDeserializer deserializer);
+
+  @protected
   List<NativeQueryRecord> sse_decode_list_native_query_record(
       SseDeserializer deserializer);
 
@@ -116,6 +127,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   NativeBoxEventType sse_decode_native_box_event_type(
+      SseDeserializer deserializer);
+
+  @protected
+  NativeIndexDefinition sse_decode_native_index_definition(
       SseDeserializer deserializer);
 
   @protected
@@ -162,6 +177,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_native_index_definition(
+      List<NativeIndexDefinition> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_native_query_record(
       List<NativeQueryRecord> self, SseSerializer serializer);
 
@@ -183,6 +202,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_native_box_event_type(
       NativeBoxEventType self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_native_index_definition(
+      NativeIndexDefinition self, SseSerializer serializer);
 
   @protected
   void sse_encode_native_query_record(

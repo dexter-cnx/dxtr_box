@@ -11,9 +11,7 @@ pub(crate) fn ensure_tables(db: &Database) -> Result<(), String> {
     write
         .open_table(INDEX_DEFINITIONS)
         .map_err(|e| e.to_string())?;
-    write
-        .open_table(INDEX_ENTRIES)
-        .map_err(|e| e.to_string())?;
+    write.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     write.commit().map_err(|e| e.to_string())
 }
 
@@ -58,14 +56,10 @@ pub(crate) fn create(
         }
         drop(data);
 
-        definitions
-            .insert(name, field)
-            .map_err(|e| e.to_string())?;
+        definitions.insert(name, field).map_err(|e| e.to_string())?;
         drop(definitions);
 
-        let mut entries = write
-            .open_table(INDEX_ENTRIES)
-            .map_err(|e| e.to_string())?;
+        let mut entries = write.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
         for key in derived {
             entries
                 .insert(key.as_slice(), EMPTY_VALUE)
@@ -122,9 +116,7 @@ pub(crate) fn maintain_put(
         return Ok(());
     }
 
-    let mut entries = write
-        .open_table(INDEX_ENTRIES)
-        .map_err(|e| e.to_string())?;
+    let mut entries = write.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     for (index_name, field) in definitions {
         if let Some(old) = old_value {
             if let Some(scalar) = query::index_scalar_key(old, &field)? {
@@ -155,9 +147,7 @@ pub(crate) fn maintain_delete(
         return Ok(());
     }
 
-    let mut entries = write
-        .open_table(INDEX_ENTRIES)
-        .map_err(|e| e.to_string())?;
+    let mut entries = write.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     for (index_name, field) in definitions {
         if let Some(scalar) = query::index_scalar_key(old_value, &field)? {
             entries
@@ -169,9 +159,7 @@ pub(crate) fn maintain_delete(
 }
 
 pub(crate) fn clear_entries(write: &WriteTransaction) -> Result<(), String> {
-    let mut entries = write
-        .open_table(INDEX_ENTRIES)
-        .map_err(|e| e.to_string())?;
+    let mut entries = write.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     let keys = entries
         .iter()
         .map_err(|e| e.to_string())?
@@ -181,9 +169,7 @@ pub(crate) fn clear_entries(write: &WriteTransaction) -> Result<(), String> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     for key in keys {
-        entries
-            .remove(key.as_slice())
-            .map_err(|e| e.to_string())?;
+        entries.remove(key.as_slice()).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -208,9 +194,7 @@ fn definitions(write: &WriteTransaction) -> Result<Vec<(String, String)>, String
 
 fn remove_index_entries(write: &WriteTransaction, index_name: &str) -> Result<(), String> {
     let prefix = index_prefix(index_name);
-    let mut entries = write
-        .open_table(INDEX_ENTRIES)
-        .map_err(|e| e.to_string())?;
+    let mut entries = write.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     let keys = entries
         .iter()
         .map_err(|e| e.to_string())?
@@ -221,9 +205,7 @@ fn remove_index_entries(write: &WriteTransaction, index_name: &str) -> Result<()
         })
         .collect::<Result<Vec<_>, String>>()?;
     for key in keys {
-        entries
-            .remove(key.as_slice())
-            .map_err(|e| e.to_string())?;
+        entries.remove(key.as_slice()).map_err(|e| e.to_string())?;
     }
     Ok(())
 }

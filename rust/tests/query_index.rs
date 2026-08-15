@@ -28,10 +28,7 @@ fn dxtr_map(entries: Vec<(&str, Value)>) -> Value {
 fn person(status: &str, age: i64) -> Vec<u8> {
     encode(&dxtr_map(vec![
         ("status", Value::from(status)),
-        (
-            "profile",
-            dxtr_map(vec![("age", Value::from(age))]),
-        ),
+        ("profile", dxtr_map(vec![("age", Value::from(age))])),
     ]))
 }
 
@@ -68,14 +65,37 @@ fn native_scan_and_persisted_index_lifecycle() {
     init_db(dir.path().to_string_lossy().to_string()).unwrap();
     open_box("people".to_string(), None).unwrap();
 
-    put("people".to_string(), "charlie".to_string(), person("active", 40)).unwrap();
-    put("people".to_string(), "alice".to_string(), person("active", 22)).unwrap();
-    put("people".to_string(), "bob".to_string(), person("inactive", 35)).unwrap();
-    put("people".to_string(), "teen".to_string(), person("active", 17)).unwrap();
+    put(
+        "people".to_string(),
+        "charlie".to_string(),
+        person("active", 40),
+    )
+    .unwrap();
+    put(
+        "people".to_string(),
+        "alice".to_string(),
+        person("active", 22),
+    )
+    .unwrap();
+    put(
+        "people".to_string(),
+        "bob".to_string(),
+        person("inactive", 35),
+    )
+    .unwrap();
+    put(
+        "people".to_string(),
+        "teen".to_string(),
+        person("active", 17),
+    )
+    .unwrap();
 
     let results = scan_query("people".to_string(), query_payload()).unwrap();
     assert_eq!(
-        results.iter().map(|record| record.key.as_str()).collect::<Vec<_>>(),
+        results
+            .iter()
+            .map(|record| record.key.as_str())
+            .collect::<Vec<_>>(),
         vec!["alice", "charlie"]
     );
 
@@ -107,7 +127,12 @@ fn encrypted_box_uses_scan_but_rejects_persisted_index_creation() {
     let dir = tempfile::tempdir().unwrap();
     init_db(dir.path().to_string_lossy().to_string()).unwrap();
     open_box("secure".to_string(), Some("secret".to_string())).unwrap();
-    put("secure".to_string(), "one".to_string(), person("active", 30)).unwrap();
+    put(
+        "secure".to_string(),
+        "one".to_string(),
+        person("active", 30),
+    )
+    .unwrap();
 
     let results = scan_query("secure".to_string(), query_payload()).unwrap();
     assert_eq!(results.len(), 1);
