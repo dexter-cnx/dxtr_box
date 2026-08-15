@@ -30,6 +30,7 @@ final class Box {
       StreamController<BoxEvent>.broadcast(sync: true);
 
   bool _closed = false;
+  Future<void>? _closeFuture;
 
   int get length => _metadata.keys.length;
   bool get isEmpty => _metadata.keys.isEmpty;
@@ -117,12 +118,26 @@ final class Box {
     _events.add(BoxEvent(boxName: name, type: BoxEventType.clear));
   }
 
-  Future<void> close() async {
-    if (_closed) return;
-    await _api.closeBox(name);
-    _closed = true;
-    _onClose();
-    await _events.close();
+  Future<void> close() {
+    if (_closed) return Future<void>.value();
+    final inFlight = _closeFuture;
+    if (inFlight != null) return inFlight;
+
+    final future = _performClose();
+    _closeFuture = future;
+    return future;
+  }
+
+  Future<void> _performClose() async {
+    try {
+      await _api.closeBox(name);
+      _closed = true;
+      _onClose();
+      await _events.close();
+    } catch (_) {
+      _closeFuture = null;
+      rethrow;
+    }
   }
 
   Future<List<MapEntry<String, dynamic>>> where(
