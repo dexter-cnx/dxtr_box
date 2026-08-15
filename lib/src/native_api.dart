@@ -3,6 +3,22 @@ import 'dart:typed_data';
 import 'rust/api.dart' as frb;
 import 'rust/frb_generated.dart';
 
+enum NativeWatchEventType { put, delete, clear }
+
+final class NativeWatchEvent {
+  const NativeWatchEvent({
+    required this.boxName,
+    required this.type,
+    this.key,
+    this.value,
+  });
+
+  final String boxName;
+  final NativeWatchEventType type;
+  final String? key;
+  final Uint8List? value;
+}
+
 /// Small seam over generated flutter_rust_bridge symbols.
 abstract interface class NativeDxtrApi {
   Future<void> initDb(String path);
@@ -10,6 +26,8 @@ abstract interface class NativeDxtrApi {
   Future<void> closeBox(String name);
   Future<void> deleteBox(String name);
   Future<bool> boxExists(String name);
+  Future<Stream<NativeWatchEvent>> watchBox(String boxName, String watcherId);
+  Future<void> unwatchBox(String boxName, String watcherId);
   Future<void> put(String boxName, String key, Uint8List value);
   Future<void> putAll(String boxName, Map<String, Uint8List> values);
   Future<Uint8List?> get(String boxName, String key);
@@ -57,6 +75,33 @@ final class FrbNativeDxtrApi implements NativeDxtrApi {
   Future<bool> boxExists(String name) async {
     await _ensureInitialized();
     return frb.boxExists(name: name);
+  }
+
+  @override
+  Future<Stream<NativeWatchEvent>> watchBox(
+    String boxName,
+    String watcherId,
+  ) async {
+    await _ensureInitialized();
+    final stream = await frb.watchBox(boxName: boxName, watcherId: watcherId);
+    return stream.map(
+      (event) => NativeWatchEvent(
+        boxName: event.boxName,
+        type: switch (event.eventType) {
+          frb.NativeBoxEventType.put => NativeWatchEventType.put,
+          frb.NativeBoxEventType.delete => NativeWatchEventType.delete,
+          frb.NativeBoxEventType.clear => NativeWatchEventType.clear,
+        },
+        key: event.key,
+        value: event.value == null ? null : Uint8List.fromList(event.value!),
+      ),
+    );
+  }
+
+  @override
+  Future<void> unwatchBox(String boxName, String watcherId) async {
+    await _ensureInitialized();
+    frb.unwatchBox(boxName: boxName, watcherId: watcherId);
   }
 
   @override
@@ -116,7 +161,8 @@ final class FrbNativeDxtrApi implements NativeDxtrApi {
     final maxDartInt = BigInt.from(0x7fffffffffffffff);
     if (value.isNegative || value > maxDartInt) {
       throw StateError(
-          'Native box length cannot be represented as a Dart int.');
+        'Native box length cannot be represented as a Dart int.',
+      );
     }
     return value.toInt();
   }
@@ -144,6 +190,16 @@ final class UnavailableNativeDxtrApi implements NativeDxtrApi {
 
   @override
   Future<bool> boxExists(String name) async => _missing();
+
+  @override
+  Future<Stream<NativeWatchEvent>> watchBox(
+    String boxName,
+    String watcherId,
+  ) async =>
+      _missing();
+
+  @override
+  Future<void> unwatchBox(String boxName, String watcherId) async => _missing();
 
   @override
   Future<void> put(String boxName, String key, Uint8List value) async =>
