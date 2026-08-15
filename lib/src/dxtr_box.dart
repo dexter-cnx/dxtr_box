@@ -13,9 +13,28 @@ abstract final class DxtrBox {
       <String, BoxMetadata>{};
 
   static const Set<String> _windowsReservedNames = <String>{
-    'CON', 'PRN', 'AUX', 'NUL',
-    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'LPT1',
+    'LPT2',
+    'LPT3',
+    'LPT4',
+    'LPT5',
+    'LPT6',
+    'LPT7',
+    'LPT8',
+    'LPT9',
   };
 
   static final RegExp _unsafeWindowsNameCharacters =
@@ -35,11 +54,14 @@ abstract final class DxtrBox {
   static Future<void> init({String? path}) async {
     final resolvedPath = p.normalize(
       p.absolute(
-        path ?? p.join((await getApplicationSupportDirectory()).path, 'dxtr_box'),
+        path ??
+            p.join((await getApplicationSupportDirectory()).path, 'dxtr_box'),
       ),
     );
 
-    if (_basePath != null && _basePath != resolvedPath && _openHandleCount > 0) {
+    if (_basePath != null &&
+        _basePath != resolvedPath &&
+        _openHandleCount > 0) {
       throw StateError(
         'Cannot change the dxtr_box base path while boxes are open.',
       );
