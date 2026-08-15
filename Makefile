@@ -20,11 +20,11 @@ pub-get:
 	$(FLUTTER) pub get
 
 format:
-	dart format lib test example
+	dart format lib test example benchmark/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
 format-check:
-	dart format --output=none --set-exit-if-changed lib test example
+	dart format --output=none --set-exit-if-changed lib test example benchmark/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
 analyze: pub-get
@@ -57,11 +57,11 @@ native-test: pub-get native-build
 process-crash:
 	$(CARGO) test --manifest-path rust/Cargo.toml --test process_crash -- --nocapture
 
-benchmark-smoke: pub-get native-build
-	DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
+benchmark-smoke: native-build
+	cd benchmark && $(FLUTTER) pub get && DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
 
-benchmark-full: pub-get native-build
-	DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_FULL_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
+benchmark-full: native-build
+	cd benchmark && $(FLUTTER) pub get && DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_FULL_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
 
 preflight: format-check analyze test rust-check
 
