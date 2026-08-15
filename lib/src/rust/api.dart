@@ -13,10 +13,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 void initDb({required String path}) =>
     RustLib.instance.api.crateApiInitDb(path: path);
 
-void openBox({required String name, String? encryptionKey}) => RustLib
-    .instance
-    .api
-    .crateApiOpenBox(name: name, encryptionKey: encryptionKey);
+void openBox({required String name, String? encryptionKey}) =>
+    RustLib.instance.api
+        .crateApiOpenBox(name: name, encryptionKey: encryptionKey);
 
 void closeBox({required String name}) =>
     RustLib.instance.api.crateApiCloseBox(name: name);
@@ -30,15 +29,15 @@ bool boxExists({required String name}) =>
 Future<Stream<NativeBoxEvent>> watchBox({
   required String boxName,
   required String watcherId,
-}) => RustLib.instance.api.crateApiWatchBox(
-  boxName: boxName,
-  watcherId: watcherId,
-);
+}) =>
+    RustLib.instance.api.crateApiWatchBox(
+      boxName: boxName,
+      watcherId: watcherId,
+    );
 
-void unwatchBox({required String boxName, required String watcherId}) => RustLib
-    .instance
-    .api
-    .crateApiUnwatchBox(boxName: boxName, watcherId: watcherId);
+void unwatchBox({required String boxName, required String watcherId}) =>
+    RustLib.instance.api
+        .crateApiUnwatchBox(boxName: boxName, watcherId: watcherId);
 
 Future<void> put({
   required String boxName,
@@ -50,7 +49,8 @@ Future<void> put({
 Future<void> putAll({
   required String boxName,
   required List<(String, Uint8List)> entries,
-}) => RustLib.instance.api.crateApiPutAll(boxName: boxName, entries: entries);
+}) =>
+    RustLib.instance.api.crateApiPutAll(boxName: boxName, entries: entries);
 
 Future<Uint8List?> get_({required String boxName, required String key}) =>
     RustLib.instance.api.crateApiGet(boxName: boxName, key: key);
@@ -64,7 +64,8 @@ Future<void> delete({required String boxName, required String key}) =>
 Future<List<String>> deleteAll({
   required String boxName,
   required List<String> keys,
-}) => RustLib.instance.api.crateApiDeleteAll(boxName: boxName, keys: keys);
+}) =>
+    RustLib.instance.api.crateApiDeleteAll(boxName: boxName, keys: keys);
 
 Future<void> clear({required String boxName}) =>
     RustLib.instance.api.crateApiClear(boxName: boxName);

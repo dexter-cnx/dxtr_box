@@ -69,10 +69,10 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
-        stem: 'rust_lib_dxtr_box',
-        ioDirectory: 'rust/target/release/',
-        webPrefix: 'pkg/',
-      );
+    stem: 'rust_lib_dxtr_box',
+    ioDirectory: 'rust/target/release/',
+    webPrefix: 'pkg/',
+  );
 }
 
 abstract class RustLibApi extends BaseApi {
@@ -270,9 +270,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   TaskConstMeta get kCrateApiContainsKeyConstMeta => const TaskConstMeta(
-    debugName: "contains_key",
-    argNames: ["boxName", "key"],
-  );
+        debugName: "contains_key",
+        argNames: ["boxName", "key"],
+      );
 
   @override
   Future<void> crateApiDelete({required String boxName, required String key}) {
@@ -333,9 +333,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   TaskConstMeta get kCrateApiDeleteAllConstMeta => const TaskConstMeta(
-    debugName: "delete_all",
-    argNames: ["boxName", "keys"],
-  );
+        debugName: "delete_all",
+        argNames: ["boxName", "keys"],
+      );
 
   @override
   void crateApiDeleteBox({required String name}) {
@@ -493,9 +493,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   TaskConstMeta get kCrateApiOpenBoxConstMeta => const TaskConstMeta(
-    debugName: "open_box",
-    argNames: ["name", "encryptionKey"],
-  );
+        debugName: "open_box",
+        argNames: ["name", "encryptionKey"],
+      );
 
   @override
   Future<void> crateApiPut({
@@ -529,9 +529,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   TaskConstMeta get kCrateApiPutConstMeta => const TaskConstMeta(
-    debugName: "put",
-    argNames: ["boxName", "key", "value"],
-  );
+        debugName: "put",
+        argNames: ["boxName", "key", "value"],
+      );
 
   @override
   Future<void> crateApiPutAll({
@@ -566,9 +566,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   TaskConstMeta get kCrateApiPutAllConstMeta => const TaskConstMeta(
-    debugName: "put_all",
-    argNames: ["boxName", "entries"],
-  );
+        debugName: "put_all",
+        argNames: ["boxName", "entries"],
+      );
 
   @override
   void crateApiUnwatchBox({
@@ -595,9 +595,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   TaskConstMeta get kCrateApiUnwatchBoxConstMeta => const TaskConstMeta(
-    debugName: "unwatch_box",
-    argNames: ["boxName", "watcherId"],
-  );
+        debugName: "unwatch_box",
+        argNames: ["boxName", "watcherId"],
+      );
 
   @override
   Future<Stream<NativeBoxEvent>> crateApiWatchBox({
@@ -632,9 +632,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   TaskConstMeta get kCrateApiWatchBoxConstMeta => const TaskConstMeta(
-    debugName: "watch_box",
-    argNames: ["boxName", "watcherId", "sink"],
-  );
+        debugName: "watch_box",
+        argNames: ["boxName", "watcherId", "sink"],
+      );
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {

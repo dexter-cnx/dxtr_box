@@ -206,7 +206,8 @@ final class UnavailableNativeDxtrApi implements NativeDxtrApi {
   Future<Stream<NativeWatchEvent>> watchBox(
     String boxName,
     String watcherId,
-  ) async => _missing();
+  ) async =>
+      _missing();
 
   @override
   Future<void> unwatchBox(String boxName, String watcherId) async => _missing();

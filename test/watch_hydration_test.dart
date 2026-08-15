@@ -6,7 +6,8 @@ import 'package:dxtr_box/src/native_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('events received during metadata hydration replay after stale snapshot', () async {
+  test('events received during metadata hydration replay after stale snapshot',
+      () async {
     final api = _HydrationRaceNativeApi();
     DxtrBox.bindNativeApi(api);
     await DxtrBox.init(path: '/tmp/dxtr_box_hydration_test');
@@ -67,7 +68,7 @@ final class _HydrationRaceNativeApi implements NativeDxtrApi {
   void _emit(NativeWatchEvent event) {
     final controllers =
         _watchers[event.boxName]?.values.toList(growable: false) ??
-        const <StreamController<NativeWatchEvent>>[];
+            const <StreamController<NativeWatchEvent>>[];
     for (final controller in controllers) {
       controller.add(event);
     }

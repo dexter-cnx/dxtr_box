@@ -87,9 +87,8 @@ void main() {
       await DxtrBox.deleteBox('native');
       expect(await DxtrBox.boxExists('native'), isFalse);
     },
-    skip: nativeEnabled
-        ? false
-        : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
+    skip:
+        nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
   );
 
   test(
@@ -133,8 +132,7 @@ void main() {
       await DxtrBox.deleteBox('secure');
       expect(await DxtrBox.boxExists('secure'), isFalse);
     },
-    skip: nativeEnabled
-        ? false
-        : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
+    skip:
+        nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
   );
 }
