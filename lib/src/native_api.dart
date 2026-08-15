@@ -26,6 +26,13 @@ final class NativeQueryRecord {
   final Uint8List value;
 }
 
+final class NativeIndexDefinition {
+  const NativeIndexDefinition({required this.name, required this.field});
+
+  final String name;
+  final String field;
+}
+
 /// Small seam over generated flutter_rust_bridge symbols.
 abstract interface class NativeDxtrApi {
   Future<void> initDb(String path);
@@ -54,6 +61,12 @@ abstract interface class NativeQueryApi {
   );
 }
 
+abstract interface class NativeIndexApi {
+  Future<void> createIndex(String boxName, String name, String field);
+  Future<List<NativeIndexDefinition>> listIndexes(String boxName);
+  Future<bool> dropIndex(String boxName, String name);
+}
+
 /// Optional maintenance capability for engines that can migrate plaintext
 /// storage into the encrypted dxtr_box format.
 abstract interface class NativeEncryptionMigrationApi {
@@ -62,7 +75,11 @@ abstract interface class NativeEncryptionMigrationApi {
 
 /// Production adapter backed by generated flutter_rust_bridge bindings.
 final class FrbNativeDxtrApi
-    implements NativeDxtrApi, NativeQueryApi, NativeEncryptionMigrationApi {
+    implements
+        NativeDxtrApi,
+        NativeQueryApi,
+        NativeIndexApi,
+        NativeEncryptionMigrationApi {
   const FrbNativeDxtrApi();
 
   static Future<void>? _initializing;
@@ -204,6 +221,32 @@ final class FrbNativeDxtrApi
           ),
         )
         .toList(growable: false);
+  }
+
+  @override
+  Future<void> createIndex(String boxName, String name, String field) async {
+    await _ensureInitialized();
+    await frb.createIndex(boxName: boxName, name: name, field: field);
+  }
+
+  @override
+  Future<List<NativeIndexDefinition>> listIndexes(String boxName) async {
+    await _ensureInitialized();
+    final definitions = await frb.listIndexes(boxName: boxName);
+    return definitions
+        .map(
+          (definition) => NativeIndexDefinition(
+            name: definition.name,
+            field: definition.field,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<bool> dropIndex(String boxName, String name) async {
+    await _ensureInitialized();
+    return frb.dropIndex(boxName: boxName, name: name);
   }
 
   @override
