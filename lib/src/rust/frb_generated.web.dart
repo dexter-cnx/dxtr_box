@@ -21,10 +21,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   });
 
   @protected
+  AnyhowException dco_decode_AnyhowException(dynamic raw);
+
+  @protected
+  RustStreamSink<NativeBoxEvent> dco_decode_StreamSink_native_box_event_Sse(
+      dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
   bool dco_decode_bool(dynamic raw);
+
+  @protected
+  int dco_decode_i_32(dynamic raw);
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
@@ -38,6 +48,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<(String, Uint8List)> dco_decode_list_record_string_list_prim_u_8_strict(
       dynamic raw);
+
+  @protected
+  NativeBoxEvent dco_decode_native_box_event(dynamic raw);
+
+  @protected
+  NativeBoxEventType dco_decode_native_box_event_type(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -59,10 +75,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
+
+  @protected
+  RustStreamSink<NativeBoxEvent> sse_decode_StreamSink_native_box_event_Sse(
+      SseDeserializer deserializer);
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
@@ -75,6 +101,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<(String, Uint8List)> sse_decode_list_record_string_list_prim_u_8_strict(
+      SseDeserializer deserializer);
+
+  @protected
+  NativeBoxEvent sse_decode_native_box_event(SseDeserializer deserializer);
+
+  @protected
+  NativeBoxEventType sse_decode_native_box_event_type(
       SseDeserializer deserializer);
 
   @protected
@@ -97,13 +130,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
+  void sse_encode_AnyhowException(
+      AnyhowException self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_StreamSink_native_box_event_Sse(
+      RustStreamSink<NativeBoxEvent> self, SseSerializer serializer);
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
@@ -118,6 +159,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_record_string_list_prim_u_8_strict(
       List<(String, Uint8List)> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_native_box_event(
+      NativeBoxEvent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_native_box_event_type(
+      NativeBoxEventType self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
@@ -138,9 +187,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
 }
 
 // Section: wire_class
