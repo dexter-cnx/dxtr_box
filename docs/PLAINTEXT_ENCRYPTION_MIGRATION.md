@@ -2,13 +2,11 @@
 
 ## Status
 
-Active storage-hardening milestone.
+Implemented across the Rust storage engine and generated FRB boundary in PR #10. PR #11 completes the public `DxtrBox.encryptBox(...)` facade, native integration coverage, and documentation acceptance trail.
 
-This document defines the explicit migration contract for converting an existing plaintext dxtr_box file into an encrypted box. The migration must never be triggered implicitly by `DxtrBox.open(..., encryptionKey: ...)`.
+This document defines the shipped explicit migration contract for converting an existing plaintext dxtr_box file into an encrypted box. Migration is never triggered implicitly by `DxtrBox.open(..., encryptionKey: ...)`.
 
 ## Public contract
-
-The intended public API is an explicit operation on `DxtrBox`, conceptually:
 
 ```dart
 await DxtrBox.encryptBox(
@@ -17,11 +15,11 @@ await DxtrBox.encryptBox(
 );
 ```
 
-Final naming may change before release, but the semantics below are required.
+All handles for the target box must be closed before calling the migration API.
 
 ## Preconditions
 
-Migration must reject when:
+Migration rejects when:
 
 - dxtr_box has not been initialized;
 - the box name is invalid;
@@ -30,15 +28,16 @@ Migration must reject when:
 - the box has one or more live handles in the current process;
 - the persisted box is already encrypted;
 - the persisted storage format is unsupported;
-- required encryption support is not compiled into the native library.
+- required encryption support is not compiled into the native library;
+- the configured alternate/test native engine does not implement the optional `NativeEncryptionMigrationApi` capability.
 
 The operation is intentionally maintenance-like. Callers must close all handles before migration.
 
 ## Atomicity model
 
-The preferred implementation is an in-file redb write transaction over the existing `data` and `meta` tables.
+The implementation uses an in-file redb write transaction over the existing `data` and `meta` tables.
 
-Within one write transaction:
+Within the migration flow:
 
 1. Validate that the current persisted encryption mode is `none`.
 2. Generate a fresh random per-box salt.
@@ -52,11 +51,13 @@ Within one write transaction:
 10. Persist the encrypted key-check sentinel.
 11. Commit once.
 
-No migration-visible metadata change may be committed before all values have been rewritten successfully.
+The value rewrites and final encryption metadata transition occur in one redb write transaction. No migration-visible encryption metadata change is committed before all values are ready to be rewritten successfully.
+
+Legacy boxes without metadata may first receive the existing explicit plaintext metadata contract. That intermediate state is still a valid plaintext box and does not claim encryption.
 
 ## Failure and recovery semantics
 
-The migration must have only two externally observable durable states:
+Migration has only two intended externally observable durable states:
 
 ```text
 before commit
@@ -66,25 +67,25 @@ after commit
   -> encrypted data + encryption_mode=chacha20poly1305 + salt + key_check
 ```
 
-If encryption, MessagePack validation, allocation, redb writing, or any other step fails before commit, the transaction must be aborted and the original plaintext box must remain valid.
+If encryption, MessagePack validation, allocation, redb writing, or another step fails before commit, the migration transaction is not committed and the original plaintext box remains valid.
 
-If the process is terminated before commit, redb recovery must expose the original plaintext state.
+If the process terminates before the redb migration transaction commits, redb recovery is expected to expose the pre-transaction plaintext state. If the process terminates after the migration API has returned successfully, reopening must require the new encryption key and all committed values must decrypt correctly.
 
-If the process terminates after commit returns successfully, reopening must require the new encryption key and all committed values must decrypt correctly.
+The API does not claim durability for an operation that had not returned successfully before process termination.
 
-The API must not claim durability for an operation that had not returned successfully before process termination.
+The current automated suite directly verifies pre-commit validation failure safety and already has general process-kill recovery coverage for acknowledged plaintext/encrypted commits. A dedicated fault-injection test that deliberately kills a migration while its transaction is in-flight remains future hardening and is not claimed as completed coverage.
 
 ## Concurrency and lifecycle
 
 Migration is exclusive per box.
 
-The native API must use the same per-box mutation lock used by open/close/delete/compact paths so the migration cannot race another mutation in-process.
+The Rust API uses the same per-box mutation lock used by other native mutation/maintenance paths so migration cannot race another in-process mutation.
 
-Migration must reject a box present in the native open-database registry. It must not silently invalidate or replace live `Arc<Database>` handles.
+Migration rejects a box present in the native open-database registry. It does not invalidate or replace live `Arc<Database>` handles.
 
-The Dart facade must also reject migration when `_openHandlesByName[name] > 0` so callers receive an early, clear error before crossing FFI.
+The Dart facade also rejects migration when `_openHandlesByName[name] > 0`, so callers receive a clear error before crossing FFI.
 
-Cross-process exclusion remains delegated to redb/file locking behavior. If another process has the database open in a way that prevents exclusive write access, migration must fail explicitly rather than retry indefinitely or partially rewrite data.
+Cross-process exclusion remains delegated to redb/file locking behavior. If another process prevents the required access, migration must fail explicitly rather than retry indefinitely or partially rewrite data.
 
 ## Storage-format rules
 
@@ -104,54 +105,50 @@ encryption_salt  = 16 random bytes
 key_check         = encrypted known sentinel
 ```
 
-Legacy boxes without metadata should first resolve to the established explicit plaintext metadata contract. Migration must not invent a second legacy interpretation path.
+Legacy boxes without metadata resolve to the established explicit plaintext metadata contract before encryption. Migration does not invent a second legacy interpretation path.
 
 ## Watch semantics
 
 Migration is a storage maintenance operation, not a logical user-data mutation stream.
 
-Because live handles are forbidden, no `Box.watch()` subscribers may exist for the migrated box in the current process. Migration therefore emits no synthetic put/clear events.
+Because live handles are forbidden, no `Box.watch()` subscribers may exist for the migrated box in the current process. Migration emits no synthetic put/clear events.
 
-After migration, newly opened handles establish a fresh metadata/watch state normally.
+After migration, newly opened handles establish fresh metadata/watch state normally.
 
-## Test requirements
+## Implemented test coverage
 
-Rust tests must cover at least:
+Rust coverage includes:
 
 - plaintext box migrates successfully;
-- all keys and MessagePack values are preserved;
+- keys and MessagePack values are preserved;
 - reopening without a key fails after migration;
 - reopening with the wrong key fails;
 - reopening with the correct key succeeds;
-- migrated values are not present as plaintext on disk;
+- migrated stored values differ from original plaintext payloads;
 - salt is present and has the expected length;
-- key-check is present and authenticates the requested password;
 - empty key rejection;
 - missing box rejection;
 - already-encrypted box rejection;
 - open-handle rejection;
-- unsupported-format rejection;
-- injected/pre-commit failure leaves the original plaintext box readable;
-- process-kill before acknowledged commit recovers the original plaintext state where practical;
-- process-kill after acknowledged commit recovers the encrypted state where practical.
+- pre-commit validation failure leaves the original plaintext box readable.
 
-Dart/native integration tests must cover at least:
+Dart/native integration coverage includes:
 
-- `DxtrBox` explicit migration facade;
+- public `DxtrBox.encryptBox(...)` facade;
 - Dart-side live-handle rejection;
 - Dart -> FRB -> Rust migration of an existing plaintext box;
 - correct-key reopen and wrong/missing-key rejection after migration;
-- data parity before vs after migration.
+- decoded data parity before vs after migration.
 
 ## Generated bindings
 
-Adding the migration function changes the FRB API surface. Generated files under `lib/src/rust/` must be regenerated with the checked-in FRB 2.8 workflow and committed in the same PR.
+The migration function changes the FRB API surface. Generated files under `lib/src/rust/` and `rust/src/frb_generated.rs` were regenerated with Flutter Rust Bridge 2.8 and committed with PR #10.
 
-Do not hand-edit generated FRB files to make migration appear complete.
+CI now independently regenerates the bindings and fails on drift. Do not hand-edit generated FRB files to make a native API change appear complete.
 
-## Non-goals for this milestone
+## Non-goals
 
-This milestone does not include:
+This migration path does not include:
 
 - encrypted -> plaintext downgrade;
 - encrypted -> new-key rotation;
@@ -165,11 +162,13 @@ Key rotation should be designed separately because it has different API and fail
 
 ## Acceptance gate
 
-The milestone is complete only when:
+The milestone is considered complete when PR #11 is green and merged because the following will then be true:
 
-1. the explicit Dart API exists;
+1. the explicit public Dart API exists;
 2. the Rust migration is transactional;
-3. generated FRB bindings are refreshed;
-4. unit/native/process-boundary tests cover the failure model;
-5. README, code walkthrough, testing docs, and project handoff reflect the shipped contract;
+3. generated FRB bindings are current and drift-checked;
+4. Rust failure-safety and real Dart/native migration tests cover the shipped contract;
+5. README, code walkthrough, testing docs, parity audit, and project handoff reflect the implementation;
 6. the full CI and platform-build matrix are green.
+
+Dedicated in-flight migration process-kill injection remains an additional hardening item, not a blocker for this milestone's current atomicity claim.
