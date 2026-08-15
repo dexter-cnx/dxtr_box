@@ -10,8 +10,8 @@ final class Box {
     required this.name,
     required NativeDxtrApi api,
     required bool lazy,
-  }) : _api = api,
-       _lazy = lazy;
+  })  : _api = api,
+        _lazy = lazy;
 
   final String name;
   final NativeDxtrApi _api;
