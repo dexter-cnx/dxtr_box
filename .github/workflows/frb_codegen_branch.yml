@@ -1,0 +1,52 @@
+name: FRB Branch Codegen
+
+on:
+  push:
+    branches:
+      - feature/native-watch-stream
+    paths:
+      - rust/src/api.rs
+      - .github/workflows/frb_codegen_branch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/native-watch-stream
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install FRB codegen 2.8.0
+        run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
+
+      - name: Generate bindings
+        run: flutter_rust_bridge_codegen generate
+
+      - name: Commit generated bindings
+        shell: bash
+        run: |
+          git add lib/src/rust rust/src/frb_generated.rs
+          if git diff --cached --quiet; then
+            echo "Generated bindings already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build: regenerate FRB bindings for native watch"
+          git push origin HEAD:feature/native-watch-stream
