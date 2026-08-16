@@ -135,7 +135,9 @@ if index == -1:
     raise SystemExit("could not locate native integration test insertion point")
 native_test.write_text(text[:index] + insert + text[index:])
 
-Path("test/batch_read_benchmark_test.dart").write_text(r'''import 'dart:io';
+Path("test/batch_read_benchmark_test.dart").write_text(r'''// ignore_for_file: avoid_print
+
+import 'dart:io';
 
 import 'package:dxtr_box/src/dxtr_box.dart';
 import 'package:dxtr_box/src/native_api.dart';
@@ -145,7 +147,9 @@ void main() {
   final enabled = Platform.environment['DXTR_BOX_BATCH_READ_BENCHMARK'] == '1';
 
   test('0.5 PR3 batch read matrix', () async {
-    if (!enabled) return;
+    if (!enabled) {
+      return;
+    }
 
     DxtrBox.bindNativeApi(const FrbNativeDxtrApi());
     final dir = await Directory.systemTemp.createTemp('dxtr_box_batch_bench_');
@@ -163,11 +167,15 @@ void main() {
       final keys = List<String>.generate(size, (i) => 'k$i', growable: false);
       final batch = await _medianMicros(() async {
         final result = await box.getAll(keys);
-        if (result.length != size) throw StateError('batch result mismatch');
+        if (result.length != size) {
+          throw StateError('batch result mismatch');
+        }
       });
       final independent = await _medianMicros(() async {
         for (final key in keys) {
-          if (await box.get(key) == null) throw StateError('missing independent get');
+          if (await box.get(key) == null) {
+            throw StateError('missing independent get');
+          }
         }
       });
       print(
