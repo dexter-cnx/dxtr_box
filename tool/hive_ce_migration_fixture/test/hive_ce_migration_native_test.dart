@@ -129,6 +129,80 @@ void main() {
   );
 
   test(
+    'rejects unsupported values before creating destination',
+    () async {
+      final root = await Directory.systemTemp.createTemp('dxtr_hive_preflight_');
+      final hiveRoot = Directory('${root.path}/hive')..createSync();
+      final dxtrRoot = Directory('${root.path}/dxtr')..createSync();
+      addTearDown(() async {
+        await hive.Hive.close();
+        if (root.existsSync()) {
+          await root.delete(recursive: true);
+        }
+      });
+
+      hive.Hive.init(hiveRoot.path);
+      final sourceBox = await hive.Hive.openBox<dynamic>('unsupported');
+      await sourceBox.put('big', BigInt.parse('123456789012345678901234567890'));
+
+      await DxtrBox.init(path: dxtrRoot.path);
+      await expectLater(
+        migrateFromHiveCe(
+          _source(sourceBox),
+          destinationName: 'preflight-must-not-exist',
+        ),
+        throwsA(isA<UnsupportedError>()),
+      );
+      expect(await DxtrBox.boxExists('preflight-must-not-exist'), isFalse);
+      expect(sourceBox.get('big'), isA<BigInt>());
+    },
+    skip: nativeEnabled
+        ? false
+        : 'Set DXTR_BOX_NATIVE_TEST=1 to run Hive CE migration IO.',
+  );
+
+  test(
+    'rejects an existing destination without mutating either box',
+    () async {
+      final root = await Directory.systemTemp.createTemp('dxtr_hive_existing_');
+      final hiveRoot = Directory('${root.path}/hive')..createSync();
+      final dxtrRoot = Directory('${root.path}/dxtr')..createSync();
+      addTearDown(() async {
+        await hive.Hive.close();
+        if (root.existsSync()) {
+          await root.delete(recursive: true);
+        }
+      });
+
+      hive.Hive.init(hiveRoot.path);
+      final sourceBox = await hive.Hive.openBox<dynamic>('existing_source');
+      await sourceBox.put('incoming', 42);
+
+      await DxtrBox.init(path: dxtrRoot.path);
+      final existing = await DxtrBox.open('existing_destination');
+      await existing.put('keep', 'original');
+      await existing.close();
+
+      await expectLater(
+        migrateFromHiveCe(
+          _source(sourceBox),
+          destinationName: 'existing_destination',
+        ),
+        throwsStateError,
+      );
+
+      final destination = await DxtrBox.open('existing_destination');
+      expect(await destination.get('keep'), 'original');
+      expect(await destination.get('incoming'), isNull);
+      await destination.close();
+      expect(sourceBox.get('incoming'), 42);
+    },
+    skip: nativeEnabled
+        ? false
+        : 'Set DXTR_BOX_NATIVE_TEST=1 to run Hive CE migration IO.',
+  );
+
+  test(
     'migrates an encrypted Hive CE source into encrypted dxtr_box',
     () async {
       final root =
