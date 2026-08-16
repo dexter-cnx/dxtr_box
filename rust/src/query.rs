@@ -589,6 +589,55 @@ mod tests {
     }
 
     #[test]
+    fn planner_candidates_do_not_descend_into_or_groups() {
+        let filter = Filter::Group {
+            op: LogicalOp::Or,
+            filters: vec![
+                Filter::Comparison(Comparison {
+                    field: "status".to_string(),
+                    op: CompareOp::Equal,
+                    value: Some(Value::from("active")),
+                    upper_value: None,
+                }),
+                Filter::Comparison(Comparison {
+                    field: "profile.age".to_string(),
+                    op: CompareOp::GreaterThanOrEqual,
+                    value: Some(Value::from(18_i64)),
+                    upper_value: None,
+                }),
+            ],
+        };
+
+        assert!(index_candidates(&filter).unwrap().is_empty());
+    }
+
+    #[test]
+    fn planner_candidates_keep_eligible_members_under_and() {
+        let filter = Filter::Group {
+            op: LogicalOp::And,
+            filters: vec![
+                Filter::Comparison(Comparison {
+                    field: "status".to_string(),
+                    op: CompareOp::Equal,
+                    value: Some(Value::from("active")),
+                    upper_value: None,
+                }),
+                Filter::Comparison(Comparison {
+                    field: "status".to_string(),
+                    op: CompareOp::NotEqual,
+                    value: Some(Value::from("archived")),
+                    upper_value: None,
+                }),
+            ],
+        };
+
+        let candidates = index_candidates(&filter).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].field, "status");
+        assert!(matches!(candidates[0].op, CompareOp::Equal));
+    }
+
+    #[test]
     fn integer_comparisons_preserve_values_above_f64_exact_range() {
         let lower = Value::from(9_007_199_254_740_992_i64);
         let higher = Value::from(9_007_199_254_740_993_i64);
