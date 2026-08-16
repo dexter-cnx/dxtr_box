@@ -1,0 +1,44 @@
+name: Temporary Query Read Transaction Docs Finalize
+
+on:
+  push:
+    branches:
+      - feature/0.3-query-read-transaction
+
+permissions:
+  contents: write
+
+jobs:
+  finalize-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-query-read-transaction
+          fetch-depth: 0
+
+      - name: Update docs
+        run: python3 tool/update_query_read_transaction_docs.py
+
+      - name: Remove stale merged/temp branches
+        run: |
+          git push origin --delete feature/0.3-index-prefix-range || true
+          git push origin --delete feature/0.3-query-read-transaction-temp-anchor || true
+          git push origin --delete feature/0.3-query-read-transaction-docs-anchor || true
+
+      - name: Remove temporary tooling
+        run: |
+          rm tool/update_query_read_transaction_docs.py
+          rm .github/workflows/query_read_transaction_docs_temp.yml
+
+      - name: Commit docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md docs/CODE_WALKTHROUGH.md docs/PROJECT_HANDOFF.md docs/QUERY_INDEX_03.md tool/update_query_read_transaction_docs.py .github/workflows/query_read_transaction_docs_temp.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "docs: document single-snapshot query execution"
+          git push origin HEAD:feature/0.3-query-read-transaction
