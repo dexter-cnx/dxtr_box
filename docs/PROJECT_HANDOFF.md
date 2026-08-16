@@ -10,11 +10,26 @@ The 1.0 claim is functional replacement for practical Hive/Hive CE local-databas
 
 ## Current snapshot — 0.4 Production Hardening active
 
-0.3 query/index + Hive CE migration is closed and closure-verified. PR #25 is the final 0.3 correctness closure for migration destination ownership; PR #26 synced README, handoff, and code walkthrough to that final contract.
+Closed milestones:
 
-PR #27 completed **PH-01 controlled cross-commit native-size regression policy**. The gate builds base/head commits on the same runner/toolchain and independently enforces growth budgets for `minimal`, `encryption`, and `full`.
+- PR #25 final 0.3 Hive CE migration destination-ownership correctness.
+- PR #26 final 0.3 documentation closure.
+- PR #27 PH-01 controlled cross-commit native-size regression policy.
+- PR #28 PH-02 self-contained package/publication hardening.
+- PR #29 PH-03 broader Flutter local-database correctness + diagnostic comparison.
 
-PR #28 completed **PH-02 package / publication hardening**. `dxtr_box` is now one self-contained Flutter FFI plugin that owns:
+**PH-04 published-payload consumer validation is active.** The remaining package-evidence gap is that `dart pub publish --dry-run` validates metadata and intended files while prior Platform Builds consumed the repository checkout directly. PH-04 stages the publication boundary and builds fresh consumer applications from that staged package copy on all five native targets.
+
+Normative 0.4 docs:
+
+- `docs/PACKAGE_RELEASE_04.md`
+- `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`
+- `docs/NATIVE_SIZE_POLICY_04.md`
+- `docs/LOCAL_DATABASE_COMPARISON_04.md`
+
+## Stable package/runtime contract
+
+`dxtr_box` is one self-contained Flutter FFI plugin:
 
 ```text
 lib/
@@ -28,33 +43,24 @@ windows/
 example/
 ```
 
-The Flutter package/plugin name is `dxtr_box`. The Rust crate and native library name remains `rust_lib_dxtr_box` to preserve FRB/native identity. The nested `rust_builder/` package and root path dependency are removed. Package docs, pub dry-run validation, `.pubignore`, CHANGELOG/example cleanup, and all five platform builds are part of the hardened package contract.
+The Flutter package/plugin identity is `dxtr_box`; the Rust crate/native library remains `rust_lib_dxtr_box` to preserve FRB/native identity.
 
-`flutter_rust_bridge` remains pinned to 2.8.0 because checked-in generated bindings and the runtime/codegen/macros must stay version-aligned. The pub dry-run uses `--ignore-warnings` for pub's broad-constraint advisory rather than allowing a newer incompatible FRB runtime to resolve.
-
-**PH-03 broader Flutter local-database comparison is active in PR #29.** The initial engineering matrix compares:
+Compatibility remains:
 
 ```text
-dxtr_box
-Hive CE
-Sembast
-SQLite via sqflite_common_ffi
+Dart >= 3.4.0 < 4.0.0
+Flutter >= 3.22.0
+flutter_rust_bridge = 2.8.0
+redb = 2.1.0
 ```
 
-PH-03 separates a cross-engine correctness hard gate from timing diagnostics. CRUD/delete/close/reopen state equivalence is a CI requirement; sequential/batch/read/contains/delete/reopen timing is evidence only and has no faster/slower release threshold. CI emits a machine-readable JSONL artifact named `local-database-comparison`.
-
-Normative 0.4 docs:
-
-- `docs/PACKAGE_RELEASE_04.md`
-- `docs/NATIVE_SIZE_POLICY_04.md`
-- `docs/LOCAL_DATABASE_COMPARISON_04.md`
+FRB is intentionally pinned exactly because checked-in generated bindings, Dart runtime, Rust runtime, codegen, and macros must remain version-aligned. Pub validation uses `--ignore-warnings` for the broad-constraint advisory rather than allowing an incompatible newer FRB runtime to resolve.
 
 ## Current capabilities
 
 - `DxtrBox`, `Box`, `BoxEvent` Flutter facade.
-- Dart >= 3.4.0 / Flutter >= 3.22.0.
 - MessagePack dynamic codec.
-- Rust `redb = 2.1.0`, one `{box}.dxtr` file per box.
+- One `{box}.dxtr` file per box.
 - Transactional CRUD/bulk CRUD/lifecycle.
 - Native cross-handle watch fan-out through FRB streams.
 - Argon2 + ChaCha20Poly1305 persisted encryption.
@@ -62,24 +68,23 @@ Normative 0.4 docs:
 - Process crash/reopen durability coverage.
 - Exactly three public native profiles: `minimal`, `encryption`, `full`.
 - Checked-in FRB 2.8 bindings with drift CI.
-- Android/iOS/macOS/Linux/Windows example build coverage.
+- Android/iOS/macOS/Linux/Windows native build coverage.
 - Declarative `Box.query(BoxQuery)` with one FRB call per query.
 - Persisted named scalar indexes under `full`.
 - Equality/range planner candidate narrowing, nested indexes, and AND intersection.
 - One redb read snapshot per native query.
 - Deterministic semantic native sorting before pagination.
-- Query/index and point-read diagnostic harnesses.
 - Explicit Hive CE 2.19.3 migration fixtures in an isolated package.
-- Migration reservation marker that excludes ordinary opens for the lifetime of a migration-owned destination.
+- Migration reservation marker excluding ordinary opens during migration ownership.
 - Native-size absolute measurement, same-commit reproducibility, and cross-commit regression gating.
-- Self-contained publishable Flutter FFI plugin topology with pub/docs validation.
-- Four-engine local-database correctness + diagnostic comparison harness under `benchmark/`.
+- Self-contained publishable Flutter FFI package topology with docs/pub validation.
+- Four-engine local-database correctness + diagnostic comparison harness.
 
 ## Core correctness invariants
 
 ### Storage and mutation
 
-Primary `data` remains authoritative. Persisted indexes are derived state only.
+Primary `data` is authoritative; persisted indexes are derived state.
 
 ```text
 put / putAll / delete / deleteAll / clear
@@ -98,161 +103,106 @@ Index create/backfill commits definition + entries atomically.
 Box.query(BoxQuery)
   -> serialize query AST
   -> one FRB call
-  -> decode query once
+  -> decode once
   -> one redb ReadTransaction snapshot
   -> optional persisted-index candidate narrowing
-  -> primary reads from the same snapshot
+  -> authoritative primary reads from same snapshot
   -> decrypt if required
   -> full predicate re-evaluation
-  -> deterministic semantic sort when requested
+  -> deterministic semantic sort
   -> record-key ascending final tie-break
   -> offset / limit
 ```
 
-Persisted indexes narrow candidates only. They never replace authoritative predicate re-evaluation and do not currently satisfy ORDER BY.
+Persisted indexes narrow candidates only; they do not replace predicate re-evaluation and do not currently satisfy ORDER BY. Raw MessagePack scalar byte order is not treated as numeric order.
 
-Raw MessagePack scalar byte order is not treated as numeric order. Range candidate matching decodes scalar components and uses the semantic comparator.
+### Encryption/index safety
 
-### Encryption/index security
-
-Encrypted boxes may use native scan queries but may not create persisted secondary indexes yet because plaintext-derived scalar keys would leak protected values. Plaintext-to-encrypted migration is rejected while persisted index definitions exist.
-
-Reduced profiles reject opening boxes containing persisted indexes because they cannot safely maintain derived index state.
+Encrypted boxes may use scan queries but may not create persisted secondary indexes because plaintext-derived scalar keys would leak protected values. Plaintext-to-encrypted migration is rejected while persisted index definitions exist. Reduced native profiles reject boxes containing persisted indexes because they cannot safely maintain derived state.
 
 ## Hive CE migration contract
 
 Core `dxtr_box` has no runtime dependency on Hive CE. Applications wrap an already-open Hive CE box with `HiveCeMigrationSource` and call `migrateFromHiveCe(...)`.
 
-Preserve these invariants:
+Preserve:
 
-- source remains open and unmodified;
-- caller opens/decrypts encrypted Hive CE sources using Hive CE itself;
-- String keys are preserved;
+- source open/unmodified;
+- String keys preserved;
 - int keys default to `@hive-int:<decimal>`;
-- custom key/value conversion is explicit;
-- converted-key collisions and unsupported values fail during preflight;
-- every converted value is `DxtrCodec`-preflighted before destination creation;
-- migration acquires a distinct exclusive reservation marker before destination creation;
-- concurrent migrations cannot both own the same target;
-- ordinary `DxtrBox.open(destinationName)` checks reservation before native open and again immediately after native open;
-- an in-flight ordinary open cannot escape with a usable handle if migration acquires ownership during the open;
-- initialization/write failures remove migration-owned destination state and release the marker;
-- successful migration closes destination and releases the marker;
-- migrated entries use one `Box.putAll` / one native redb write transaction;
-- hard process termination may leave an incomplete destination/reservation marker; file-level staging/promotion and automatic stale-reservation recovery remain deferred.
+- custom conversion explicit;
+- converted-key collisions/unsupported values fail in preflight;
+- `DxtrCodec` preflight before destination creation;
+- exclusive migration reservation before destination creation;
+- concurrent migration and ordinary-open exclusion;
+- failure cleanup removes migration-owned destination and reservation;
+- one destination `putAll` / one native redb write transaction;
+- hard-kill stale destination/reservation recovery remains deferred.
 
 See `docs/HIVE_CE_MIGRATION_03.md`.
 
-## Public native profile contract
+## Public native profiles
 
-Keep exactly these three public profiles:
+Keep exactly:
 
 ```text
-minimal
-  CRUD + lifecycle + native watch
-
-encryption
-  minimal + encrypted create/open/read/write
-
-full
-  encryption + maintenance + query/index implementation
+minimal     CRUD + lifecycle + native watch
+encryption  minimal + encrypted create/open/read/write
+full        encryption + maintenance + query/index implementation
 ```
 
-`full` remains the default production build. Do not add a fourth product profile merely to move optional code around.
+`full` is default. Do not add a fourth public profile for size tuning.
 
 ## 0.4 native-size policy
-
-Current policy per profile:
 
 ```text
 allowed_growth = max(65,536 bytes, 3% of base artifact)
 fail when head_bytes - base_bytes > allowed_growth
 ```
 
-Base and candidate commits are built from detached commit snapshots with isolated Cargo target directories under one OS/arch/rustc/cargo environment. Machine-readable evidence is written to `native-size-regression.tsv`.
-
-The budget is a regression alarm, not a target and not a routine allowance. Intentional growth must be explained with measured profile deltas and reviewed explicitly rather than hidden by bypassing the gate.
-
-See `docs/NATIVE_SIZE_POLICY_04.md`.
+Base/head are detached committed snapshots built under one OS/arch/rustc/cargo environment with isolated target dirs. Evidence is `native-size-regression.tsv`. Intentional growth must be reviewed with measured deltas rather than hidden by bypassing the gate.
 
 ## 0.4 package/publication policy
 
-The package distributed to consumers must be self-contained. No published dependency may rely on a repository-relative `path:` source.
-
-Platform mapping:
+The distributed package must be self-contained and contain no repository-relative production dependency.
 
 ```text
-Android  android/build.gradle
-  -> ../cargokit
-  -> ../rust
-
-iOS/macOS  {ios,macos}/dxtr_box.podspec
-  -> ../cargokit/build_pod.sh
-  -> ../rust
-
-Linux/Windows  {linux,windows}/CMakeLists.txt
-  -> ../cargokit/cmake/cargokit.cmake
-  -> ../rust
+Android       android/build.gradle -> ../cargokit -> ../rust
+iOS/macOS     podspec -> ../cargokit/build_pod.sh -> ../rust
+Linux/Windows CMakeLists.txt -> ../cargokit/cmake/cargokit.cmake -> ../rust
 ```
 
-Package readiness requires both publication validation and runtime/native validation:
+`make package-readiness` runs docs generation and `dart pub publish --dry-run --ignore-warnings`. A green dry-run alone is not native build evidence.
+
+## PH-04 published-payload consumer policy
+
+`tool/validate_published_consumer.dart` stages a consumer-visible package tree according to the current explicit `.pubignore` rules plus hidden-file exclusion, then verifies required native inputs, rejects repository-only leakage/path-source dependencies, creates a fresh Flutter application, points it only at the staged package, imports the public API, and builds the selected platform.
+
+Supported gates:
 
 ```text
-make package-readiness
-  -> flutter pub get
-  -> dart doc
-  -> dart pub publish --dry-run --ignore-warnings
-
-normal CI
-  -> Flutter / minimum SDK / FRB / Rust / native integration / size policy
-
-Platform Builds
-  -> Android / iOS / macOS / Linux / Windows examples
+make published-consumer-android
+make published-consumer-ios
+make published-consumer-macos
+make published-consumer-linux
+make published-consumer-windows
 ```
 
-A green pub dry-run alone is not sufficient evidence that the native plugin builds correctly.
-
-Publication remains a separate explicit release action from a reviewed clean commit/tag.
+`Platform Builds` runs the staged-consumer flow on all five targets. The validator fails closed if `.pubignore` introduces wildcard/negation syntax it does not model exactly. `dart pub publish --dry-run` remains authoritative for pub validation/file listing; PH-04 is complementary build evidence, not a replacement.
 
 ## 0.4 local-database comparison policy
 
-Comparison-only dependencies stay under `benchmark/`; they must not raise the root package SDK floor or become production dependencies.
+Comparison-only dependencies stay under `benchmark/` and do not affect root SDK or production dependencies.
 
-Correctness hard gate:
-
-```text
-same payloads
-  -> putAll
-  -> overwrite
-  -> contains existing/missing
-  -> delete deterministic subset
-  -> close/reopen
-  -> verify deleted/retained records
-  -> compare final snapshots across engines
-```
-
-Diagnostic matrix:
+Engines:
 
 ```text
-sequential_put
-batch_put
-point_get
-contains
-delete_all
-reopen_read
+dxtr_box
+Hive CE
+Sembast
+SQLite via sqflite_common_ffi
 ```
 
-Each engine receives one warmup and three measured samples. Evidence records engine, scenario, operation count, raw samples, median, min, and max.
-
-Interpretation rules:
-
-- correctness mismatch is a release blocker;
-- inability to execute the harness is a test/harness failure;
-- timing differences are not pass/fail thresholds;
-- hosted CI timings are diagnostic and not stable marketing benchmarks;
-- performance optimization requires repeated evidence of a product-relevant bottleneck.
-
-See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
+Correctness CRUD/delete/reopen equivalence is a hard gate. Timing scenarios (`sequential_put`, `batch_put`, `point_get`, `contains`, `delete_all`, `reopen_read`) are diagnostic only. Hosted-runner timings are not stable marketing benchmarks.
 
 ## Developer workflow
 
@@ -280,65 +230,34 @@ make native-build-encryption
 make native-size-baseline
 make native-size-stability
 make native-size-regression
-make example-android
-make example-linux
-make example-windows
-make example-macos
-make example-ios
+make published-consumer-android
+make published-consumer-ios
+make published-consumer-macos
+make published-consumer-linux
+make published-consumer-windows
 ```
-
-## Closed 0.3 sequence
-
-1. Native query/index foundation.
-2. Equality/range persisted-index planner with nested fields.
-3. Multi-index AND candidate intersection.
-4. Bounded index-name iteration.
-5. One-redb-read-transaction query execution.
-6. Deterministic planner selection and equivalence tests.
-7. Explicit native `sortBy` contract.
-8. Query/index diagnostic benchmark matrix.
-9. Point-read diagnosis with authoritative native reads retained.
-10. Explicit Hive CE migration with isolated Hive CE 2.19.3 fixtures.
-11. Concurrent migration destination exclusion and initialization-failure cleanup.
-12. Final reservation fix excluding ordinary opens before/after native open (PR #25).
-13. Final documentation closure sync (PR #26).
-
-Do not reopen 0.3 query/index/migration work for speculative optimization. Changes to those invariants require demonstrated correctness or product-performance evidence plus matching regression/equivalence coverage.
 
 ## 0.4 Production Hardening sequence
 
 ### PH-01 — Cross-commit native-size regression policy — complete (PR #27)
 
-- controlled base/head same-environment comparison;
-- exactly three profiles measured;
-- same-commit reproducibility retained;
-- hybrid byte/percentage budget enforced;
-- machine-readable evidence uploaded.
-
 ### PH-02 — Package-quality / publication hardening — complete (PR #28)
 
-Completed acceptance:
+### PH-03 — Broader Flutter local-database comparison — complete (PR #29)
 
-- root `dxtr_box` is a self-contained Flutter FFI plugin;
-- no nested `rust_builder` path dependency;
-- native crate and Cargokit required by consumers are inside the published package;
-- `dart doc` succeeds;
-- pub dry-run validates the archive with the intentional exact FRB 2.8 pin documented;
-- CHANGELOG/example/public library docs are current;
-- CI and all five Platform Builds are green;
-- README, handoff, code walkthrough, and `PACKAGE_RELEASE_04.md` agree on topology.
+Acceptance completed: four engines, benchmark-only comparison dependencies, correctness hard gate, timing-only diagnostics, machine-readable CI evidence, no speculative threshold optimization.
 
-### PH-03 — Broader Flutter local-database comparison — active (PR #29)
+### PH-04 — Published-payload consumer validation — active
 
 Acceptance:
 
-- at least four representative engines in the matrix, including dxtr_box and Hive CE;
-- comparison dependencies remain benchmark-only;
-- shared CRUD/delete/reopen correctness workload is a hard CI gate;
-- timing scenarios remain diagnostic only;
-- machine-readable evidence is uploaded from CI;
-- no benchmark threshold drives speculative optimization;
-- README, handoff, code walkthrough, and `LOCAL_DATABASE_COMPARISON_04.md` agree.
+- staged payload follows current publication exclusions and prunes ignored directories before traversal;
+- required Dart/Rust/Cargokit/platform files are present;
+- repository-only files and root path-source dependencies are absent;
+- a fresh consumer imports the public API from staged `dxtr_box` only;
+- Android/iOS/macOS/Linux/Windows consumer builds pass;
+- `.pubignore` and validator changes trigger Platform Builds;
+- README, handoff, walkthrough, `PACKAGE_RELEASE_04.md`, and `PUBLISHED_PAYLOAD_CONSUMER_04.md` agree.
 
 ## Deferred beyond current 0.4 slice
 
@@ -350,6 +269,8 @@ Acceptance:
 - file-level crash-atomic Hive migration staging/promotion and stale-reservation recovery;
 - application bundle/APK/IPA size budgets;
 - Web/IndexedDB and remaining 1.0 Hive functional-parity gaps.
+
+Do not reopen closed query/index/migration work or optimize benchmark timings without demonstrated product-relevant evidence and matching regression/equivalence coverage.
 
 ## Later roadmap
 
