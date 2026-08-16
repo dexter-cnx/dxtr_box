@@ -82,4 +82,4 @@ If a real workload later shows point-read throughput is a product bottleneck, me
 
 ## Status
 
-Diagnosis complete. CI #238 (`31928486808`) and diagnostic run `31928485185` are green. The 0.3 decision is to retain authoritative point-read semantics and proceed to the Hive CE migration slice rather than add speculative performance changes.
+Diagnosis complete. CI #238 (`31928486808`) and diagnostic run `31928485185` are green. Final PR checks are rerun after the documentation-only finalize commit; the 0.3 decision remains to retain authoritative point-read semantics and proceed to the Hive CE migration slice rather than add speculative performance changes.
