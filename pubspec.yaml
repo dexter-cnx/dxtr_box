@@ -1,11 +1,17 @@
 name: dxtr_box
-description: A fast, ACID, encrypted, Rust-powered NoSQL box DB for Flutter. No codegen.
-version: 0.1.0
+description: A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
+version: 0.4.0-dev.1
 homepage: https://github.com/dexter-cnx/dxtr_box
 repository: https://github.com/dexter-cnx/dxtr_box
 issue_tracker: https://github.com/dexter-cnx/dxtr_box/issues
+documentation: https://github.com/dexter-cnx/dxtr_box/tree/main/docs
 
-publish_to: none
+topics:
+  - database
+  - nosql
+  - storage
+  - rust
+  - flutter
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -18,8 +24,6 @@ dependencies:
   msgpack_dart: ^1.0.1
   path: ^1.9.0
   path_provider: ^2.1.5
-  rust_lib_dxtr_box:
-    path: rust_builder
 
 dev_dependencies:
   flutter_test:
@@ -27,3 +31,17 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   integration_test:
     sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        ffiPlugin: true
+      ios:
+        ffiPlugin: true
+      linux:
+        ffiPlugin: true
+      macos:
+        ffiPlugin: true
+      windows:
+        ffiPlugin: true
