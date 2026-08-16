@@ -8,15 +8,9 @@ Target: Hive-simple Flutter ergonomics backed by redb, with durable storage outs
 
 The 1.0 claim is functional replacement for practical Hive/Hive CE local-database workloads, not source-level API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` remains a release gate.
 
-## Current snapshot — 0.3 planner selection hardening
+## Current snapshot — 0.3 query/index benchmark complete
 
-Main contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, and single-snapshot query execution. Current branch:
-
-```text
-feature/0.3-planner-selection-tests
-```
-
-hardens the internal planner by separating persisted-index selection from candidate extraction and adding direct deterministic selection/fallback tests, without changing the public Dart API or FRB shape.
+Main contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, and explicit native `sortBy`. The active 0.3 slice adds a reproducible diagnostic query/index benchmark matrix on `feature/0.3-query-benchmarks`; it does not change public query semantics or the FRB shape.
 
 Current capabilities include:
 
@@ -292,10 +286,11 @@ The current range planner was additionally finalized through a temporary workflo
 1. Completed: bounded persisted-index lookup/drop cleanup by index-name range.
 2. Completed: one-redb-read-transaction query execution for planner/fallback/primary reads.
 3. Completed: deterministic pure planner-selection step with direct selection/fallback tests.
-4. Define an explicit public `sortBy` contract separately.
-5. Add focused query/index benchmark scenarios now that planner and execution semantics are stable.
-6. Continue point-get/contains performance diagnosis independently.
-7. Keep encrypted-index design, cross-commit size policy, and Dart 3.13 tree shaking separate.
+4. Completed: explicit public `sortBy` contract and deterministic native execution.
+5. Completed: focused query/index benchmark matrix with machine-readable diagnostic output.
+6. Next: point-get/contains performance diagnosis independently.
+7. Then: Hive CE migration design/implementation and 0.3 closure audit.
+8. Keep encrypted-index design, cross-commit size policy, and Dart 3.13 tree shaking separate.
 
 ## Later roadmap
 
@@ -349,3 +344,9 @@ The planner now also has a pure deterministic selection step with direct tests f
 The public declarative query contract now includes deterministic multi-clause `sortBy` via `QuerySort`, `QuerySortDirection`, and `QueryNullOrder` without changing the FRB function signature. Native execution sorts authoritative predicate matches inside the same redb read snapshot before pagination, supports nested dotted fields, exact numeric ordering, lexical strings, explicit null placement, and record-key tie-breaking. Mixed incompatible non-null sort domains, unsupported ordered values, and NaN are rejected explicitly. Focused Dart/Rust coverage is available through `make query-sort-test`, including scan/index ordered-result equivalence.
 
 Next query/index work should benchmark the now-stable planner/sort execution before introducing a new persisted scalar representation. Scalar-level redb range seeks or index-order sort satisfaction remain deferred until an order-preserving encoding contract and migration/rebuild semantics are justified.
+
+### Query/index benchmark evidence
+
+`make benchmark-query-index` now measures equality, range, AND-intersection, and sorted-range queries in scan/index modes at 100/1,000/5,000 records. Run `31927276095` completed the full 24-case matrix. At 5,000 records the median scan/index measurements were: equality 15,887/10,649 µs, range 15,125/6,988 µs, AND intersection 15,511/8,739 µs, and sorted range 16,256/7,997 µs. Shared-runner timings are diagnostic, not hard thresholds.
+
+The evidence supports persisted-index candidate narrowing but does not by itself justify an order-preserving persisted scalar format. The immediate 0.3 sequence is point-get/contains diagnosis, Hive CE migration, then closure audit.
