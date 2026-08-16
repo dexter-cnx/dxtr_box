@@ -7,7 +7,6 @@ use std::{
     time::Instant,
 };
 
-use redb::ReadableTable;
 use serde::Serialize;
 
 use crate::{codec::validate_message_pack, db};
