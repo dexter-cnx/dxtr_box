@@ -127,10 +127,15 @@ jobs:
         run: flutter pub get
       - name: Build Rust release library
         run: cargo build --manifest-path rust/Cargo.toml --release
-      - name: Native round-trip test
+      - name: Native round-trip and Hive CE migration tests
         env:
           DXTR_BOX_NATIVE_TEST: '1'
-        run: flutter test test/native_integration_test.dart --reporter expanded
+          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
+        run: >-
+          flutter test
+          test/native_integration_test.dart
+          test/hive_ce_migration_native_test.dart
+          --reporter expanded
       - name: Install benchmark dependencies
         working-directory: benchmark
         run: flutter pub get
