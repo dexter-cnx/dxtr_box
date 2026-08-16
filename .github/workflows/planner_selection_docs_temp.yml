@@ -1,0 +1,38 @@
+name: Temporary Planner Selection Docs Finalize
+
+on:
+  push:
+    branches:
+      - feature/0.3-planner-selection-tests
+
+permissions:
+  contents: write
+
+jobs:
+  finalize-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-planner-selection-tests
+          fetch-depth: 0
+
+      - name: Update docs
+        run: python3 tool/update_planner_selection_docs.py
+
+      - name: Remove temporary tooling
+        run: |
+          rm tool/update_planner_selection_docs.py
+          rm .github/workflows/planner_selection_docs_temp.yml
+
+      - name: Commit docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/CODE_WALKTHROUGH.md docs/PROJECT_HANDOFF.md docs/QUERY_INDEX_03.md tool/update_planner_selection_docs.py .github/workflows/planner_selection_docs_temp.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "docs: document planner selection policy"
+          git push origin HEAD:feature/0.3-planner-selection-tests
