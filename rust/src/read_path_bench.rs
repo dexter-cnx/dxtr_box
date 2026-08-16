@@ -7,7 +7,10 @@ use std::{
     time::Instant,
 };
 
-use serde::Serialize;
+use serde::{
+    ser::{SerializeSeq, Serializer},
+    Serialize,
+};
 
 #[cfg(feature = "encryption")]
 use crate::crypto;
@@ -17,11 +20,41 @@ const DEFAULT_ITERATIONS: usize = 2_000;
 const DEFAULT_SAMPLES: usize = 7;
 const WARMUP_ITERATIONS: usize = 100;
 
-#[derive(Serialize)]
 struct BenchPayload {
     id: u64,
     label: String,
-    body: Vec<u8>,
+    body: String,
+}
+
+/// Serialize the benchmark record using the same logical wire shape as
+/// `DxtrCodec.encode(Map<String, dynamic>)`:
+///
+/// ["@dxtr:map", [["id", id], ["label", label], ["body", body]]]
+impl Serialize for BenchPayload {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut sequence = serializer.serialize_seq(Some(2))?;
+        sequence.serialize_element("@dxtr:map")?;
+        sequence.serialize_element(&BenchPayloadEntries(self))?;
+        sequence.end()
+    }
+}
+
+struct BenchPayloadEntries<'a>(&'a BenchPayload);
+
+impl Serialize for BenchPayloadEntries<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut entries = serializer.serialize_seq(Some(3))?;
+        entries.serialize_element(&("id", self.0.id))?;
+        entries.serialize_element(&("label", self.0.label.as_str()))?;
+        entries.serialize_element(&("body", self.0.body.as_str()))?;
+        entries.end()
+    }
 }
 
 #[test]
@@ -267,10 +300,10 @@ fn read_path_microbench() {
 }
 
 fn encoded_payload(id: u64, body_len: usize) -> Vec<u8> {
-    rmp_serde::to_vec_named(&BenchPayload {
+    rmp_serde::to_vec(&BenchPayload {
         id,
         label: format!("record-{id}"),
-        body: vec![b'x'; body_len],
+        body: "x".repeat(body_len),
     })
     .expect("encode benchmark payload")
 }
