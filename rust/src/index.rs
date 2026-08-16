@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use redb::{Database, ReadableTable, TableDefinition, WriteTransaction};
 
 use crate::{db::EncryptionState, query};
@@ -88,25 +90,48 @@ pub(crate) fn candidate_keys(
     db: &Database,
     filter: &query::Filter,
 ) -> Result<Option<Vec<String>>, String> {
-    let candidates = query::equality_index_candidates(filter)?;
+    let candidates = query::index_candidates(filter)?;
     if candidates.is_empty() {
         return Ok(None);
     }
 
     let definitions = list(db)?;
-    for (field, scalar) in candidates {
-        if let Some((index_name, _)) = definitions
+    let mut candidate_sets = Vec::<HashSet<String>>::new();
+    for candidate in candidates {
+        let Some((index_name, _)) = definitions
             .iter()
-            .find(|(_, indexed_field)| *indexed_field == field)
-        {
-            return lookup_equal(db, index_name, &scalar).map(Some);
+            .find(|(_, indexed_field)| *indexed_field == candidate.field)
+        else {
+            continue;
+        };
+        candidate_sets.push(
+            lookup_candidate(db, index_name, &candidate)?
+                .into_iter()
+                .collect(),
+        );
+    }
+
+    if candidate_sets.is_empty() {
+        return Ok(None);
+    }
+
+    candidate_sets.sort_by_key(HashSet::len);
+    let mut intersection = candidate_sets.remove(0);
+    for candidates in candidate_sets {
+        intersection.retain(|key| candidates.contains(key));
+        if intersection.is_empty() {
+            break;
         }
     }
-    Ok(None)
+    Ok(Some(intersection.into_iter().collect()))
 }
 
-fn lookup_equal(db: &Database, index_name: &str, scalar: &[u8]) -> Result<Vec<String>, String> {
-    let prefix = entry_value_prefix(index_name, scalar);
+fn lookup_candidate(
+    db: &Database,
+    index_name: &str,
+    candidate: &query::IndexCandidate,
+) -> Result<Vec<String>, String> {
+    let prefix = index_prefix(index_name);
     let read = db.begin_read().map_err(|e| e.to_string())?;
     let entries = read.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     entries
@@ -114,18 +139,52 @@ fn lookup_equal(db: &Database, index_name: &str, scalar: &[u8]) -> Result<Vec<St
         .map_err(|e| e.to_string())?
         .filter_map(|item| match item {
             Ok((key, _)) if key.value().starts_with(&prefix) => {
-                Some(decode_record_key(key.value(), prefix.len()))
+                Some(decode_candidate_entry(key.value(), prefix.len(), candidate))
             }
             Ok(_) => None,
             Err(error) => Some(Err(error.to_string())),
         })
+        .filter_map(|result| match result {
+            Ok(Some(key)) => Some(Ok(key)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
+        })
         .collect()
 }
 
-fn entry_value_prefix(index_name: &str, scalar: &[u8]) -> Vec<u8> {
-    let mut prefix = index_prefix(index_name);
-    push_component(&mut prefix, scalar);
-    prefix
+fn decode_candidate_entry(
+    key: &[u8],
+    scalar_offset: usize,
+    candidate: &query::IndexCandidate,
+) -> Result<Option<String>, String> {
+    let (scalar, record_offset) = decode_component(key, scalar_offset, "scalar")?;
+    if !query::index_candidate_matches(scalar, candidate)? {
+        return Ok(None);
+    }
+    decode_record_key(key, record_offset).map(Some)
+}
+
+fn decode_component<'a>(
+    key: &'a [u8],
+    offset: usize,
+    label: &str,
+) -> Result<(&'a [u8], usize), String> {
+    let length_bytes = key
+        .get(offset..offset + 4)
+        .ok_or_else(|| format!("invalid persisted index entry {label} length"))?;
+    let length = u32::from_be_bytes(
+        length_bytes
+            .try_into()
+            .map_err(|_| format!("invalid persisted index entry {label} length"))?,
+    ) as usize;
+    let start = offset + 4;
+    let end = start
+        .checked_add(length)
+        .ok_or_else(|| format!("invalid persisted index entry {label} length"))?;
+    let value = key
+        .get(start..end)
+        .ok_or_else(|| format!("invalid persisted index entry {label} encoding"))?;
+    Ok((value, end))
 }
 
 fn decode_record_key(key: &[u8], offset: usize) -> Result<String, String> {

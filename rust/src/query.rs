@@ -105,21 +105,57 @@ pub fn index_scalar_key(payload: &[u8], field: &str) -> Result<Option<Vec<u8>>, 
     Ok(Some(encoded))
 }
 
-pub fn equality_index_candidates(filter: &Filter) -> Result<Vec<(String, Vec<u8>)>, String> {
+#[derive(Debug, Clone)]
+pub struct IndexCandidate {
+    pub field: String,
+    pub op: CompareOp,
+    pub value: Vec<u8>,
+    pub upper_value: Option<Vec<u8>>,
+}
+
+pub fn index_candidates(filter: &Filter) -> Result<Vec<IndexCandidate>, String> {
     match filter {
         Filter::Comparison(comparison) => {
-            if !matches!(comparison.op, CompareOp::Equal) {
-                return Ok(Vec::new());
-            }
             let Some(value) = comparison.value.as_ref() else {
                 return Ok(Vec::new());
             };
-            if !is_index_scalar(value) {
+
+            let eligible = match comparison.op {
+                CompareOp::Equal => is_index_scalar(value),
+                CompareOp::GreaterThan
+                | CompareOp::GreaterThanOrEqual
+                | CompareOp::LessThan
+                | CompareOp::LessThanOrEqual => is_ordered_index_scalar(value),
+                CompareOp::Between => {
+                    is_ordered_index_scalar(value)
+                        && comparison
+                            .upper_value
+                            .as_ref()
+                            .is_some_and(is_ordered_index_scalar)
+                }
+                CompareOp::NotEqual | CompareOp::IsNull | CompareOp::IsNotNull => false,
+            };
+            if !eligible {
                 return Ok(Vec::new());
             }
+
             let mut encoded = Vec::new();
             rmpv::encode::write_value(&mut encoded, value).map_err(|e| e.to_string())?;
-            Ok(vec![(comparison.field.clone(), encoded)])
+            let upper_value = comparison
+                .upper_value
+                .as_ref()
+                .map(|upper| {
+                    let mut encoded = Vec::new();
+                    rmpv::encode::write_value(&mut encoded, upper).map_err(|e| e.to_string())?;
+                    Ok::<Vec<u8>, String>(encoded)
+                })
+                .transpose()?;
+            Ok(vec![IndexCandidate {
+                field: comparison.field.clone(),
+                op: comparison.op,
+                value: encoded,
+                upper_value,
+            }])
         }
         Filter::Group {
             op: LogicalOp::And,
@@ -127,7 +163,7 @@ pub fn equality_index_candidates(filter: &Filter) -> Result<Vec<(String, Vec<u8>
         } => {
             let mut candidates = Vec::new();
             for filter in filters {
-                candidates.extend(equality_index_candidates(filter)?);
+                candidates.extend(index_candidates(filter)?);
             }
             Ok(candidates)
         }
@@ -135,6 +171,48 @@ pub fn equality_index_candidates(filter: &Filter) -> Result<Vec<(String, Vec<u8>
             op: LogicalOp::Or, ..
         } => Ok(Vec::new()),
     }
+}
+
+pub fn index_candidate_matches(scalar: &[u8], candidate: &IndexCandidate) -> Result<bool, String> {
+    let actual = decode_messagepack_value(scalar, "invalid persisted index scalar")?;
+    let expected = decode_messagepack_value(&candidate.value, "invalid query index candidate")?;
+    let upper = candidate
+        .upper_value
+        .as_deref()
+        .map(|bytes| decode_messagepack_value(bytes, "invalid upper query index candidate"))
+        .transpose()?;
+
+    Ok(match candidate.op {
+        CompareOp::Equal => values_equal(&actual, &expected),
+        CompareOp::GreaterThan => compare(&actual, Some(&expected))? == Some(Ordering::Greater),
+        CompareOp::GreaterThanOrEqual => matches!(
+            compare(&actual, Some(&expected))?,
+            Some(Ordering::Greater | Ordering::Equal)
+        ),
+        CompareOp::LessThan => compare(&actual, Some(&expected))? == Some(Ordering::Less),
+        CompareOp::LessThanOrEqual => matches!(
+            compare(&actual, Some(&expected))?,
+            Some(Ordering::Less | Ordering::Equal)
+        ),
+        CompareOp::Between => {
+            let Some(upper) = upper.as_ref() else {
+                return Ok(false);
+            };
+            matches!(
+                compare(&actual, Some(&expected))?,
+                Some(Ordering::Greater | Ordering::Equal)
+            ) && matches!(
+                compare(&actual, Some(upper))?,
+                Some(Ordering::Less | Ordering::Equal)
+            )
+        }
+        CompareOp::NotEqual | CompareOp::IsNull | CompareOp::IsNotNull => false,
+    })
+}
+
+fn decode_messagepack_value(bytes: &[u8], context: &str) -> Result<Value, String> {
+    let mut cursor = Cursor::new(bytes);
+    rmpv::decode::read_value(&mut cursor).map_err(|e| format!("{context}: {e}"))
 }
 
 fn parse_filter(value: &Value) -> Result<Filter, String> {
@@ -477,6 +555,13 @@ fn is_index_scalar(value: &Value) -> bool {
     value.is_nil()
         || value.is_bool()
         || value.as_i64().is_some()
+        || value.as_u64().is_some()
+        || value.as_f64().is_some()
+        || value.as_str().is_some()
+}
+
+fn is_ordered_index_scalar(value: &Value) -> bool {
+    value.as_i64().is_some()
         || value.as_u64().is_some()
         || value.as_f64().is_some()
         || value.as_str().is_some()
