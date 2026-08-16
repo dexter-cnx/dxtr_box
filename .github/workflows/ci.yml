@@ -135,6 +135,9 @@ jobs:
       - name: Install Hive CE migration fixture dependencies
         working-directory: tool/hive_ce_migration_fixture
         run: flutter pub get
+      - name: Analyze Hive CE migration fixture
+        working-directory: tool/hive_ce_migration_fixture
+        run: flutter analyze
       - name: Real Hive CE 2.19.3 migration fixtures
         working-directory: tool/hive_ce_migration_fixture
         env:
