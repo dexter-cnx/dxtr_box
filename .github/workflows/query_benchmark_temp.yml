@@ -26,6 +26,8 @@ jobs:
       - name: Format benchmark source
         run: dart format benchmark/test/query_index_benchmark_test.dart
       - name: Run query/index benchmark matrix
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
         run: |
           set -o pipefail
           make benchmark-query-index 2>&1 | tee /tmp/query-benchmark.log
