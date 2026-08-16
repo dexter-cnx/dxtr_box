@@ -276,8 +276,13 @@ pub fn scan_query(
     #[cfg(feature = "full")]
     {
         let spec = query::decode_query(&query_payload)?;
-        let mut keys = db::all_keys(&box_name)?;
+        let (database, _) = db::database(&box_name)?;
+        let mut keys = match index::candidate_keys(&database, &spec.filter)? {
+            Some(keys) => keys,
+            None => db::all_keys(&box_name)?,
+        };
         keys.sort();
+        keys.dedup();
         let mut matched = 0usize;
         let mut results = Vec::new();
         for key in keys {

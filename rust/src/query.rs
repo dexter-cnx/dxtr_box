@@ -105,6 +105,38 @@ pub fn index_scalar_key(payload: &[u8], field: &str) -> Result<Option<Vec<u8>>, 
     Ok(Some(encoded))
 }
 
+pub fn equality_index_candidates(filter: &Filter) -> Result<Vec<(String, Vec<u8>)>, String> {
+    match filter {
+        Filter::Comparison(comparison) => {
+            if !matches!(comparison.op, CompareOp::Equal) {
+                return Ok(Vec::new());
+            }
+            let Some(value) = comparison.value.as_ref() else {
+                return Ok(Vec::new());
+            };
+            if !is_index_scalar(value) {
+                return Ok(Vec::new());
+            }
+            let mut encoded = Vec::new();
+            rmpv::encode::write_value(&mut encoded, value).map_err(|e| e.to_string())?;
+            Ok(vec![(comparison.field.clone(), encoded)])
+        }
+        Filter::Group {
+            op: LogicalOp::And,
+            filters,
+        } => {
+            let mut candidates = Vec::new();
+            for filter in filters {
+                candidates.extend(equality_index_candidates(filter)?);
+            }
+            Ok(candidates)
+        }
+        Filter::Group {
+            op: LogicalOp::Or, ..
+        } => Ok(Vec::new()),
+    }
+}
+
 fn parse_filter(value: &Value) -> Result<Filter, String> {
     let map = as_map(value)?;
     match as_str(required(map, "type")?)? {

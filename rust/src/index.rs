@@ -84,6 +84,74 @@ pub(crate) fn list(db: &Database) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
+pub(crate) fn candidate_keys(
+    db: &Database,
+    filter: &query::Filter,
+) -> Result<Option<Vec<String>>, String> {
+    let candidates = query::equality_index_candidates(filter)?;
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+
+    let definitions = list(db)?;
+    for (field, scalar) in candidates {
+        if let Some((index_name, _)) = definitions
+            .iter()
+            .find(|(_, indexed_field)| *indexed_field == field)
+        {
+            return lookup_equal(db, index_name, &scalar).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+fn lookup_equal(db: &Database, index_name: &str, scalar: &[u8]) -> Result<Vec<String>, String> {
+    let prefix = entry_value_prefix(index_name, scalar);
+    let read = db.begin_read().map_err(|e| e.to_string())?;
+    let entries = read.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
+    entries
+        .iter()
+        .map_err(|e| e.to_string())?
+        .filter_map(|item| match item {
+            Ok((key, _)) if key.value().starts_with(&prefix) => {
+                Some(decode_record_key(key.value(), prefix.len()))
+            }
+            Ok(_) => None,
+            Err(error) => Some(Err(error.to_string())),
+        })
+        .collect()
+}
+
+fn entry_value_prefix(index_name: &str, scalar: &[u8]) -> Vec<u8> {
+    let mut prefix = index_prefix(index_name);
+    push_component(&mut prefix, scalar);
+    prefix
+}
+
+fn decode_record_key(key: &[u8], offset: usize) -> Result<String, String> {
+    let length_bytes = key
+        .get(offset..offset + 4)
+        .ok_or_else(|| "invalid persisted index entry record-key length".to_string())?;
+    let length = u32::from_be_bytes(
+        length_bytes
+            .try_into()
+            .map_err(|_| "invalid persisted index entry record-key length".to_string())?,
+    ) as usize;
+    let start = offset + 4;
+    let end = start
+        .checked_add(length)
+        .ok_or_else(|| "invalid persisted index entry record-key length".to_string())?;
+    if end != key.len() {
+        return Err("invalid persisted index entry record-key encoding".to_string());
+    }
+    std::str::from_utf8(
+        key.get(start..end)
+            .ok_or_else(|| "invalid persisted index entry record-key encoding".to_string())?,
+    )
+    .map(str::to_string)
+    .map_err(|_| "persisted index entry record key is not UTF-8".to_string())
+}
+
 pub(crate) fn drop_index(db: &Database, name: &str) -> Result<bool, String> {
     let write = db.begin_write().map_err(|e| e.to_string())?;
     let removed = {
