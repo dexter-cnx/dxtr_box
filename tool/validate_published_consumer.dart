@@ -206,7 +206,7 @@ void _validateStagedPayload(Directory stagedPackage) {
   }
 
   final pubspec = File('${stagedPackage.path}/pubspec.yaml').readAsStringSync();
-  if (RegExp(r'^\s+path:\s+', multiLine: true).hasMatch(pubspec)) {
+  if (RegExp(r'^    path:\s+', multiLine: true).hasMatch(pubspec)) {
     throw StateError('published root pubspec may not contain path-source dependencies');
   }
 }
