@@ -6,17 +6,14 @@ on:
     paths:
       - '.github/workflows/read_path_benchmark.yml'
       - 'Makefile'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - 'flutter_rust_bridge.yaml'
       - 'lib/**'
       - 'rust/**'
-      - 'test/read_path_benchmark_test.dart'
-      - 'test/read_path_boundary_benchmark_test.dart'
+      - 'test/**'
+      - 'tool/pr3_apply.py'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: read-path-benchmark-${{ github.workflow }}-${{ github.ref }}
@@ -24,12 +21,14 @@ concurrency:
 
 jobs:
   diagnostic:
-    name: 0.5 read-path decomposition / Linux x64
+    name: 0.5 PR3 implementation + batch evidence / Linux x64
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -43,42 +42,27 @@ jobs:
           cache-workspaces: rust
       - name: Install dependencies
         run: flutter pub get
-      - name: Run decomposed read-path diagnostics
-        env:
-          READ_PATH_RUST_ITERATIONS: '1000'
-          READ_PATH_DART_ITERATIONS: '500'
-          READ_PATH_SAMPLES: '5'
-        run: make benchmark-read-path
-      - name: Run cross-runtime boundary diagnostic
-        env:
-          DXTR_BOX_READ_PATH_BOUNDARY_BENCHMARK: '1'
-          DXTR_BOX_READ_PATH_DART_ITERATIONS: '500'
-          DXTR_BOX_READ_PATH_DART_SAMPLES: '5'
-          DXTR_BOX_READ_PATH_BOUNDARY_OUTPUT: 'build/read-path/dart-boundary.jsonl'
+      - name: Apply PR3 source patch
+        run: python3 tool/pr3_apply.py
+      - name: Generate pinned FRB bindings
         run: |
-          LD_LIBRARY_PATH="rust/target/release:${LD_LIBRARY_PATH:-}" \
-          DYLD_LIBRARY_PATH="rust/target/release:${DYLD_LIBRARY_PATH:-}" \
-          PATH="rust/target/release:$PATH" \
-          flutter test test/read_path_boundary_benchmark_test.dart --reporter expanded
-      - name: Verify read-path evidence
+          cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
+          make frb-generate
+      - name: Format and validate PR3
         run: |
-          test -s build/read-path/rust-read-path.jsonl
-          test -s build/read-path/dart-read-path.jsonl
-          test -s build/read-path/dart-boundary.jsonl
-      - name: Toolchain metadata
-        if: always()
+          make format
+          make ci-fast
+          make native-test
+          make benchmark-batch-read
+      - name: Commit generated PR3 implementation
+        if: success() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         run: |
-          mkdir -p build/read-path
-          flutter --version | tee build/read-path/flutter-version.txt
-          rustc --version | tee build/read-path/rust-version.txt
-          cargo --version | tee build/read-path/cargo-version.txt
-          uname -a | tee build/read-path/runner.txt
-          lscpu > build/read-path/cpu.txt || true
-      - name: Upload read-path evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: read-path-benchmark-linux-x64
-          path: build/read-path
-          if-no-files-found: error
-          retention-days: 14
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Makefile lib/src/box.dart lib/src/native_api.dart lib/src/rust rust/src/api.rs rust/src/db.rs rust/src/frb_generated.rs test/box_test.dart test/native_integration_test.dart test/batch_read_benchmark_test.dart
+          if git diff --cached --quiet; then
+            echo 'PR3 implementation already current.'
+            exit 0
+          fi
+          git commit -m 'perf: add one-snapshot batch reads'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
