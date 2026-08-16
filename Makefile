@@ -13,6 +13,7 @@ POINT_READ_SAMPLES ?= 5
 READ_PATH_RUST_ITERATIONS ?= 2000
 READ_PATH_DART_ITERATIONS ?= 1000
 READ_PATH_SAMPLES ?= 7
+READ_PATH_OUTPUT_DIR ?= $(abspath build/read-path)
 SIZE_STABILITY_RUNS ?= 3
 SIZE_BASE_REF ?= HEAD^
 SIZE_MAX_GROWTH_BYTES ?= 65536
@@ -151,10 +152,12 @@ diagnose-point-read: native-build pub-get
 	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_POINT_READ_DIAGNOSIS=1 DXTR_BOX_POINT_READ_ITERATIONS=$(POINT_READ_ITERATIONS) DXTR_BOX_POINT_READ_SAMPLES=$(POINT_READ_SAMPLES) $(FLUTTER) test test/point_read_diagnosis_test.dart --reporter expanded
 
 benchmark-read-path: native-build pub-get
-	rm -rf build/read-path
-	mkdir -p build/read-path
-	DXTR_BOX_READ_PATH_RUST_ITERATIONS=$(READ_PATH_RUST_ITERATIONS) DXTR_BOX_READ_PATH_RUST_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_RUST_OUTPUT=build/read-path/rust-read-path.jsonl $(CARGO) test --manifest-path rust/Cargo.toml --release read_path_bench::read_path_microbench -- --ignored --nocapture
-	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_READ_PATH_BENCHMARK=1 DXTR_BOX_READ_PATH_DART_ITERATIONS=$(READ_PATH_DART_ITERATIONS) DXTR_BOX_READ_PATH_DART_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_DART_OUTPUT=build/read-path/dart-read-path.jsonl $(FLUTTER) test test/read_path_benchmark_test.dart --reporter expanded
+	rm -rf "$(READ_PATH_OUTPUT_DIR)"
+	mkdir -p "$(READ_PATH_OUTPUT_DIR)"
+	DXTR_BOX_READ_PATH_RUST_ITERATIONS=$(READ_PATH_RUST_ITERATIONS) DXTR_BOX_READ_PATH_RUST_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_RUST_OUTPUT="$(READ_PATH_OUTPUT_DIR)/rust-read-path.jsonl" $(CARGO) test --manifest-path rust/Cargo.toml --release read_path_bench::read_path_microbench -- --ignored --nocapture
+	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_READ_PATH_BENCHMARK=1 DXTR_BOX_READ_PATH_DART_ITERATIONS=$(READ_PATH_DART_ITERATIONS) DXTR_BOX_READ_PATH_DART_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_DART_OUTPUT="$(READ_PATH_OUTPUT_DIR)/dart-read-path.jsonl" $(FLUTTER) test test/read_path_benchmark_test.dart --reporter expanded
+	test -s "$(READ_PATH_OUTPUT_DIR)/rust-read-path.jsonl"
+	test -s "$(READ_PATH_OUTPUT_DIR)/dart-read-path.jsonl"
 
 preflight: format-check analyze test contract-check rust-check
 
