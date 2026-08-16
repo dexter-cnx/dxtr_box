@@ -15,7 +15,7 @@ help:
 	@echo "dxtr_box developer targets"
 	@echo "  make preflight            Format check + analyze + Dart/Rust tests"
 	@echo "  make frb-generate         Refresh flutter_rust_bridge bindings"
-	@echo "  make native-test          Native FRB round-trip test"
+	@echo "  make native-test          Native FRB round-trip + Hive CE migration fixtures"
 	@echo "  make query-index-test     Rust full-profile query/index integration test"
 	@echo "  make query-sort-test      Dart sort contract + Rust query sort integration tests"
 	@echo "  make native-build-minimal Build core CRUD/lifecycle/watch only"
@@ -82,7 +82,7 @@ native-size-stability:
 	DXTR_BOX_SIZE_RUNS=$(SIZE_STABILITY_RUNS) bash tool/native_size_stability.sh
 
 native-test: pub-get native-build
-	DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test test/native_integration_test.dart --reporter expanded
+	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test test/native_integration_test.dart test/hive_ce_migration_native_test.dart --reporter expanded
 
 query-index-test:
 	$(CARGO) test --manifest-path rust/Cargo.toml --test query_index -- --nocapture
