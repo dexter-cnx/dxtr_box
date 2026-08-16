@@ -53,9 +53,9 @@ The audit should be refreshed against the latest Hive CE release immediately bef
 | Web | IndexedDB/Web/WASM support | IndexedDB fallback behind same Dart API | Gap |
 | Flutter integration | Flutter initialization/helpers | dxtr_box Flutter facade | In progress |
 | DevTools inspection | Hive CE Inspector | optional dxtr_box inspector/tooling; evaluate as parity requirement | Planned audit |
-| Hive data migration | existing Hive data | `migrateFromHiveCe()` with documented supported types | Gap / planned 0.3 |
-| Query/filter | app-side filtering | native query helpers + indexes where useful | Planned 0.3 |
-| Binary size | pure-Dart Hive has no native payload | explicit native-size budget, Cargo profiles/features, future tree shaking | In progress / next milestone |
+| Hive data migration | existing Hive data | `migrateFromHiveCe()` with documented supported types | Implemented for documented 0.3 contract; final parity audit pending |
+| Query/filter | app-side filtering | native query helpers + indexes where useful | Implemented 0.3 foundation; broader parity audit pending |
+| Binary size | pure-Dart Hive has no native payload | explicit native-size budget, Cargo profiles/features, future tree shaking | Same-commit profile reproducibility implemented; cross-commit budget deferred |
 
 ## Compatibility principle
 
@@ -117,7 +117,7 @@ The implementation now covers the storage/security behaviors above except the bi
 
 ## Plaintext -> encrypted migration contract
 
-`DxtrBox.encryptBox()` is a storage-mode maintenance operation, distinct from future Hive-file migration.
+`DxtrBox.encryptBox()` is a storage-mode maintenance operation, distinct from Hive CE data migration.
 
 Required semantics:
 
@@ -133,17 +133,23 @@ A dedicated process-kill test that targets an in-flight migration remains future
 
 ## Hive migration parity gate
 
-Future `migrateFromHiveCe()` must define support for at least:
+The 0.3 `migrateFromHiveCe()` path now covers the following documented migration baseline:
 
 - primitive values,
 - lists/maps,
 - binary data,
 - DateTime,
-- supported built-in extended values,
-- custom objects through an explicit conversion callback where automatic conversion is impossible,
-- encrypted-source migration with caller-supplied source credentials where technically feasible.
+- String keys and deterministic int-key mapping,
+- custom/unsupported values through an explicit conversion callback,
+- encrypted Hive CE source boxes opened by the caller with Hive CE credentials,
+- encrypted dxtr_box destinations,
+- preflight collision/value failures before destination creation,
+- exclusive destination reservation so concurrent migrations cannot merge into one target,
+- cleanup of a destination reservation owned by a migration when handle initialization or the single transactional `putAll` fails.
 
-Hive data migration must be restart-safe or transactional enough that a failed migration cannot silently produce a partially valid destination.
+Real Hive CE 2.19.3 fixtures validate this contract. LazyBox migration, direct `.hive` parsing, overwrite/merge into an existing destination, additional Hive CE built-in types not representable by the current codec, and full 1.0 custom-object/schema parity remain outside the 0.3 claim.
+
+A hard process termination during destination creation/commit is not claimed to provide file-level crash-atomic promotion; stronger staging/promotion remains future hardening if product evidence requires it.
 
 ## Performance is not parity
 
