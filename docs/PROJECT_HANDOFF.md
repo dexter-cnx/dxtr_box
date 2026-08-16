@@ -8,9 +8,9 @@ Target: Hive-simple Flutter ergonomics backed by redb, with durable storage outs
 
 The 1.0 claim is functional replacement for practical Hive/Hive CE local-database workloads, not source-level API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` remains a release gate.
 
-## Current snapshot — 0.3 query/index benchmark complete
+## Current snapshot — 0.3 point-read diagnosis complete
 
-Main contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, and explicit native `sortBy`. The active 0.3 slice adds a reproducible diagnostic query/index benchmark matrix on `feature/0.3-query-benchmarks`; it does not change public query semantics or the FRB shape.
+Main contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, explicit native `sortBy`, and the reproducible query/index benchmark matrix. The active 0.3 point-read diagnosis measured `get` / `containsKey` without changing public query semantics, storage format, FRB shape, or profile count.
 
 Current capabilities include:
 
@@ -288,9 +288,10 @@ The current range planner was additionally finalized through a temporary workflo
 3. Completed: deterministic pure planner-selection step with direct selection/fallback tests.
 4. Completed: explicit public `sortBy` contract and deterministic native execution.
 5. Completed: focused query/index benchmark matrix with machine-readable diagnostic output.
-6. Next: point-get/contains performance diagnosis independently.
-7. Then: Hive CE migration design/implementation and 0.3 closure audit.
-8. Keep encrypted-index design, cross-commit size policy, and Dart 3.13 tree shaking separate.
+6. Completed: point-get/contains performance diagnosis; retain authoritative native semantics and avoid speculative metadata caching.
+7. Next: Hive CE migration design/implementation.
+8. Then: 0.3 closure audit.
+9. Keep encrypted-index design, cross-commit size policy, and Dart 3.13 tree shaking separate.
 
 ## Later roadmap
 
@@ -338,7 +339,6 @@ Important constraint: this is **not** scalar-order range seeking. MessagePack sc
 
 The planner now also has a pure deterministic selection step with direct tests for exact-field matching, partial/multi-index AND behavior, duplicate-field choice, and fallback. Next candidates are an explicit sort contract and focused benchmark scenarios; scalar-level redb seeks still require a separately proven order-preserving scalar encoding.
 
-
 ### Query sort milestone completed
 
 The public declarative query contract now includes deterministic multi-clause `sortBy` via `QuerySort`, `QuerySortDirection`, and `QueryNullOrder` without changing the FRB function signature. Native execution sorts authoritative predicate matches inside the same redb read snapshot before pagination, supports nested dotted fields, exact numeric ordering, lexical strings, explicit null placement, and record-key tie-breaking. Mixed incompatible non-null sort domains, unsupported ordered values, and NaN are rejected explicitly. Focused Dart/Rust coverage is available through `make query-sort-test`, including scan/index ordered-result equivalence.
@@ -350,3 +350,11 @@ Next query/index work should benchmark the now-stable planner/sort execution bef
 `make benchmark-query-index` now measures equality, range, AND-intersection, and sorted-range queries in scan/index modes at 100/1,000/5,000 records. Run `31927276095` completed the full 24-case matrix. At 5,000 records the median scan/index measurements were: equality 15,887/10,649 µs, range 15,125/6,988 µs, AND intersection 15,511/8,739 µs, and sorted range 16,256/7,997 µs. Shared-runner timings are diagnostic, not hard thresholds.
 
 The evidence supports persisted-index candidate narrowing but does not by itself justify an order-preserving persisted scalar format. The immediate 0.3 sequence is point-get/contains diagnosis, Hive CE migration, then closure audit.
+
+### Point-read diagnosis evidence
+
+`make diagnose-point-read` measures public/native point reads, Dart MessagePack decode-only work, authoritative `containsKey`, Dart metadata membership, and plaintext/encrypted reads. Run `31928485185` completed successfully on Flutter 3.47 / Dart 3.13. Median plaintext native `get` hit was about 225.7 µs/op while Dart decode-only was about 6.0 µs/op; native `containsKey` hit was about 193.8 µs/op while Dart metadata membership was about 6.5 µs/op. Shared-runner timings are diagnostic only.
+
+The 6.0 µs result isolates only Dart `DxtrCodec.decode`; it does not isolate native MessagePack work. Every successful native read performs `validate_message_pack(&plaintext)` before returning, so the ~225.7 µs native region is a composite of FRB call/response, redb transaction/lookup, native MessagePack validation, optional decrypt/authentication, and payload copying. The current harness cannot attribute that composite further without a purpose-built internal benchmark.
+
+The faster metadata membership result does not justify replacing authoritative `containsKey`, because `_metadata.keys` is not durable cross-process truth. Plaintext/encrypted differences were within noisy shared-runner variation, so crypto/storage-format changes are not justified. The 0.3 decision is no speculative point-read optimization; proceed to Hive CE migration.

@@ -336,7 +336,6 @@ This optimization is deliberately limited to the **index-name component**. Scala
 
 A future scalar-level redb range seek still requires a proven order-preserving scalar encoding.
 
-
 ## 20. Deterministic native query sorting
 
 `BoxQuery` now accepts an ordered `sortBy` list. Public sort clauses are represented by `QuerySort`, `QuerySortDirection`, and `QueryNullOrder`; they are serialized inside the existing opaque MessagePack query payload, so the FRB function shape does not change.
@@ -363,10 +362,34 @@ The unsorted path keeps its existing deterministic record-key order and early pa
 
 `rust/tests/query_index.rs` verifies order-before-pagination, nested sort fields, null/missing placement, mixed-type rejection, large-integer precision, deterministic key tie-breaking, and exact scan/index result equivalence. `make query-sort-test` runs the focused Dart contract and Rust integration coverage.
 
-## 20. Query/index diagnostic benchmark
+## 21. Query/index diagnostic benchmark
 
 `benchmark/test/query_index_benchmark_test.dart` exercises the public `Box.query(...)` and `createIndex(...)` APIs against equality, range, AND-intersection, and sorted-range workloads. Each scenario is timed once through primary scan and once after the matching persisted indexes exist. Setup and backfill are outside the timed region.
 
 The 2026-08-16 baseline (`31927276095`) shows lower median query time for indexed execution in every measured 100/1,000/5,000-record case. At 5,000 records, range measured 15,125 µs scan vs 6,988 µs indexed, while sorted range measured 16,256 µs vs 7,997 µs. These numbers are diagnostic only.
 
 The result supports keeping candidate narrowing and measuring further before changing the persisted scalar representation. Current index-name-bounded iteration still decodes scalar MessagePack components; a true scalar seek remains a separate storage-format decision with ordering and migration requirements.
+
+## 22. Point-read diagnosis
+
+The 0.3 diagnostic harness keeps the production path unchanged and measures the existing public/native layers directly:
+
+```text
+Box.get
+  -> Dart validation / async wrapper
+  -> NativeDxtrApi.get
+  -> FRB
+  -> api::get
+  -> db::get
+  -> redb read transaction + point lookup
+  -> optional decrypt/authenticate
+  -> native validate_message_pack traversal
+  -> payload copy through FRB
+  -> DxtrCodec.decode
+```
+
+Run `31928485185` measured a plaintext native `get` hit around 225.7 µs/op and a Dart `DxtrCodec.decode`-only case around 6.0 µs/op on a shared Ubuntu runner. The 6.0 µs measurement shows that the Dart decode step alone is small relative to the end-to-end native adapter call; it does **not** isolate total MessagePack-related native work because every successful native read also performs `validate_message_pack(&plaintext)` before returning the payload.
+
+Accordingly, the measured ~225.7 µs native region must be treated as a composite of FRB call/response overhead, redb read-transaction setup and point lookup, optional decrypt/authenticate, native MessagePack validation, and payload copying. The current harness cannot attribute that region further without perturbing the production native surface. `containsKey` measured around 193.8 µs/op versus about 6.5 µs/op for local Dart metadata membership.
+
+The metadata number is deliberately not used to optimize public `containsKey`: `_metadata.keys` is a convenience snapshot synchronized within the current runtime, not durable authority across processes. `Box.get` and `Box.containsKey` therefore remain native/redb-backed. Encrypted/plaintext timing deltas were noisy and do not justify crypto or storage-format changes. If point-read throughput later becomes a demonstrated product bottleneck, first isolate native validation/redb/boundary costs with a purpose-built internal benchmark or benchmark batching/a safe native read-session design rather than introducing a whole-box Dart cache.
