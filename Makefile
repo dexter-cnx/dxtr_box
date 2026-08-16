@@ -17,7 +17,7 @@ SIZE_MAX_GROWTH_PERCENT ?= 3
 
 help:
 	@echo "dxtr_box developer targets"
-	@echo "  make format-check         Dart format + rustfmt checks"
+	@echo "  make format-check         Resolve Dart packages, then check Dart format + rustfmt"
 	@echo "  make rust-check           rustfmt + clippy + compile all three profiles + cheap Rust unit tests"
 	@echo "  make analyze              Flutter analyze"
 	@echo "  make test-fast            Cheap Dart unit/contract tests"
@@ -49,11 +49,11 @@ help:
 pub-get:
 	$(FLUTTER) pub get
 
-format:
+format: pub-get
 	dart format lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
-format-check:
+format-check: pub-get
 	dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
