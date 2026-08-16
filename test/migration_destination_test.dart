@@ -1,14 +1,15 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dxtr_box/src/dxtr_box.dart';
 import 'package:dxtr_box/src/native_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('openNew removes its reservation when handle initialization fails', () async {
-    final root = await Directory.systemTemp.createTemp('dxtr_open_new_failure_');
+  test('openNew removes its reservation when handle initialization fails',
+      () async {
+    final root =
+        await Directory.systemTemp.createTemp('dxtr_open_new_failure_');
     addTearDown(() async {
       if (root.existsSync()) {
         await root.delete(recursive: true);
