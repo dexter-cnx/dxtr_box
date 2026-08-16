@@ -263,3 +263,8 @@ Refresh the audit against the then-current Hive CE release and close every pract
 ## License
 
 MIT
+
+### Persisted-index lookup optimization
+
+Index-backed queries bound redb iteration to the selected persisted index name rather than scanning unrelated `index_entries`. Range predicates still decode stored MessagePack scalars and use the query comparator; raw MessagePack byte order is not used as numeric order.
+

@@ -248,3 +248,10 @@ Cross-commit binary-size regression policy remains separate from query/index wor
 - Reduced profiles reject unsafe persisted-index boxes.
 - Encrypted indexed fields must not leak through plaintext persisted index keys.
 - Raw MessagePack numeric byte ordering must not be used as query numeric ordering.
+
+## Bounded index-name range optimization
+
+Persisted index lookup and `dropIndex` cleanup now use a redb half-open range bounded by the encoded index-name prefix and its lexicographic successor. This skips unrelated persisted indexes at the storage iterator level while preserving the existing scalar comparison contract.
+
+The optimization does **not** use MessagePack scalar bytes as numeric range bounds. Candidate scalar components are still decoded and evaluated with the same exact comparator used by the authoritative query engine. Scan/index equivalence therefore remains unchanged.
+

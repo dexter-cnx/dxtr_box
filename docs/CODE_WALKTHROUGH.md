@@ -323,3 +323,12 @@ The range-capable planner is now implemented with equivalence coverage. Next wor
 4. define explicit `sortBy` semantics as a separate public API decision;
 5. add query/index benchmark scenarios only after execution semantics remain stable;
 6. keep encrypted persisted-index design, cross-commit native-size policy, and Dart 3.13 tree shaking as separate workstreams.
+
+## 19. Bounded persisted-index iteration
+
+Persisted-index candidate lookup no longer iterates the entire `index_entries` table. `rust/src/index.rs` computes the encoded index-name prefix and its lexicographic successor, then asks redb for only that half-open key range. `dropIndex` cleanup uses the same bounded range.
+
+This optimization is deliberately limited to the **index-name component**. Scalar MessagePack bytes inside that range are still decoded and compared with the query engine comparator, so numeric/string query semantics are unchanged and raw MessagePack byte ordering is never treated as numeric ordering.
+
+A future scalar-level redb range seek still requires a proven order-preserving scalar encoding.
+
