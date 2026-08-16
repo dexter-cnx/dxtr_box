@@ -206,7 +206,7 @@ No package is automatically published by CI or by the hardening milestones. See 
 
 PH-04 adds a stronger native package-boundary proof. `tool/validate_published_consumer.dart` stages the files allowed by the current `.pubignore`, verifies required native inputs and absence of repository-only leakage, creates a fresh Flutter app, adds only the staged `dxtr_box` copy as a dependency, imports the public API, and builds the app.
 
-Platform Builds now run this staged-consumer flow for all five native targets rather than building directly against the repository checkout:
+Platform Builds run this staged-consumer flow for all five native targets:
 
 ```bash
 make published-consumer-android
@@ -216,7 +216,24 @@ make published-consumer-linux
 make published-consumer-windows
 ```
 
-The staging helper fails closed if `.pubignore` starts using wildcard/negation rules it does not model exactly. `dart pub publish --dry-run` remains the source of truth for pub validation and intended file listing; the staged consumer gate is complementary build evidence. See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
+The staging helper fails closed if `.pubignore` starts using wildcard/negation rules it does not model exactly. `dart pub publish --dry-run` remains the source of truth for pub validation and intended file listing; the staged consumer gate is complementary build evidence. PH-04 completed in PR #30. See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
+
+## Public API + durable storage contract guard
+
+PH-05 adds fail-fast compatibility change control without claiming pre-1.0 stability.
+
+```bash
+dart run tool/verify_public_storage_contract.dart
+```
+
+The normal Flutter test suite also runs this contract. It verifies the package entrypoint export set, compiles representative public constructors/enums/typedefs and typed `Box`/`DxtrBox`/migration signatures, and guards the current durable metadata identity:
+
+```text
+meta key: format_version
+value:    dxtr_box/1
+```
+
+A deliberate 0.x API change is allowed only with an intentional contract/doc update. A future storage-format change must include backward-read or migration behavior plus compatibility evidence rather than merely updating the marker. PH-05 completed in PR #31. See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
 
 ## Local database comparison
 
@@ -240,6 +257,7 @@ Common root targets:
 ```bash
 make preflight
 make package-readiness
+dart run tool/verify_public_storage_contract.dart
 make dart-doc
 make pub-dry-run
 make frb-generate
@@ -276,7 +294,7 @@ make example-windows
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture.
 - `docs/PACKAGE_RELEASE_04.md` — self-contained plugin and publication-readiness contract.
 - `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md` — PH-04 staged publication-boundary consumer build contract.
-- `docs/PUBLIC_API_STORAGE_CONTRACT_04.md` — PH-05 public API + durable storage compatibility guard.
+- `docs/PUBLIC_API_STORAGE_CONTRACT_04.md` — PH-05 public API and durable-format change-control contract.
 - `docs/NATIVE_SIZE_POLICY_04.md` — controlled native-size regression policy.
 - `docs/LOCAL_DATABASE_COMPARISON_04.md` — PH-03 correctness + diagnostic comparison contract.
 - `docs/QUERY_INDEX_03.md` — query/index semantics and planner constraints.
@@ -285,4 +303,4 @@ make example-windows
 
 ## 1.0 direction
 
-A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. The current 0.4 work is production/package hardening, not a stable-API claim.
+A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. The completed 0.4 work is production/package hardening, not a stable-API claim.
