@@ -111,13 +111,13 @@ void main() {
       );
       expect(sink, isTrue);
 
-      await _measureAsync(
-        operation: 'generated_frb_get_async',
+      _measureSync(
+        operation: 'generated_frb_get_sync',
         outcome: 'hit',
         iterations: iterations,
         samples: samples,
-        action: () async {
-          sink = await frb.get_(boxName: box.name, key: key);
+        action: () {
+          sink = frb.get_(boxName: box.name, key: key);
         },
       );
       expect(sink, isA<Uint8List>());
@@ -133,24 +133,24 @@ void main() {
       );
       expect(sink, isA<Uint8List>());
 
-      await _measureAsync(
-        operation: 'generated_frb_get_async',
+      _measureSync(
+        operation: 'generated_frb_get_sync',
         outcome: 'miss',
         iterations: iterations,
         samples: samples,
-        action: () async {
-          sink = await frb.get_(boxName: box.name, key: missKey);
+        action: () {
+          sink = frb.get_(boxName: box.name, key: missKey);
         },
       );
       expect(sink, isNull);
 
-      await _measureAsync(
-        operation: 'generated_frb_contains_key_async',
+      _measureSync(
+        operation: 'generated_frb_contains_key_sync',
         outcome: 'hit',
         iterations: iterations,
         samples: samples,
-        action: () async {
-          sink = await frb.containsKey(boxName: box.name, key: key);
+        action: () {
+          sink = frb.containsKey(boxName: box.name, key: key);
         },
       );
       expect(sink, isTrue);
@@ -166,13 +166,13 @@ void main() {
       );
       expect(sink, isTrue);
 
-      await _measureAsync(
-        operation: 'generated_frb_contains_key_async',
+      _measureSync(
+        operation: 'generated_frb_contains_key_sync',
         outcome: 'miss',
         iterations: iterations,
         samples: samples,
-        action: () async {
-          sink = await frb.containsKey(boxName: box.name, key: missKey);
+        action: () {
+          sink = frb.containsKey(boxName: box.name, key: missKey);
         },
       );
       expect(sink, isFalse);
