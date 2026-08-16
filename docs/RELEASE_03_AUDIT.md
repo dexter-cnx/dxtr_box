@@ -15,6 +15,8 @@ This document is the release-closure checklist for the 0.3 query/index + migrati
 - [x] Hive CE String keys are preserved; int keys default to `@hive-int:<decimal>`; conversion collisions fail before destination creation.
 - [x] Unsupported/custom Hive CE values require explicit conversion.
 - [x] Existing migration destinations are rejected rather than overwritten.
+- [x] Migration destination creation uses an exclusive filesystem reservation so concurrent migrations cannot both claim the same new destination.
+- [x] A migration-owned destination reservation is cleaned up if `DxtrBox.open` fails during handle initialization.
 
 ## Query / index correctness
 
@@ -70,7 +72,17 @@ full
 - [x] Shared-runner benchmark timing is informational, not an SLA gate.
 - [x] Point-read diagnosis records `get`/`containsKey` cost without changing authoritative native semantics.
 - [x] Point-read measurements do not over-attribute the native region because native MessagePack validation is included in that region.
-- [x] Real Hive CE 2.19.3 fixtures cover primitive/list/map/binary/DateTime data, String/int keys, custom conversion, collision rejection, encrypted source/destination, unsupported-value preflight, source preservation, and existing-destination preservation.
+- [x] Real Hive CE 2.19.3 fixtures cover primitive/list/map/binary/DateTime data, String/int keys, custom conversion, collision rejection, encrypted source/destination, unsupported-value preflight, source preservation, existing-destination preservation, and concurrent-destination rejection.
+- [x] Root regression coverage injects a handle-initialization failure and verifies the migration-owned destination file is removed.
+
+## Review follow-up discovered during closure
+
+Codex review `4945584625` on merged PR #23 identified two migration correctness gaps after that PR merged:
+
+1. a TOCTOU race between `boxExists()` and normal `DxtrBox.open()` allowed two migrations to target the same destination;
+2. if native open succeeded but watch/metadata initialization failed, the destination file could remain because the migration had not yet marked the handle as opened.
+
+PR #24 treats these as release-blocking defects rather than expanding 0.3 scope. The fix reserves `{destination}.dxtr` with exclusive filesystem creation before opening it, keeps that helper internal to `src`, cleans up the reservation on open-initialization failure, and adds direct race/failure regression tests.
 
 ## Documentation closure
 
@@ -82,7 +94,7 @@ Before merging the closure PR, verify these files all describe the same current 
 - [ ] `docs/QUERY_INDEX_03.md`
 - [ ] `docs/QUERY_BENCHMARK_03.md`
 - [ ] `docs/POINT_READ_DIAGNOSIS_03.md`
-- [ ] `docs/HIVE_CE_MIGRATION_03.md`
+- [x] `docs/HIVE_CE_MIGRATION_03.md`
 - [ ] `docs/HIVE_FUNCTIONAL_PARITY.md`
 
 ## Explicitly deferred beyond 0.3
