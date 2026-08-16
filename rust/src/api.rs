@@ -284,8 +284,31 @@ pub fn scan_query(
         };
         keys.sort();
         keys.dedup();
-        let mut matched = 0usize;
-        let mut results = Vec::new();
+
+        if spec.sort_by.is_empty() {
+            let mut matched = 0usize;
+            let mut results = Vec::new();
+            for key in keys {
+                let Some(value) = db::query_get(&read, &encryption, &key)? else {
+                    continue;
+                };
+                if !query::matches_record(&value, &spec.filter)? {
+                    continue;
+                }
+                if matched < spec.offset {
+                    matched += 1;
+                    continue;
+                }
+                results.push(NativeQueryRecord { key, value });
+                matched += 1;
+                if spec.limit.is_some_and(|limit| results.len() >= limit) {
+                    break;
+                }
+            }
+            return Ok(results);
+        }
+
+        let mut sortable = Vec::new();
         for key in keys {
             let Some(value) = db::query_get(&read, &encryption, &key)? else {
                 continue;
@@ -293,17 +316,26 @@ pub fn scan_query(
             if !query::matches_record(&value, &spec.filter)? {
                 continue;
             }
-            if matched < spec.offset {
-                matched += 1;
-                continue;
-            }
-            results.push(NativeQueryRecord { key, value });
-            matched += 1;
-            if spec.limit.is_some_and(|limit| results.len() >= limit) {
-                break;
-            }
+            let sort_values = query::sort_values(&value, &spec.sort_by)?;
+            sortable.push((key, value, sort_values));
         }
-        Ok(results)
+
+        let sort_rows = sortable
+            .iter()
+            .map(|(_, _, values)| values.clone())
+            .collect::<Vec<_>>();
+        query::validate_sort_rows(&sort_rows, &spec.sort_by)?;
+        sortable.sort_by(|left, right| {
+            query::compare_sort_rows(&left.2, &left.0, &right.2, &right.0, &spec.sort_by)
+        });
+
+        let limit = spec.limit.unwrap_or(usize::MAX);
+        Ok(sortable
+            .into_iter()
+            .skip(spec.offset)
+            .take(limit)
+            .map(|(key, value, _)| NativeQueryRecord { key, value })
+            .collect())
     }
 
     #[cfg(not(feature = "full"))]

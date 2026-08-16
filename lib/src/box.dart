@@ -17,10 +17,10 @@ final class Box {
     required NativeDxtrApi api,
     required BoxMetadata metadata,
     required void Function() onClose,
-  })  : _watcherId = watcherId,
-        _api = api,
-        _metadata = metadata,
-        _onClose = onClose;
+  }) : _watcherId = watcherId,
+       _api = api,
+       _metadata = metadata,
+       _onClose = onClose;
 
   final String name;
   final String _watcherId;
@@ -172,11 +172,14 @@ final class Box {
     _ensureOpen();
     if (_api is! NativeQueryApi) {
       throw UnsupportedError(
-          'The configured native engine does not support queries.');
+        'The configured native engine does not support queries.',
+      );
     }
     final queryApi = _api as NativeQueryApi;
-    final records =
-        await queryApi.scanQuery(name, DxtrCodec.encode(_queryWire(query)));
+    final records = await queryApi.scanQuery(
+      name,
+      DxtrCodec.encode(_queryWire(query)),
+    );
     return records
         .map(
           (record) => MapEntry<String, dynamic>(
@@ -191,7 +194,8 @@ final class Box {
     _ensureOpen();
     if (_api is! NativeIndexApi) {
       throw UnsupportedError(
-          'The configured native engine does not support persisted indexes.');
+        'The configured native engine does not support persisted indexes.',
+      );
     }
     final indexApi = _api as NativeIndexApi;
     await indexApi.createIndex(name, definition.name, definition.field);
@@ -201,16 +205,15 @@ final class Box {
     _ensureOpen();
     if (_api is! NativeIndexApi) {
       throw UnsupportedError(
-          'The configured native engine does not support persisted indexes.');
+        'The configured native engine does not support persisted indexes.',
+      );
     }
     final indexApi = _api as NativeIndexApi;
     final definitions = await indexApi.listIndexes(name);
     return definitions
         .map(
-          (definition) => IndexDefinition(
-            name: definition.name,
-            field: definition.field,
-          ),
+          (definition) =>
+              IndexDefinition(name: definition.name, field: definition.field),
         )
         .toList(growable: false);
   }
@@ -219,7 +222,8 @@ final class Box {
     _ensureOpen();
     if (_api is! NativeIndexApi) {
       throw UnsupportedError(
-          'The configured native engine does not support persisted indexes.');
+        'The configured native engine does not support persisted indexes.',
+      );
     }
     final indexApi = _api as NativeIndexApi;
     return indexApi.dropIndex(name, indexName);
@@ -341,24 +345,31 @@ final class Box {
 }
 
 Map<String, dynamic> _queryWire(BoxQuery query) => <String, dynamic>{
-      'where': _filterWire(query.where),
-      'limit': query.limit,
-      'offset': query.offset,
-    };
+  'where': _filterWire(query.where),
+  'sortBy': query.sortBy.map(_sortWire).toList(growable: false),
+  'limit': query.limit,
+  'offset': query.offset,
+};
+
+Map<String, dynamic> _sortWire(QuerySort sort) => <String, dynamic>{
+  'field': sort.field,
+  'direction': sort.direction.name,
+  'nulls': sort.nulls.name,
+};
 
 Map<String, dynamic> _filterWire(QueryFilter filter) {
   return switch (filter) {
     QueryComparison comparison => <String, dynamic>{
-        'type': 'comparison',
-        'field': comparison.field,
-        'operator': comparison.operator.name,
-        'value': comparison.value,
-        'upperValue': comparison.upperValue,
-      },
+      'type': 'comparison',
+      'field': comparison.field,
+      'operator': comparison.operator.name,
+      'value': comparison.value,
+      'upperValue': comparison.upperValue,
+    },
     QueryGroup group => <String, dynamic>{
-        'type': 'group',
-        'operator': group.operator.name,
-        'filters': group.filters.map(_filterWire).toList(growable: false),
-      },
+      'type': 'group',
+      'operator': group.operator.name,
+      'filters': group.filters.map(_filterWire).toList(growable: false),
+    },
   };
 }
