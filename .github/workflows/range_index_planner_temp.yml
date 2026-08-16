@@ -23,7 +23,9 @@ jobs:
           components: rustfmt, clippy
 
       - name: Apply range planner patch
-        run: python3 tool/apply_range_index_planner.py
+        run: |
+          python3 tool/apply_range_index_planner.py
+          python3 tool/fix_range_planner_dead_code.py
 
       - name: Format Rust
         run: cargo fmt --manifest-path rust/Cargo.toml
@@ -36,7 +38,7 @@ jobs:
           cargo test --manifest-path rust/Cargo.toml --all-targets
 
       - name: Remove temporary tooling
-        run: git rm .github/workflows/range_index_planner_temp.yml tool/apply_range_index_planner.py
+        run: git rm .github/workflows/range_index_planner_temp.yml tool/apply_range_index_planner.py tool/fix_range_planner_dead_code.py
 
       - name: Commit finalized range planner
         run: |
