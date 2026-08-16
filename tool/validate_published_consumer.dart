@@ -33,7 +33,7 @@ Future<void> main(List<String> args) async {
     workingDirectory: consumer.path,
   );
 
-  _wireConsumerDependency(consumer, stagedPackage);
+  _wireConsumerDependency(consumer);
   _wireConsumerApiReference(consumer);
 
   await _run('flutter', <String>['pub', 'get'], workingDirectory: consumer.path);
@@ -94,8 +94,9 @@ Future<void> main(List<String> args) async {
 String _readPlatform(List<String> args) {
   final argument = args.where((value) => value.startsWith('--platform=')).firstOrNull;
   if (argument == null) {
-    stderr.writeln('usage: dart run tool/validate_published_consumer.dart --platform=<platform>');
-    exitCode = 64;
+    stderr.writeln(
+      'usage: dart run tool/validate_published_consumer.dart --platform=<platform>',
+    );
     throw StateError('missing --platform');
   }
   final platform = argument.substring('--platform='.length);
@@ -136,22 +137,28 @@ Future<void> _copyPublishedPayload(
   Directory destination,
   List<_IgnoreRule> rules,
 ) async {
-  await for (final entity in root.list(recursive: true, followLinks: false)) {
-    final relative = _relativePath(root.path, entity.path);
-    if (relative.isEmpty || _isHidden(relative) || _isIgnored(relative, rules)) {
-      continue;
-    }
+  Future<void> copyDirectory(Directory source) async {
+    await for (final entity in source.list(followLinks: false)) {
+      final relative = _relativePath(root.path, entity.path);
+      if (_isHidden(relative) || _isIgnored(relative, rules)) {
+        continue;
+      }
 
-    final targetPath = '${destination.path}${Platform.pathSeparator}${_nativePath(relative)}';
-    if (entity is Directory) {
-      await Directory(targetPath).create(recursive: true);
-    } else if (entity is File) {
-      await File(targetPath).parent.create(recursive: true);
-      await entity.copy(targetPath);
-    } else if (entity is Link) {
-      throw StateError('published payload may not contain symlinks: $relative');
+      final targetPath =
+          '${destination.path}${Platform.pathSeparator}${_nativePath(relative)}';
+      if (entity is Directory) {
+        await Directory(targetPath).create(recursive: true);
+        await copyDirectory(entity);
+      } else if (entity is File) {
+        await File(targetPath).parent.create(recursive: true);
+        await entity.copy(targetPath);
+      } else if (entity is Link) {
+        throw StateError('published payload may not contain symlinks: $relative');
+      }
     }
   }
+
+  await copyDirectory(root);
 }
 
 void _validateStagedPayload(Directory stagedPackage) {
@@ -170,9 +177,12 @@ void _validateStagedPayload(Directory stagedPackage) {
     'windows/CMakeLists.txt',
   ];
   for (final path in required) {
-    final entityPath = '${stagedPackage.path}${Platform.pathSeparator}${_nativePath(path)}';
+    final entityPath =
+        '${stagedPackage.path}${Platform.pathSeparator}${_nativePath(path)}';
     if (FileSystemEntity.typeSync(entityPath) == FileSystemEntityType.notFound) {
-      throw StateError('published payload is missing required consumer input: $path');
+      throw StateError(
+        'published payload is missing required consumer input: $path',
+      );
     }
   }
 
@@ -188,7 +198,8 @@ void _validateStagedPayload(Directory stagedPackage) {
     'rust/target',
   ];
   for (final path in forbidden) {
-    final entityPath = '${stagedPackage.path}${Platform.pathSeparator}${_nativePath(path)}';
+    final entityPath =
+        '${stagedPackage.path}${Platform.pathSeparator}${_nativePath(path)}';
     if (FileSystemEntity.typeSync(entityPath) != FileSystemEntityType.notFound) {
       throw StateError('repository-only path leaked into published payload: $path');
     }
@@ -200,17 +211,18 @@ void _validateStagedPayload(Directory stagedPackage) {
   }
 }
 
-void _wireConsumerDependency(Directory consumer, Directory stagedPackage) {
+void _wireConsumerDependency(Directory consumer) {
   final pubspecFile = File('${consumer.path}/pubspec.yaml');
   final original = pubspecFile.readAsStringSync();
   const anchor = 'dependencies:\n  flutter:';
   if (!original.contains(anchor)) {
-    throw StateError('generated consumer pubspec shape changed; dependency anchor not found');
+    throw StateError(
+      'generated consumer pubspec shape changed; dependency anchor not found',
+    );
   }
-  final relativePackage = '../published-payload/dxtr_box'.replaceAll('\\', '/');
   final updated = original.replaceFirst(
     anchor,
-    'dependencies:\n  dxtr_box:\n    path: $relativePackage\n  flutter:',
+    'dependencies:\n  dxtr_box:\n    path: ../published-payload/dxtr_box\n  flutter:',
   );
   pubspecFile.writeAsStringSync(updated);
 }
