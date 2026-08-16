@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test test-fast ci-fast contract-check dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-profile-check rust-test-fast rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read benchmark-read-path preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test test-fast ci-fast contract-check dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-profile-check rust-test-fast rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read benchmark-read-path benchmark-batch-read preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -49,6 +49,7 @@ help:
 	@echo "  make benchmark-query-index Query scan/index diagnostic benchmark matrix"
 	@echo "  make diagnose-point-read  Point get/containsKey diagnostic matrix"
 	@echo "  make benchmark-read-path  0.5 decomposed Rust + Dart/FRB read-path diagnostics"
+	@echo "  make benchmark-batch-read 0.5 PR3 batch read 10/100/1000-key diagnostics"
 	@echo "  make published-consumer-linux Stage the publish payload and build an isolated Linux consumer"
 
 pub-get:
@@ -175,6 +176,9 @@ benchmark-read-path: native-build pub-get
 	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_READ_PATH_BENCHMARK=1 DXTR_BOX_READ_PATH_DART_ITERATIONS=$(READ_PATH_DART_ITERATIONS) DXTR_BOX_READ_PATH_DART_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_DART_OUTPUT="$(READ_PATH_OUTPUT_DIR)/dart-read-path.jsonl" $(FLUTTER) test test/read_path_benchmark_test.dart --reporter expanded
 	test -s "$(READ_PATH_OUTPUT_DIR)/rust-read-path.jsonl"
 	test -s "$(READ_PATH_OUTPUT_DIR)/dart-read-path.jsonl"
+
+benchmark-batch-read: native-build pub-get
+	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_BATCH_READ_BENCHMARK=1 $(FLUTTER) test test/batch_read_benchmark_test.dart --reporter expanded
 
 preflight: ci-fast
 

@@ -38,6 +38,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<NativeBatchRecord> dco_decode_list_native_batch_record(dynamic raw);
+
+  @protected
   List<NativeIndexDefinition> dco_decode_list_native_index_definition(
       dynamic raw);
 
@@ -53,6 +56,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<(String, Uint8List)> dco_decode_list_record_string_list_prim_u_8_strict(
       dynamic raw);
+
+  @protected
+  NativeBatchRecord dco_decode_native_batch_record(dynamic raw);
 
   @protected
   NativeBoxEvent dco_decode_native_box_event(dynamic raw);
@@ -105,6 +111,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<NativeBatchRecord> sse_decode_list_native_batch_record(
+      SseDeserializer deserializer);
+
+  @protected
   List<NativeIndexDefinition> sse_decode_list_native_index_definition(
       SseDeserializer deserializer);
 
@@ -120,6 +130,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<(String, Uint8List)> sse_decode_list_record_string_list_prim_u_8_strict(
+      SseDeserializer deserializer);
+
+  @protected
+  NativeBatchRecord sse_decode_native_batch_record(
       SseDeserializer deserializer);
 
   @protected
@@ -177,6 +191,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_native_batch_record(
+      List<NativeBatchRecord> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_native_index_definition(
       List<NativeIndexDefinition> self, SseSerializer serializer);
 
@@ -194,6 +212,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_record_string_list_prim_u_8_strict(
       List<(String, Uint8List)> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_native_batch_record(
+      NativeBatchRecord self, SseSerializer serializer);
 
   @protected
   void sse_encode_native_box_event(

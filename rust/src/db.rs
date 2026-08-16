@@ -651,6 +651,28 @@ pub fn get(name: &str, key: &str) -> Result<Option<Vec<u8>>, String> {
     }
 }
 
+pub fn get_all(name: &str, keys: &[String]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let (db, encryption) = database(name)?;
+    let read = db.begin_read().map_err(|e| e.to_string())?;
+    let table = read.open_table(DATA).map_err(|e| e.to_string())?;
+    let mut records = Vec::with_capacity(keys.len());
+
+    for key in keys {
+        let Some(stored) = table
+            .get(key.as_str())
+            .map_err(|e| e.to_string())?
+            .map(|guard| guard.value().to_vec())
+        else {
+            continue;
+        };
+        let plaintext = encryption.decode_value(key, &stored)?;
+        validate_message_pack(&plaintext)?;
+        records.push((key.clone(), plaintext));
+    }
+
+    Ok(records)
+}
+
 #[cfg(feature = "full")]
 pub(crate) fn query_all_keys(read: &ReadTransaction) -> Result<Vec<String>, String> {
     let table = read.open_table(DATA).map_err(|e| e.to_string())?;

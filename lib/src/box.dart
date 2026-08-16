@@ -129,6 +129,37 @@ final class Box {
     return _api.containsKey(name, key);
   }
 
+  /// Fetches multiple authoritative values using one native batch read.
+  ///
+  /// Results preserve input order for hits. Missing keys are omitted and
+  /// duplicate input keys produce duplicate result entries.
+  Future<List<MapEntry<String, dynamic>>> getAll(Iterable<String> keys) async {
+    _ensureOpen();
+    if (_api is! NativeBatchReadApi) {
+      throw UnsupportedError(
+        'The configured native engine does not support batch reads.',
+      );
+    }
+
+    final requested = keys.toList(growable: false);
+    for (final key in requested) {
+      _validateKey(key);
+    }
+    if (requested.isEmpty) {
+      return const <MapEntry<String, dynamic>>[];
+    }
+
+    final records = await (_api as NativeBatchReadApi).getAll(name, requested);
+    return records
+        .map(
+          (record) => MapEntry<String, dynamic>(
+            record.key,
+            DxtrCodec.decode(record.value),
+          ),
+        )
+        .toList(growable: false);
+  }
+
   Future<void> delete(String key) async {
     _ensureOpen();
     _validateKey(key);

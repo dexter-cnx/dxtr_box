@@ -28,6 +28,11 @@ pub struct NativeQueryRecord {
     pub value: Vec<u8>,
 }
 
+pub struct NativeBatchRecord {
+    pub key: String,
+    pub value: Vec<u8>,
+}
+
 pub struct NativeIndexDefinition {
     pub name: String,
     pub field: String,
@@ -213,6 +218,15 @@ pub fn get(box_name: String, key: String) -> Result<Option<Vec<u8>>, String> {
 #[frb(sync)]
 pub fn contains_key(box_name: String, key: String) -> Result<bool, String> {
     db::contains_key(&box_name, &key)
+}
+
+pub fn get_all(box_name: String, keys: Vec<String>) -> Result<Vec<NativeBatchRecord>, String> {
+    db::get_all(&box_name, &keys).map(|records| {
+        records
+            .into_iter()
+            .map(|(key, value)| NativeBatchRecord { key, value })
+            .collect()
+    })
 }
 
 pub fn delete(box_name: String, key: String) -> Result<(), String> {

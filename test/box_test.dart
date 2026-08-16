@@ -127,6 +127,16 @@ void main() {
     expect(await box.get('missing', defaultValue: 'fallback'), 'fallback');
   });
 
+  test('getAll preserves input order, duplicates, and omits misses', () async {
+    final box = await DxtrBox.open('batch-read');
+    await box.putAll(<String, dynamic>{'a': 1, 'b': 2, 'c': 3});
+
+    final values = await box.getAll(<String>['c', 'missing', 'a', 'c']);
+
+    expect(values.map((entry) => entry.key), <String>['c', 'a', 'c']);
+    expect(values.map((entry) => entry.value), <int>[3, 1, 3]);
+  });
+
   test('putAll and where operate over decoded values', () async {
     final box = await DxtrBox.open('scores');
     await box.putAll(<String, dynamic>{'a': 10, 'b': 20, 'c': 30});
@@ -235,7 +245,7 @@ void main() {
 
 Uint8List _bytes(List<int> values) => Uint8List.fromList(values);
 
-final class _FakeNativeDxtrApi implements NativeDxtrApi {
+final class _FakeNativeDxtrApi implements NativeDxtrApi, NativeBatchReadApi {
   final Map<String, Map<String, Uint8List>> _boxes =
       <String, Map<String, Uint8List>>{};
   final Map<String, int> _openCounts = <String, int>{};
@@ -389,6 +399,25 @@ final class _FakeNativeDxtrApi implements NativeDxtrApi {
   Future<bool> containsKey(String boxName, String key) async {
     _requireOpen(boxName);
     return _box(boxName).containsKey(key);
+  }
+
+  @override
+  Future<List<NativeBatchRecord>> getAll(
+    String boxName,
+    List<String> keys,
+  ) async {
+    _requireOpen(boxName);
+    final box = _box(boxName);
+    final records = <NativeBatchRecord>[];
+    for (final key in keys) {
+      final value = box[key];
+      if (value != null) {
+        records.add(
+          NativeBatchRecord(key: key, value: Uint8List.fromList(value)),
+        );
+      }
+    }
+    return records;
   }
 
   @override
