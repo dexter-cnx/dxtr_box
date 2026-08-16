@@ -2,7 +2,7 @@
 
 ## Current status
 
-The 0.3 query/index engine has an authoritative native scan path plus a conservative persisted-index planner path.
+The 0.3 query/index engine has an authoritative native scan path, a conservative persisted-index planner path, deterministic native sorting, and diagnostic benchmark evidence.
 
 Implemented:
 
@@ -13,15 +13,18 @@ Implemented:
 - Native scans work for plaintext and encrypted boxes.
 - Persisted named single-field scalar indexes exist in the `full` profile.
 - Index creation/backfill/drop and primary mutation maintenance are transactionally coupled to redb writes.
-- Planner eligibility now includes scalar `equal`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, `lessThanOrEqual`, and `between` predicates at the top level or underneath `AND` groups.
+- Planner eligibility includes scalar `equal`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, `lessThanOrEqual`, and `between` predicates at the top level or underneath `AND` groups.
 - Matching indexes may be combined by intersecting candidate key sets for `AND` groups.
 - Nested indexed fields such as `profile.age` are planner-eligible when the persisted definition exactly matches the dotted field path.
 - The complete original predicate is always re-evaluated against primary data before ordering/pagination.
-- One `Box.query(...)` now uses one redb `ReadTransaction` snapshot for index definitions, candidate entry ranges, fallback key enumeration, and primary-record reads.
+- One `Box.query(...)` uses one redb `ReadTransaction` snapshot for index definitions, candidate entry ranges, fallback key enumeration, primary-record reads, and sort inputs.
 - Queries without a safe usable index fall back to native scan within that same read snapshot.
-- Scan/index equivalence coverage exists for equality, nested range operators, inclusive `between`, and multi-index AND intersection.
+- Deterministic `sortBy` supports ordered clauses, explicit null/missing placement, exact numeric semantics, lexical strings, and an ascending record-key tie-break.
+- Pagination is applied after sorting when `sortBy` is present; the unsorted path retains deterministic key order and early pagination.
+- Scan/index equivalence coverage exists for equality, nested range operators, inclusive `between`, multi-index AND intersection, and sorted execution.
 - Encrypted boxes reject persisted index creation until a non-leaking representation exists; native scan remains supported.
 - Reduced profiles reject boxes that already contain persisted index definitions.
+- Diagnostic benchmarks compare scan vs indexed equality, range, AND intersection, and sorted-range workloads.
 
 ## Public profile contract
 
@@ -40,6 +43,7 @@ Do not add a fourth public query profile.
 ```text
 BoxQuery
   where: QueryFilter
+  sortBy: List<QuerySort>
   limit: int?
   offset: int
 
@@ -47,6 +51,11 @@ QueryFilter
   QueryComparison
   QueryGroup.and(...)
   QueryGroup.or(...)
+
+QuerySort
+  field: dotted path
+  direction: ascending | descending
+  nulls: first | last
 ```
 
 Supported comparison operators:
@@ -67,7 +76,7 @@ Fields may be dotted paths such as `status`, `profile.age`, and `address.country
 
 ## Persisted index contract
 
-Initial indexes are named single-field scalar indexes:
+Indexes are named single-field scalar indexes:
 
 ```dart
 IndexDefinition(
@@ -110,7 +119,7 @@ lessThanOrEqual
 between
 ```
 
-Range operators currently accept ordered numeric or string scalar bounds.
+Range operators accept ordered numeric or string scalar bounds.
 
 Planner extraction is allowed at the top level and recursively through `AND` groups. The planner deliberately does not descend into `OR` groups because narrowing by only some OR branches could remove valid results.
 
@@ -120,7 +129,7 @@ Planner extraction is allowed at the top level and recursively through `AND` gro
 
 Candidate extraction and persisted-index selection are intentionally separate internal steps. Selection matches candidate fields to persisted definitions by exact dotted field path. Missing definitions are ignored, allowing a usable subset of an `AND` group to narrow the query. Multiple usable candidates remain eligible for intersection. If duplicate persisted index definitions target the same field, selection deterministically chooses the lexicographically smallest index name. If no candidate has a matching persisted definition, execution falls back to native scan.
 
-Unit tests cover exact-field selection, partial-index AND selection, multi-index AND selection, deterministic duplicate-field choice, empty-selection fallback, OR extraction fallback, and filtering of non-indexable AND members. This is internal hardening only; no Dart or FRB API is added.
+Unit tests cover exact-field selection, partial-index AND selection, multi-index AND selection, deterministic duplicate-field choice, empty-selection fallback, OR extraction fallback, and filtering of non-indexable AND members. This is internal hardening only; no additional public API is required.
 
 ## Multi-index AND planning
 
@@ -159,13 +168,13 @@ Therefore the current range planner is correctness-first:
 
 ```text
 matching index definition
-  -> inspect entries belonging to that index
+  -> bound redb iteration to that index name
   -> decode persisted scalar component
   -> compare scalar with the same comparator used by the query engine
   -> collect matching record keys
 ```
 
-A future redb range-seek optimization requires an order-preserving scalar encoding or equivalent proven ordering contract. Raw MessagePack numeric bytes are not sufficient by themselves.
+A future scalar-level redb range-seek optimization requires an order-preserving scalar encoding or equivalent proven ordering contract plus rebuild/migration semantics. Raw MessagePack numeric bytes are not sufficient by themselves.
 
 ## Execution shape
 
@@ -179,20 +188,26 @@ Box.query(BoxQuery)
        -> optional AND intersection
        -> None when scan is required
   -> fallback key enumeration from the same snapshot when needed
-  -> sort + deduplicate candidate keys
-  -> read primary record from the same snapshot
+  -> read primary records from the same snapshot
   -> decrypt if needed
   -> evaluate the complete original predicate
-  -> deterministic record-key ordering
-  -> apply offset / limit
+  -> if sortBy is empty:
+       deterministic record-key order + efficient offset/limit
+  -> else:
+       collect all matches
+       validate/extract sort values
+       semantic multi-clause sort
+       explicit null/missing placement
+       ascending record-key tie-break
+       offset / limit after sort
   -> return matching key + payload records
 ```
 
-The index is candidate narrowing only. It is never final truth.
+The index is candidate narrowing only. It is never final truth and does not satisfy ORDER BY.
 
-## Scan/index equivalence gate
+## Scan/index/sort equivalence gate
 
-Equivalence is required for every planner-eligible operator.
+Equivalence is required for every planner-eligible operator and for sorted planner execution.
 
 Current integration coverage verifies:
 
@@ -203,28 +218,41 @@ Current integration coverage verifies:
 5. Transactional indexed-field mutation changes planner results correctly.
 6. Reopen preserves index definitions.
 7. Encrypted boxes continue to use scan and reject persisted index creation.
+8. Sorting occurs before pagination.
+9. Missing fields and null values share one explicit nullish bucket.
+10. Descending direction does not reverse explicit null placement.
+11. Large integer ordering remains exact across signed/unsigned boundaries.
+12. Mixed numeric/string sort domains and NaN are rejected.
+13. Record key ascending is the final deterministic tie-break.
+14. Scan and indexed execution return the same sorted results.
 
-Future planner rules must add equivalent scan-vs-index coverage first.
+Future planner or sorting rules must add equivalent scan-vs-index coverage first.
 
 ## Numeric correctness
 
 MessagePack integers are compared exactly across signed and unsigned domains. Large integers above the exact `f64` range must not become equal due to float rounding. Mixed integer/float comparisons use explicit boundary handling.
 
-The same comparator semantics are reused for persisted range candidate matching.
+The same comparator semantics are reused for persisted range candidate matching and numeric sorting.
 
 ## Encryption semantics
 
-Encrypted boxes may use native scan query. Persisted index creation is rejected because plaintext-derived scalar keys would leak indexed values. Plaintext-to-encrypted migration is rejected while persisted index definitions exist.
+Encrypted boxes may use native scan query and deterministic sorting after decrypting values from the same read snapshot. Persisted index creation is rejected because plaintext-derived scalar keys would leak indexed values. Plaintext-to-encrypted migration is rejected while persisted index definitions exist.
 
 ## Reduced-profile safety
 
 `minimal` and `encryption` builds do not maintain persisted indexes and therefore reject opening boxes that already contain index definitions. Explicit rejection prevents stale derived state.
 
+## Diagnostic benchmark evidence
+
+`benchmark/test/query_index_benchmark_test.dart` measures equality, range, multi-index AND, and sorted-range workloads at 100, 1,000, and 5,000 records with setup/backfill outside the timed region.
+
+The 2026-08-16 shared-runner baseline showed indexed execution with lower medians than scan in all measured cases. This supports retaining candidate narrowing but is not sufficient evidence for a storage-format migration to order-preserving scalar bytes. Shared-runner timings are diagnostic, not an SLA or release threshold.
+
 ## Binary-size and SDK policy
 
-Cross-commit binary-size regression policy remains separate from query/index work. Dart 3.13 recorded-use/native tree shaking remains deferred. The package floor remains Dart >= 3.4.0 and Flutter >= 3.22.0.
+Cross-commit binary-size regression policy remains separate from query/index work. Same-commit profile reproducibility is already a CI gate. Dart 3.13 recorded-use/native tree shaking remains deferred. The package floor remains Dart >= 3.4.0 and Flutter >= 3.22.0.
 
-## Completed 0.3 planner sequence
+## Completed 0.3 sequence
 
 1. Dart query/index AST and validation.
 2. Stable native transport representation.
@@ -241,12 +269,21 @@ Cross-commit binary-size regression policy remains separate from query/index wor
 13. Bounded index-name redb range iteration for lookup and drop cleanup.
 14. Single-redb-read-transaction query execution across planner/fallback/primary reads.
 15. Pure deterministic planner-selection step with direct selection/fallback unit coverage.
+16. Public `sortBy` contract and deterministic native execution.
+17. Sort-before-pagination, null/missing, numeric precision, error-domain, and scan/index sort-equivalence tests.
+18. Focused query/index diagnostic benchmark matrix.
+19. Point-read diagnosis kept separate from query/index storage-format decisions.
 
-## Next
+## Deferred beyond 0.3
 
-1. Define `sortBy` as a separate public API contract.
-2. Add focused query/index benchmark scenarios now that bounded iteration, deterministic planner selection, and single-snapshot execution are stable.
-3. Design an order-preserving scalar encoding only if benchmark evidence justifies scalar-level redb range seek.
+The following are intentionally not required for 0.3 closure:
+
+- encrypted persisted indexes;
+- versioned order-preserving scalar encoding and true scalar-level redb range seeks;
+- index-backed ORDER BY;
+- composite/unique/full-text/custom-collation indexes;
+- cross-commit native binary-size thresholds;
+- Dart 3.13 recorded-use/native tree shaking.
 
 ## Correctness rules
 
@@ -254,28 +291,9 @@ Cross-commit binary-size regression policy remains separate from query/index wor
 - Primary `data` is authoritative; indexes are derived state.
 - The planner may narrow candidates but may not skip full predicate re-evaluation.
 - Scan and indexed execution must be logically equivalent.
-- Pagination occurs after deterministic key ordering until an explicit sort contract supersedes it.
+- Sorting is semantic and deterministic; pagination follows sorting when `sortBy` is present.
+- Explicit null placement is independent of sort direction.
+- Record key ascending is always the final sort tie-break.
 - Reduced profiles reject unsafe persisted-index boxes.
 - Encrypted indexed fields must not leak through plaintext persisted index keys.
 - Raw MessagePack numeric byte ordering must not be used as query numeric ordering.
-
-## Bounded index-name range optimization
-
-Persisted index lookup and `dropIndex` cleanup now use a redb half-open range bounded by the encoded index-name prefix and its lexicographic successor. This skips unrelated persisted indexes at the storage iterator level while preserving the existing scalar comparison contract.
-
-The optimization does **not** use MessagePack scalar bytes as numeric range bounds. Candidate scalar components are still decoded and evaluated with the same exact comparator used by the authoritative query engine. Scan/index equivalence therefore remains unchanged.
-
-
-## Explicit query sorting
-
-`BoxQuery.sortBy` is an ordered list of `QuerySort` clauses. Each clause names an exact dotted field path, an ascending/descending direction, and explicit null placement (`first` or `last`). Sorting occurs after candidate discovery and authoritative predicate re-evaluation but before `offset`/`limit`.
-
-Ordering domains are intentionally strict: non-null values for one sort field must be all numeric or all strings. Numeric comparison uses the same exact signed/unsigned/float semantics as query predicates and does not coerce integers through `f64`. NaN and unsupported structured/bool values are rejected for ordered sorting. Missing and explicit null are one nullish category. The primary record key is the final deterministic tie-break after all user clauses compare equal.
-
-Index use does not change sort semantics: the same sorted query before and after matching index creation must return the exact same ordered records. Current persisted indexes narrow candidates only; they are not claimed to satisfy sort order and no raw MessagePack scalar byte ordering is used as an ordering shortcut.
-
-## Query/index benchmark gate
-
-The 0.3 benchmark harness covers equality, ordered range, multi-index AND intersection, and sorted range in scan/index modes at 100, 1,000, and 5,000 records. It times `Box.query(...)` only; data population and index backfill are excluded. Results are emitted as JSON diagnostics through `make benchmark-query-index`.
-
-Run `31927276095` completed all 24 combinations. Indexed execution had a lower median in every case. The evidence is recorded in `docs/QUERY_BENCHMARK_03.md`. Timing remains informational on shared runners; semantic equivalence, deterministic ordering, and primary-data re-evaluation remain the hard gates.

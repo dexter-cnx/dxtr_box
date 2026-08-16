@@ -8,11 +8,11 @@ Target: Hive-simple Flutter ergonomics backed by redb, with durable storage outs
 
 The 1.0 claim is functional replacement for practical Hive/Hive CE local-database workloads, not source-level API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` remains a release gate.
 
-## Current snapshot — 0.3 Hive CE migration implemented
+## Current snapshot — 0.3 query/index + migration milestone closed
 
-Main before this PR contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, explicit native `sortBy`, the query/index benchmark matrix, and point-read diagnosis.
+The 0.3 implementation scope is complete and closure-verified: native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, explicit native `sortBy`, query/index diagnostics, point-read diagnosis, and Hive CE migration with exclusive destination reservation.
 
-PR #23 adds the explicit Hive CE migration path while preserving the core SDK/dependency contract. The next slice after merge is the 0.3 closure audit.
+PR #24 is the closure PR. During closure, Codex review `4945584625` from merged PR #23 exposed two release-blocking migration defects: a destination creation TOCTOU race and cleanup failure when handle initialization throws. Both are fixed in #24 with regression coverage.
 
 Current capabilities include:
 
@@ -36,6 +36,7 @@ Current capabilities include:
 - Deterministic native sorting before pagination.
 - Diagnostic query/index and point-read benchmark harnesses.
 - Explicit Hive CE 2.19.3 migration validation through a separate fixture package.
+- Exclusive migration destination reservation and initialization-failure cleanup.
 
 ## Hive CE migration contract
 
@@ -61,15 +62,17 @@ Migration invariants:
 
 - source remains open and unmodified;
 - caller opens/decrypts encrypted Hive CE sources using Hive CE itself;
-- destination must not already exist;
 - String keys are preserved;
 - int keys default to `@hive-int:<decimal>`;
 - custom key/value conversion is explicit;
 - converted-key collisions fail before destination creation;
 - every converted value is `DxtrCodec`-preflighted before destination creation;
+- `{destination}.dxtr` is reserved using exclusive filesystem creation, so concurrent migrations cannot both own one destination;
+- an existing destination is rejected without mutation;
+- if `DxtrBox.open` fails during watch/metadata initialization, cleanup removes the reservation owned by that migration;
 - migrated entries are committed through one `Box.putAll` / one native redb write transaction;
-- if `putAll` throws after destination open, the newly-created destination is removed;
-- process termination between destination creation and commit can still leave an empty destination and is not claimed crash-atomic.
+- if `putAll` throws, the newly-created destination is closed and removed;
+- a hard process kill during destination creation/commit is not claimed to provide file-level crash-atomic staging/promotion.
 
 Real Hive CE 2.19.3 fixtures live under `tool/hive_ce_migration_fixture/` and are isolated from root dependency resolution. Use `make hive-ce-migration-test`.
 
@@ -170,18 +173,19 @@ Box.query(BoxQuery)
   -> decrypt if required
   -> full predicate re-evaluation
   -> optional deterministic semantic sort
-  -> record-key tie-break
+  -> explicit null/missing placement
+  -> record-key ascending tie-break
   -> offset / limit
   -> one FRB response
 ```
 
 Persisted indexes narrow `where` candidates only; they do not claim to satisfy requested ORDER BY.
 
-## Scan/index equivalence gate
+## Scan/index/sort equivalence gate
 
 `rust/tests/query_index.rs` covers equality, nested ordered ranges, inclusive `between`, multi-index AND intersection, indexed-field mutation correctness, persistence after reopen, deterministic sorting, and encrypted-box scan/index restrictions.
 
-Every future planner rule must add matching scan-vs-index equivalence coverage first.
+Every future planner/sort rule must add matching equivalence coverage first.
 
 ## Public native profile contract
 
@@ -265,9 +269,9 @@ make example-macos
 make example-ios
 ```
 
-## Current validation expectation
+## 0.3 validation contract
 
-Before a 0.3 merge, preserve:
+The closed 0.3 milestone preserves:
 
 ```text
 Minimum SDK / Flutter 3.22 + Dart 3.4
@@ -281,43 +285,44 @@ Rust Ubuntu + macOS + Windows
   full tests
 Native Linux FRB round trip
 Hive CE 2.19.3 migration fixture analyze + native tests
+Migration destination race + initialization-failure regression coverage
 Native-size same-commit reproducibility
 Platform Builds: Android/iOS/macOS/Linux/Windows
 ```
 
-## Next 0.3 sequence
+## Completed 0.3 sequence
 
-1. Completed: bounded persisted-index lookup/drop cleanup by index-name range.
-2. Completed: one-redb-read-transaction query execution for planner/fallback/primary reads.
-3. Completed: deterministic pure planner-selection step with direct selection/fallback tests.
-4. Completed: explicit public `sortBy` contract and deterministic native execution.
-5. Completed: focused query/index benchmark matrix with machine-readable diagnostic output.
-6. Completed: point-get/contains performance diagnosis; retain authoritative native semantics and avoid speculative metadata caching.
-7. Completed in PR #23: explicit Hive CE migration path with isolated Hive CE 2.19.3 fixture validation.
-8. Next: 0.3 closure audit.
-9. Keep encrypted-index design, scalar order-preserving storage encoding, cross-commit size policy, and Dart 3.13 tree shaking outside 0.3 closure unless a release-blocking defect requires otherwise.
+1. Bounded persisted-index lookup/drop cleanup by index-name range.
+2. One-redb-read-transaction query execution for planner/fallback/primary reads.
+3. Deterministic pure planner-selection step with direct selection/fallback tests.
+4. Explicit public `sortBy` contract and deterministic native execution.
+5. Focused query/index benchmark matrix with machine-readable diagnostic output.
+6. Point-get/contains performance diagnosis; authoritative native semantics retained.
+7. Explicit Hive CE migration path with isolated Hive CE 2.19.3 fixture validation.
+8. Closure review fix: exclusive migration destination reservation.
+9. Closure review fix: cleanup when destination handle initialization fails.
+10. Documentation/parity audit and explicit deferral of out-of-scope work.
 
-## 0.3 closure-audit focus
+## Deferred beyond 0.3
 
-The next PR should verify, not expand scope:
+- encrypted persisted-index design;
+- order-preserving scalar encoding / true scalar-level redb range seeks;
+- index-backed ORDER BY;
+- cross-commit native-size regression thresholds;
+- Dart 3.13 recorded-use/native tree shaking;
+- LazyBox migration and direct `.hive` parsing;
+- file-level crash-atomic Hive migration staging/promotion;
+- Web/IndexedDB and remaining 1.0 Hive functional-parity gaps.
 
-- README / handoff / walkthrough / query-index / migration docs agree with actual main;
-- exactly three public native profiles;
-- minimum SDK still passes;
-- FRB bindings are current;
-- query scan/index/sort equivalence remains green;
-- Hive CE migration fixtures remain green;
-- no temporary workflows/tools/branches remain;
-- all 0.3 roadmap bullets are either completed or explicitly deferred;
-- encrypted indexes, true scalar-level range seeks, cross-commit binary-size thresholds, and Dart 3.13 native tree shaking are explicitly deferred.
-
-## Later roadmap
+## Next roadmap
 
 ### 0.4.x
 
 - production/package hardening;
 - controlled cross-commit native-size policy;
 - broader Flutter local-database comparison.
+
+Do not reopen 0.3 query/index/migration work merely for speculative optimization. Any change to 0.3 invariants requires a demonstrated correctness or product-performance reason and matching regression/equivalence evidence.
 
 ### 0.9.x
 
