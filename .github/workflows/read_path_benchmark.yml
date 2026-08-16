@@ -39,10 +39,22 @@ jobs:
           READ_PATH_DART_ITERATIONS: '500'
           READ_PATH_SAMPLES: '5'
         run: make benchmark-read-path
+      - name: Run PR2 cross-runtime boundary diagnostic
+        env:
+          DXTR_BOX_READ_PATH_BOUNDARY_BENCHMARK: '1'
+          DXTR_BOX_READ_PATH_DART_ITERATIONS: '500'
+          DXTR_BOX_READ_PATH_DART_SAMPLES: '5'
+          DXTR_BOX_READ_PATH_BOUNDARY_OUTPUT: 'build/read-path/dart-boundary.jsonl'
+        run: |
+          LD_LIBRARY_PATH="rust/target/release:${LD_LIBRARY_PATH:-}" \
+          DYLD_LIBRARY_PATH="rust/target/release:${DYLD_LIBRARY_PATH:-}" \
+          PATH="rust/target/release:$PATH" \
+          flutter test test/read_path_boundary_benchmark_test.dart --reporter expanded
       - name: Verify read-path evidence
         run: |
           test -s build/read-path/rust-read-path.jsonl
           test -s build/read-path/dart-read-path.jsonl
+          test -s build/read-path/dart-boundary.jsonl
       - name: Toolchain metadata
         if: always()
         run: |
