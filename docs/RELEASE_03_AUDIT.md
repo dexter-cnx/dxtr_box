@@ -82,20 +82,22 @@ Codex review `4945584625` on merged PR #23 identified two migration correctness 
 1. a TOCTOU race between `boxExists()` and normal `DxtrBox.open()` allowed two migrations to target the same destination;
 2. if native open succeeded but watch/metadata initialization failed, the destination file could remain because the migration had not yet marked the handle as opened.
 
-PR #24 treats these as release-blocking defects rather than expanding 0.3 scope. The fix reserves `{destination}.dxtr` with exclusive filesystem creation before opening it, keeps that helper internal to `src`, cleans up the reservation on open-initialization failure, and adds direct race/failure regression tests.
+PR #24 treats these as release-blocking defects rather than expanding 0.3 scope. The fix reserves `{destination}.dxtr` with exclusive filesystem creation before opening it, keeps that helper internal to `src`, cleans up the reservation on open-initialization failure, and adds direct race/failure regression tests. Both original PR #23 review threads were answered with regression/CI evidence and resolved during closure.
 
 ## Documentation closure
 
-Before merging the closure PR, verify these files all describe the same current state:
+These files were re-read and aligned to the post-0.3 state:
 
-- [ ] `README.md`
-- [ ] `docs/CODE_WALKTHROUGH.md`
-- [ ] `docs/PROJECT_HANDOFF.md`
-- [ ] `docs/QUERY_INDEX_03.md`
-- [ ] `docs/QUERY_BENCHMARK_03.md`
-- [ ] `docs/POINT_READ_DIAGNOSIS_03.md`
+- [x] `README.md`
+- [x] `docs/CODE_WALKTHROUGH.md`
+- [x] `docs/PROJECT_HANDOFF.md`
+- [x] `docs/QUERY_INDEX_03.md`
+- [x] `docs/QUERY_BENCHMARK_03.md`
+- [x] `docs/POINT_READ_DIAGNOSIS_03.md`
 - [x] `docs/HIVE_CE_MIGRATION_03.md`
-- [ ] `docs/HIVE_FUNCTIONAL_PARITY.md`
+- [x] `docs/HIVE_FUNCTIONAL_PARITY.md`
+
+The parity audit was intentionally updated only for capabilities with implemented evidence. Remaining 1.0 gaps stay open.
 
 ## Explicitly deferred beyond 0.3
 
@@ -109,16 +111,17 @@ These are not blockers for 0.3 closure:
 - LazyBox migration;
 - direct `.hive` file parsing;
 - overwrite/merge migration into an existing dxtr_box destination;
+- file-level crash-atomic Hive migration staging/promotion;
 - Web/IndexedDB support and 1.0 parity closure.
 
 ## Final merge gate
 
 0.3 may be marked closed only when the closure PR itself has:
 
-- [ ] current CI green;
-- [ ] Platform Builds green;
-- [ ] no unresolved review threads or request-changes reviews;
-- [ ] no temporary workflows or helper files in the final diff;
-- [ ] no stale 0.3 roadmap entries that describe already-completed work as `Next`;
+- [ ] current CI green on the final head;
+- [ ] Platform Builds green on the final head;
+- [ ] no unresolved review threads or request-changes reviews after Ready-for-review;
+- [x] no temporary workflows or helper workflow files in the final diff;
+- [x] no stale 0.3 roadmap entries that describe already-completed work as `Next`;
 - [ ] merged branch deleted after merge;
-- [ ] repository branch list verified clean.
+- [ ] repository branch list verified clean after merge.
