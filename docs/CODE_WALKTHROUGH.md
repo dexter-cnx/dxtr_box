@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current dxtr_box architecture from the Flutter facade through FRB into Rust/redb, including encryption, native watch fan-out, declarative query execution, persisted secondary indexes, and the first index-backed query planner.
+This walkthrough describes the current dxtr_box architecture from the Flutter facade through flutter_rust_bridge into Rust/redb, including encryption, native watch fan-out, declarative query execution, persisted secondary indexes, and the current range-capable index planner.
 
 ## 1. Package boundary
 
@@ -13,13 +13,19 @@ Flutter app
   -> redb storage engine
 ```
 
-Dart owns public ergonomics, dynamic-value encoding/decoding, lightweight key metadata, lifecycle guards, and public query objects. Rust owns durable storage, transactions, encryption, native watchers, query evaluation, planner/index state, migration, and maintenance.
+Dart owns public ergonomics, dynamic-value encoding/decoding, lightweight key metadata, lifecycle guards, and public query objects. Rust owns durable storage, transactions, encryption, native watchers, query evaluation, planner/index state, migration, and maintenance. Values are not retained wholesale in the Dart heap.
 
-Values are not retained wholesale in the Dart heap.
+## 2. Public lifecycle and storage
 
-## 2. Public lifecycle
+Each box maps to one native file:
 
-`lib/dxtr_box.dart` exports the supported package API. `lib/src/dxtr_box.dart` implements package-level lifecycle:
+```text
+{base_path}/{box_name}.dxtr
+```
+
+Core redb tables are `data` and `meta`. The `full` profile additionally maintains `index_definitions` and `index_entries`.
+
+Typical Dart lifecycle:
 
 ```dart
 await DxtrBox.init();
@@ -29,21 +35,9 @@ final theme = await box.get('theme');
 await box.close();
 ```
 
-Encrypted boxes use the same open API with `encryptionKey`. Existing plaintext boxes are never silently reinterpreted as encrypted; migration uses explicit `DxtrBox.encryptBox(...)`.
+Encrypted boxes use the same open API with `encryptionKey`. Plaintext to encrypted conversion is explicit through `DxtrBox.encryptBox(...)`.
 
-## 3. `Box` state and mutation path
-
-A `Box` keeps lightweight Dart state only:
-
-```text
-name
-shared key metadata
-native watcher id/subscription
-closed/closing state
-public BoxEvent controller
-```
-
-Normal write path:
+## 3. Mutation path and index atomicity
 
 ```text
 Box.put
@@ -54,14 +48,12 @@ Box.put
   -> validate MessagePack
   -> optional encryption
   -> redb write transaction
-  -> persisted-index maintenance when definitions exist
+  -> persisted-index maintenance
   -> one commit
-  -> emit NativeBoxEvent after commit
-  -> FRB stream
-  -> all registered Box handles
+  -> NativeBoxEvent after commit
 ```
 
-`putAll`, `delete`, `deleteAll`, and `clear` preserve the same primary/index atomicity rule: primary data and derived index state commit together.
+`putAll`, `delete`, `deleteAll`, and `clear` preserve the same invariant: primary data and derived index state change in the same redb write transaction. Failed writes do not emit successful watch events.
 
 ## 4. Read path
 
@@ -78,28 +70,13 @@ Box.get
   -> DxtrCodec.decode
 ```
 
-A missing key returns the Dart `defaultValue` when supplied.
+## 5. Dynamic codec and FRB
 
-## 5. Dynamic codec
+`lib/src/codec.dart` uses MessagePack for null, bool, int, double, String, List, `Map<String, dynamic>`, `Uint8List`, and `DateTime`. Tagged map/list forms let Rust reconstruct nested dynamic objects without generated application models.
 
-`lib/src/codec.dart` uses MessagePack for the Dart/Rust wire/storage value model. Supported values include null, bool, int, double, String, List, `Map<String, dynamic>`, `Uint8List`, and `DateTime`.
+`lib/src/native_api.dart` exposes capability seams such as `NativeDxtrApi`, `NativeEncryptionMigrationApi`, `NativeQueryApi`, and `NativeIndexApi`. `FrbNativeDxtrApi` is the production adapter. Checked-in FRB 2.8 bindings are regenerated in CI and drift is rejected.
 
-Maps use tagged representations so Rust can reconstruct dynamic nested objects without application model code generation.
-
-## 6. Native capability seams and FRB
-
-`lib/src/native_api.dart` defines the main seam and optional capabilities:
-
-```text
-NativeDxtrApi
-NativeEncryptionMigrationApi
-NativeQueryApi
-NativeIndexApi
-```
-
-`FrbNativeDxtrApi` is the production adapter. Generated Dart bindings live under `lib/src/rust/`; Rust generated bindings live in `rust/src/frb_generated.rs`. CI regenerates with `flutter_rust_bridge_codegen 2.8.0` and fails on drift.
-
-## 7. Declarative query API
+## 6. Declarative query API
 
 Public query types live in `lib/src/query.dart`:
 
@@ -135,84 +112,49 @@ final rows = await box.query(
 );
 ```
 
-The public invariant is **one FRB call per query**.
+The public query invariant remains one FRB call per `Box.query(...)`. Legacy `Box.where(predicate)` remains a Dart-side linear scan.
 
-Legacy `Box.where(predicate)` remains a Dart-side linear scan and is separate from the declarative native engine.
+## 7. Query decode and predicate engine
 
-## 8. Query decode and predicate engine
-
-`rust/src/query.rs` decodes the tagged MessagePack AST once into `QuerySpec`/`Filter`.
+`rust/src/query.rs` decodes the tagged MessagePack AST once into `QuerySpec` and `Filter`.
 
 Supported semantics:
 
 - dotted nested-field lookup;
-- equal / notEqual;
-- greater/less comparisons;
+- `equal`, `notEqual`;
+- `greaterThan`, `greaterThanOrEqual`;
+- `lessThan`, `lessThanOrEqual`;
 - `between`;
-- `isNull` / `isNotNull`;
+- `isNull`, `isNotNull`;
 - AND/OR groups;
-- deterministic record-key ordering before pagination.
+- deterministic record-key ordering before offset/limit.
 
-Numeric comparison preserves MessagePack integer precision. Signed and unsigned integers remain exact rather than being converted wholesale to `f64`; mixed integer/float comparisons use explicit boundary logic.
+Numeric comparison preserves MessagePack integer precision across signed and unsigned domains instead of collapsing all integers through `f64`.
 
-## 9. First planner stage
+## 8. Planner candidate extraction
 
-The planner is deliberately conservative and internal to Rust. It does not change the Dart or FRB API.
+The planner is internal to Rust and does not change the Dart or FRB surface.
 
-`query::equality_index_candidates(...)` extracts safe scalar equality predicates only from:
+`query::index_candidates(...)` extracts index-eligible comparisons from the top level and recursively from `AND` groups. It never descends into `OR` for narrowing because intersecting a subset of OR branches could drop valid results.
 
-```text
-QueryComparison(equal)
-QueryGroup.and(...)
-```
-
-An equality predicate that exists only under `OR` is not considered safe narrowing in this slice.
-
-`rust/src/index.rs` then checks persisted definitions for an index whose field exactly matches an eligible predicate.
+Eligible operators are:
 
 ```text
-query filter
-  -> equality_index_candidates
-  -> persisted index definitions
-  -> first exact field match
-  -> encoded equality prefix
-  -> candidate record keys from index_entries
+equal
+greaterThan
+greaterThanOrEqual
+lessThan
+lessThanOrEqual
+between
 ```
 
-If no safe persisted index exists, execution falls back to primary-key scan.
+Ordered range candidates require numeric or string scalar bounds. `notEqual`, `isNull`, and `isNotNull` remain scan-backed.
 
-## 10. Index-backed query execution
+Nested dotted fields such as `profile.age` are eligible when a persisted index exists for that exact field path.
 
-`rust/src/api.rs::scan_query` remains the single FRB query entry point.
+## 9. Persisted index representation
 
-Current execution:
-
-```text
-Box.query
-  -> DxtrCodec query payload
-  -> NativeQueryApi.scanQuery
-  -> one FRB call
-  -> api::scan_query
-  -> query::decode_query once
-  -> index::candidate_keys(filter)
-       -> Some(keys) when equality planner is eligible
-       -> None when scan is required
-  -> sort + deduplicate candidate keys
-  -> db::get current primary payload for each candidate
-  -> decrypt if encrypted
-  -> query::matches_record evaluates complete original predicate
-  -> offset / limit
-  -> one FRB response with key + payload records
-  -> Dart decodes result values
-```
-
-The planner **never treats index membership as the final predicate result**. It only narrows candidates. Complete predicate evaluation remains authoritative.
-
-This is important for compound AND filters such as `status == active AND profile.age >= 18`: the status index narrows candidates, then age is still evaluated from primary data.
-
-## 11. Persisted secondary-index storage
-
-`rust/src/index.rs` uses two full-profile redb tables:
+`rust/src/index.rs` stores:
 
 ```text
 index_definitions: index name -> dotted field path
@@ -227,126 +169,122 @@ Entry key layout is length-prefixed:
 [record-key length][record-key]
 ```
 
-This avoids delimiter ambiguity.
+Primary `data` remains authoritative. Indexes are derived state only.
 
-Equality lookup reconstructs the index-name + scalar prefix, reads matching derived entries, and decodes record keys. The current correctness-first implementation filters the index table by encoded prefix; a more direct redb range implementation can follow without changing semantics.
+## 10. Equality and range candidate matching
 
-## 12. Index create/backfill and maintenance
+Equality and range planning use the same logical comparison semantics as the primary predicate engine.
+
+A critical storage detail is that persisted scalar bytes are ordinary MessagePack encodings. Their lexicographic byte order is **not** a general numeric sort order. Therefore the current implementation does not use raw MessagePack byte ordering as a redb numeric range bound.
+
+Instead, for a matching index definition:
+
+```text
+index::lookup_candidate
+  -> iterate entries belonging to that index name
+  -> decode the stored scalar component
+  -> query::index_candidate_matches(...)
+       -> exact equality/range comparison using query comparator
+  -> decode matching record keys
+```
+
+This is intentionally correctness-first. A future efficient redb range seek requires an order-preserving scalar encoding or equivalent representation whose ordering contract is proven to match query semantics.
+
+## 11. Multiple indexed predicates under AND
+
+When an `AND` group contains multiple planner-eligible predicates and matching persisted indexes exist, `index::candidate_keys(...)` builds a record-key set for each usable index.
+
+```text
+AND filter
+  -> candidate A -> index set A
+  -> candidate B -> index set B
+  -> ...
+  -> sort sets by size
+  -> intersect from smallest set
+  -> candidate record keys
+```
+
+Using the smallest set first reduces intersection work. Missing indexes do not make the query fail; they simply contribute no narrowing set and the remaining usable indexes may still narrow candidates.
+
+## 12. Index-backed query execution
+
+`rust/src/api.rs::scan_query` remains the single native query entry point.
+
+```text
+Box.query
+  -> DxtrCodec query payload
+  -> NativeQueryApi.scanQuery
+  -> one FRB call
+  -> api::scan_query
+  -> query::decode_query once
+  -> index::candidate_keys(filter)
+       -> Some(keys) for usable equality/range index candidates
+       -> None when scan is required
+  -> sort + deduplicate candidate keys
+  -> db::get current primary payload for each candidate
+  -> decrypt if required
+  -> query::matches_record evaluates complete original predicate
+  -> deterministic key ordering
+  -> offset / limit
+  -> one FRB response
+```
+
+The planner never treats persisted index membership as final truth. Every candidate is re-read from committed primary data and re-evaluated with the complete original predicate.
+
+## 13. Scan/index equivalence gate
+
+`rust/tests/query_index.rs` proves planner expansion against the authoritative scan path.
+
+Coverage now includes:
+
+```text
+same query before index creation -> scan
+same query after index creation  -> planner/index path
+compare ordered results exactly
+```
+
+The suite covers nested `profile.age` indexes for `>`, `>=`, `<`, `<=`, and inclusive `between`, plus an AND query where `status == active` and `profile.age >= 18` are both indexed and their candidate sets are intersected.
+
+Existing coverage also verifies transactional indexed-field mutation, index persistence after reopen, encrypted-box scan fallback, and rejection of encrypted persisted-index creation.
+
+Every future planner rule must add scan-vs-index equivalence coverage before it is considered complete.
+
+## 14. Index lifecycle and maintenance
 
 Dart facade:
 
 ```dart
 await box.createIndex(
-  const IndexDefinition(name: 'by-status', field: 'status'),
+  const IndexDefinition(name: 'by-age', field: 'profile.age'),
 );
 final indexes = await box.listIndexes();
-final removed = await box.dropIndex('by-status');
+final removed = await box.dropIndex('by-age');
 ```
 
-Creation path:
+Creation validates the definition, rejects encrypted boxes, backfills from current `data`, and commits the definition plus derived entries atomically.
 
-```text
-Box.createIndex
-  -> NativeIndexApi.createIndex
-  -> api::create_index
-  -> index::create
-  -> validate definition
-  -> reject encrypted box
-  -> scan current DATA
-  -> derive scalar entries
-  -> one redb write transaction:
-       definition + entries
-  -> commit
-```
+For primary mutations, old index entries are removed and new entries inserted in the same transaction as the primary change.
 
-Mutation maintenance occurs in the same primary write transaction:
+## 15. Encryption and reduced-profile safety
 
-```text
-put / putAll
-  -> remove old derived entry
-  -> add new derived entry
-  -> update DATA
-  -> one commit
+Encrypted boxes may use native scan query but may not create persisted secondary indexes yet, because plaintext-derived scalar index keys would leak protected values. Plaintext-to-encrypted migration is rejected while persisted indexes exist.
 
-delete / deleteAll
-  -> remove derived entry
-  -> remove DATA
-  -> one commit
+`minimal` and `encryption` builds reject opening boxes that already contain persisted index definitions because those profiles cannot maintain derived index state safely.
 
-clear
-  -> clear DATA
-  -> clear index entries
-  -> one commit
-```
-
-Primary `data` remains authoritative.
-
-## 13. Scan/index equivalence tests
-
-`rust/tests/query_index.rs` now verifies both execution modes using the same logical query:
-
-```text
-insert records
--> run query before index exists      # scan path
--> create index on status
--> run exact same query                # planner/index candidate path
--> compare ordered keys and payloads
--> mutate indexed status field
--> run query again
--> verify result changes correctly
-```
-
-Any future planner eligibility expansion must add equivalent scan-vs-index coverage before it is considered complete.
-
-## 14. Encryption policy
-
-Persisted index creation is rejected for encrypted boxes because plaintext-derived scalar keys would leak protected values.
-
-Encrypted boxes continue to use native scan query. Plaintext -> encrypted migration is rejected while persisted index definitions exist.
-
-Reduced `minimal`/`encryption` builds reject opening boxes that contain persisted index definitions. Those builds do not include index maintenance, so explicit rejection prevents stale derived state.
-
-## 15. Native watch/event ordering
+## 16. Native watch ordering
 
 ```text
 Dart mutation
   -> FRB
   -> redb write transaction
   -> primary + index changes
-  -> commit succeeds
-  -> Rust emits NativeBoxEvent
+  -> commit
+  -> Rust NativeBoxEvent
   -> FRB stream
   -> Box handles
 ```
 
-Failed writes do not emit successful events.
-
-## 16. Storage and encryption
-
-Each box is one file:
-
-```text
-{base_path}/{box_name}.dxtr
-```
-
-Core tables:
-
-```text
-data
-meta
-```
-
-Encryption metadata records format, encryption mode, salt, and encrypted key-check sentinel. Argon2 derives the key; ChaCha20Poly1305 encrypts values with record-key AAD.
-
-## 17. Maintenance, crash durability, and benchmarks
-
-`Box.compact()` is explicit maintenance. Plaintext -> encrypted migration is explicit and transactional.
-
-`rust/tests/process_crash.rs` verifies acknowledged commits survive abrupt process termination and reopen.
-
-The separate `benchmark/` package compares equal logical workloads with Hive CE. Shared-runner timings are informational; CI validates the harness rather than enforcing absolute performance thresholds.
-
-## 18. Native profiles
+## 17. Profiles and validation
 
 Exactly three public native profiles remain:
 
@@ -356,39 +294,32 @@ encryption  = minimal + encrypted create/open/read/write
 full        = encryption + maintenance + query/index implementation
 ```
 
-`full` is the default production build. Do not add a fourth public query profile.
+`full` is the default production build. Query/index work does not add a fourth profile.
 
-## 19. Developer entry points
-
-Preferred root Make targets:
+Important developer targets include:
 
 ```text
 make preflight
 make frb-generate
 make native-test
 make query-index-test
-make process-crash
-make benchmark-smoke
-make benchmark-full
 make rust-check
-make native-build-minimal
-make native-build-encryption
-make native-size-baseline
+make benchmark-smoke
 make native-size-stability
 make example-android
+make example-ios
+make example-macos
 make example-linux
 make example-windows
-make example-macos
-make example-ios
 ```
 
-## 20. Next architectural work
+## 18. Next architectural work
 
-The first equality planner path is now implemented. Next query/index work should remain equivalence-driven:
+The range-capable planner is now implemented with equivalence coverage. Next work should stay correctness-driven:
 
-1. measure whether intersecting multiple indexed AND candidates is worthwhile;
-2. add safe range planner eligibility only with exact scan/index equivalence tests;
-3. consider redb range-based index lookup optimization;
-4. consider one-read-transaction native scan execution;
-5. add explicit sort contract / `sortBy` separately;
-6. keep encrypted persisted-index design, cross-commit size policy, and Dart 3.13 tree shaking as separate workstreams.
+1. improve persisted-index lookup efficiency without relying on raw MessagePack numeric byte ordering;
+2. consider a one-redb-read-transaction query execution path;
+3. add planner diagnostics/selection tests if they materially improve maintainability;
+4. define explicit `sortBy` semantics as a separate public API decision;
+5. add query/index benchmark scenarios only after execution semantics remain stable;
+6. keep encrypted persisted-index design, cross-commit native-size policy, and Dart 3.13 tree shaking as separate workstreams.
