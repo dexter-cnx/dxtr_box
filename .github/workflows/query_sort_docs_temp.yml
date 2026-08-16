@@ -1,0 +1,35 @@
+name: Temporary Query Sort Docs Finalize
+
+on:
+  push:
+    branches:
+      - feature/0.3-query-sort
+
+permissions:
+  contents: write
+
+jobs:
+  finalize-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-query-sort
+          fetch-depth: 0
+      - name: Sync query sort docs
+        run: python3 tool/sync_query_sort_docs.py
+      - name: Validate documentation markers
+        run: |
+          grep -q "Deterministic native query sorting" docs/CODE_WALKTHROUGH.md
+          grep -q "Explicit query sorting" docs/QUERY_INDEX_03.md
+          grep -q "Query sort milestone completed" docs/PROJECT_HANDOFF.md
+          grep -q "Deterministic query sorting" README.md
+      - name: Remove temporary docs tooling
+        run: rm tool/sync_query_sort_docs.py .github/workflows/query_sort_docs_temp.yml
+      - name: Commit documentation sync
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'docs: document deterministic query sorting'
+          git push origin HEAD:feature/0.3-query-sort
