@@ -44,13 +44,15 @@ already-open Hive CE box
   -> convert unsupported values when required
   -> DxtrCodec preflight every converted value
   -> detect converted-key collisions
-  -> verify destination does not already exist
-  -> create/open new dxtr destination
+  -> atomically reserve {destination}.dxtr with exclusive file creation
+  -> open the reserved dxtr destination
   -> one Box.putAll call
   -> one native redb write transaction for migrated entries
   -> close destination
   -> return HiveCeMigrationResult
 ```
+
+The exclusive reservation is the create-if-absent boundary for migration. Concurrent migrations targeting the same destination cannot both proceed: exactly one obtains the filesystem reservation and the other fails without opening or mutating that destination.
 
 No source entry is deleted or modified.
 
@@ -85,15 +87,15 @@ Map<String, dynamic>
 
 Unsupported/custom values require `valueConverter(dynamic value)`. The converted value is recursively normalized and must itself become codec-supported. Returning the same unsupported instance is rejected.
 
-All converted values are encoded during preflight before destination creation. A conversion/encoding failure therefore does not create or partially populate the destination.
+All converted values are encoded during preflight before destination reservation. A conversion/encoding failure therefore does not create or partially populate the destination.
 
 ## Failure and restart behavior
 
 0.3 guarantees **no partially populated committed migration transaction**: all prepared entries are submitted in one native `putAll` write transaction after full Dart-side preflight.
 
-If `putAll` throws after the destination was successfully opened, migration closes and deletes the newly-created destination before rethrowing.
+If destination handle initialization fails after the exclusive reservation is created, the reservation owned by that migration is closed/deleted before the original error is rethrown. If `putAll` throws after the destination was successfully opened, migration closes and deletes the newly-created destination before rethrowing.
 
-A process termination between destination creation and the single `putAll` commit may still leave an empty destination file. That is not a completed migration and callers must handle it explicitly before retrying. A future stronger crash-atomic design could use native staging + promotion if product evidence justifies the extra storage machinery.
+A process termination after exclusive reservation but before the single `putAll` commit may still leave an empty destination file. That is not a completed migration and callers must handle it explicitly before retrying. A future stronger crash-atomic design could use native staging + promotion if product evidence justifies the extra storage machinery.
 
 ## Result
 
@@ -116,10 +118,12 @@ The Hive CE 2.19.3 fixture suite covers:
 - unsupported/custom value rejection without a converter;
 - custom value conversion using `BigInt` as a real unsupported Hive CE value;
 - destination-already-exists rejection without mutation;
+- concurrent migration attempts to one destination with exactly one winner;
 - encrypted Hive CE source opened with caller-supplied Hive CE credentials;
 - encrypted dxtr_box destination;
 - source preservation;
 - failed preflight leaving no destination;
+- destination reservation cleanup when handle initialization fails;
 - root package minimum Flutter/Dart compatibility independently from the Hive CE fixture package.
 
 Run:
