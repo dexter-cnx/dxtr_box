@@ -370,3 +370,25 @@ The unsorted path keeps its existing deterministic record-key order and early pa
 The 2026-08-16 baseline (`31927276095`) shows lower median query time for indexed execution in every measured 100/1,000/5,000-record case. At 5,000 records, range measured 15,125 µs scan vs 6,988 µs indexed, while sorted range measured 16,256 µs vs 7,997 µs. These numbers are diagnostic only.
 
 The result supports keeping candidate narrowing and measuring further before changing the persisted scalar representation. Current index-name-bounded iteration still decodes scalar MessagePack components; a true scalar seek remains a separate storage-format decision with ordering and migration requirements.
+
+
+## 18. Point-read diagnosis
+
+The 0.3 diagnostic harness keeps the production path unchanged and measures the existing public/native layers directly:
+
+```text
+Box.get
+  -> Dart validation / async wrapper
+  -> NativeDxtrApi.get
+  -> FRB
+  -> api::get
+  -> db::get
+  -> redb read transaction + point lookup
+  -> optional decrypt/authenticate
+  -> payload copy through FRB
+  -> DxtrCodec.decode
+```
+
+Run `31928485185` measured a plaintext native `get` hit around 225.7 µs/op and decode-only around 6.0 µs/op on a shared Ubuntu runner. This makes MessagePack decode a minor part of the observed point-read path. `containsKey` showed the same pattern: native authoritative lookup around 193.8 µs/op versus about 6.5 µs/op for local Dart metadata membership.
+
+The metadata number is deliberately not used to optimize public `containsKey`: `_metadata.keys` is a convenience snapshot synchronized within the current runtime, not durable authority across processes. `Box.get` and `Box.containsKey` therefore remain native/redb-backed. Encrypted/plaintext timing deltas were noisy and do not justify crypto or storage-format changes. If point-read throughput later becomes a demonstrated product bottleneck, benchmark batching or a safe native read-session design separately rather than introducing a whole-box Dart cache.
