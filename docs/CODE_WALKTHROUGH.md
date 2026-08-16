@@ -201,6 +201,8 @@ Real Hive CE 2.19.3 fixtures are isolated under `tool/hive_ce_migration_fixture/
 
 Checked-in Flutter Rust Bridge 2.8 bindings are regenerated in CI. Any diff under generated Dart/Rust binding output fails the binding-current job.
 
+The Dart runtime dependency remains pinned to FRB 2.8.0 because generated bindings, Dart runtime, Rust runtime, codegen, and macros must remain aligned. The package dry-run ignores pub's broad-constraint advisory warning rather than allowing pub resolution to silently select a newer incompatible FRB runtime.
+
 The package refactor does not rename the native Rust library; generated native loading remains based on `rust_lib_dxtr_box`.
 
 ## 12. Native-size policy
@@ -226,7 +228,7 @@ PH-02 adds a separate package gate:
 make package-readiness
   -> flutter pub get
   -> dart doc --output build/doc
-  -> dart pub publish --dry-run
+  -> dart pub publish --dry-run --ignore-warnings
 ```
 
 CI first verifies the self-contained layout: no `rust_builder/`, Rust/Cargokit present, five platform integration files present, and no dependency using a nested YAML `path:` source.
@@ -235,13 +237,61 @@ CI first verifies the self-contained layout: no `rust_builder/`, Rust/Cargokit p
 
 A green pub dry-run is not enough by itself. Normal CI still validates minimum SDK, Flutter tests, FRB drift, Rust host matrix, native integration, migration fixtures, and native-size policy. Platform Builds remain the final proof for Android/iOS/macOS/Linux/Windows consumption.
 
-The active preview version is `0.4.0-dev.1`. PH-02 does not publish anything automatically.
+The active preview version is `0.4.0-dev.1`. PH-02 was completed by PR #28 and does not publish anything automatically.
 
 See `docs/PACKAGE_RELEASE_04.md`.
 
-## 14. Current milestone
+## 14. PH-03 local database comparison
 
-0.3 query/index + Hive CE migration is closed. PH-01 native-size regression policy is complete in PR #27. PH-02 package/publication hardening is active in PR #28.
+Comparison-only dependencies and adapters live under `benchmark/`; they are not part of the published runtime package.
+
+The initial matrix is:
+
+```text
+dxtr_box
+Hive CE
+Sembast
+SQLite via sqflite_common_ffi
+```
+
+`benchmark/lib/local_database_adapters.dart` normalizes only the narrow operations needed by the matrix: open/close/destroy, put/putAll, get, containsKey, and deleteAll. It is test infrastructure, not a proposed public database abstraction.
+
+Correctness flow:
+
+```text
+shared payload set
+  -> open each engine
+  -> batch insert
+  -> overwrite one record
+  -> existing/missing contains checks
+  -> delete deterministic subset
+  -> close + reopen
+  -> verify deletes and retained values
+  -> compare final canonical snapshot across engines
+```
+
+A mismatch fails CI.
+
+Diagnostic flow:
+
+```text
+for each scenario
+  -> one warmup per engine
+  -> three measured samples
+  -> median/min/max
+  -> print DXTR_BOX_COMPARISON JSON
+  -> optional JSONL artifact
+```
+
+Scenarios are `sequential_put`, `batch_put`, `point_get`, `contains`, `delete_all`, and `reopen_read`. No faster/slower threshold exists. Hosted runner timing remains diagnostic evidence only.
+
+CI writes `benchmark/build/comparison/local-database-comparison.jsonl` and uploads the `local-database-comparison` artifact.
+
+See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
+
+## 15. Current milestone
+
+0.3 query/index + Hive CE migration is closed. PH-01 native-size regression policy is complete in PR #27. PH-02 self-contained package/publication hardening is complete in PR #28. PH-03 broader local-database comparison is active in PR #29.
 
 Preserve these invariants:
 
@@ -255,6 +305,7 @@ Preserve these invariants:
 - encrypted-index leakage prevention;
 - migration reservation ownership and ordinary-open exclusion;
 - self-contained publishable package topology;
+- comparison timing remains diagnostic rather than a release threshold;
 - hardening must not trade away correctness, durability, encryption, or compatibility.
 
 Important targets:
@@ -267,6 +318,8 @@ make native-test
 make hive-ce-migration-test
 make query-index-test
 make query-sort-test
+make benchmark-comparison-correctness
+make benchmark-comparison
 make benchmark-query-index
 make diagnose-point-read
 make rust-check
@@ -279,5 +332,3 @@ make example-macos
 make example-linux
 make example-windows
 ```
-
-Next after PH-02: broader Flutter local-database comparison.
