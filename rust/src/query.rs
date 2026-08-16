@@ -477,8 +477,14 @@ mod tests {
         let higher = Value::from(9_007_199_254_740_993_i64);
 
         assert!(!values_equal(&lower, &higher));
-        assert_eq!(compare(&higher, Some(&lower)).unwrap(), Some(Ordering::Greater));
-        assert_eq!(compare(&lower, Some(&higher)).unwrap(), Some(Ordering::Less));
+        assert_eq!(
+            compare(&higher, Some(&lower)).unwrap(),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare(&lower, Some(&higher)).unwrap(),
+            Some(Ordering::Less)
+        );
     }
 
     #[test]
@@ -488,7 +494,10 @@ mod tests {
         let max_signed = Value::from(i64::MAX);
         let above_signed = Value::from((i64::MAX as u64) + 1);
 
-        assert_eq!(compare(&negative, Some(&zero)).unwrap(), Some(Ordering::Less));
+        assert_eq!(
+            compare(&negative, Some(&zero)).unwrap(),
+            Some(Ordering::Less)
+        );
         assert_eq!(
             compare(&above_signed, Some(&max_signed)).unwrap(),
             Some(Ordering::Greater)
