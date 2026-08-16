@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.4 Production Hardening active**. PH-01 native-size policy and PH-02 package hardening are complete; PH-03 broader local-database comparison is active. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are not stable yet.
+> Status: **0.4 Production Hardening active**. PH-01 native-size policy, PH-02 package hardening, and PH-03 broader local-database comparison are complete; PH-04 staged published-payload consumer validation is active. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are not stable yet.
 
 ## Compatibility
 
@@ -190,17 +190,33 @@ The budget is a regression alarm, not routine allowance. See `docs/NATIVE_SIZE_P
 
 ## Package / pub.dev readiness
 
-The package is validated as a self-contained archive before any future publication:
+The package is validated before any future publication:
 
 ```bash
 make package-readiness
 ```
 
-This runs public API documentation generation and `dart pub publish --dry-run`. CI also checks that consumer-required Rust/Cargokit/platform files are present and that no publishable dependency uses a path source. The five-platform example build workflow remains mandatory because a successful pub dry-run does not prove native builds.
+This runs public API documentation generation and `dart pub publish --dry-run --ignore-warnings`. CI also checks that consumer-required Rust/Cargokit/platform files are present and that no publishable dependency uses a path source.
 
 `flutter_rust_bridge` remains pinned to 2.8.0 because checked-in generated bindings and native runtime must remain on the same FRB version; the pub dry-run therefore ignores the advisory broad-dependency warning while still failing validation errors.
 
-No package is automatically published by CI or by PH-02. See `docs/PACKAGE_RELEASE_04.md`.
+No package is automatically published by CI or by the hardening milestones. See `docs/PACKAGE_RELEASE_04.md`.
+
+## Published-payload consumer validation
+
+PH-04 adds a stronger native package-boundary proof. `tool/validate_published_consumer.dart` stages the files allowed by the current `.pubignore`, verifies required native inputs and absence of repository-only leakage, creates a fresh Flutter app, adds only the staged `dxtr_box` copy as a dependency, imports the public API, and builds the app.
+
+Platform Builds now run this staged-consumer flow for all five native targets rather than building directly against the repository checkout:
+
+```bash
+make published-consumer-android
+make published-consumer-ios
+make published-consumer-macos
+make published-consumer-linux
+make published-consumer-windows
+```
+
+The staging helper fails closed if `.pubignore` starts using wildcard/negation rules it does not model exactly. `dart pub publish --dry-run` remains the source of truth for pub validation and intended file listing; the staged consumer gate is complementary build evidence. See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
 
 ## Local database comparison
 
@@ -241,9 +257,10 @@ make rust-check
 make native-size-baseline
 make native-size-stability
 make native-size-regression
+make published-consumer-linux
 ```
 
-Platform examples:
+The original example build targets remain available for local documentation/example validation:
 
 ```bash
 make example-android
@@ -258,6 +275,7 @@ make example-windows
 - `docs/PROJECT_HANDOFF.md` — current milestone state and sequencing.
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture.
 - `docs/PACKAGE_RELEASE_04.md` — self-contained plugin and publication-readiness contract.
+- `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md` — PH-04 staged publication-boundary consumer build contract.
 - `docs/NATIVE_SIZE_POLICY_04.md` — controlled native-size regression policy.
 - `docs/LOCAL_DATABASE_COMPARISON_04.md` — PH-03 correctness + diagnostic comparison contract.
 - `docs/QUERY_INDEX_03.md` — query/index semantics and planner constraints.
