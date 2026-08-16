@@ -51,3 +51,5 @@ for filename, edits in replacements.items():
             raise SystemExit(f'missing expected text in {filename}: {old[:80]!r}')
         text = text.replace(old, new, 1)
     path.write_text(text)
+
+# Trigger the already-present temporary workflow after its creation commit.
