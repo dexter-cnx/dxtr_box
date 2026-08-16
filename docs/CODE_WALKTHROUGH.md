@@ -63,6 +63,14 @@ Each box maps to:
 
 Core redb tables are `data` and `meta`. The full profile also maintains `index_definitions` and `index_entries`.
 
+The durable metadata identity currently includes:
+
+```text
+meta[format_version] = dxtr_box/1
+```
+
+This is now guarded by PH-05 so a format change requires an explicit compatibility/migration decision rather than a silent constant edit.
+
 ```dart
 await DxtrBox.init();
 final box = await DxtrBox.open('settings');
@@ -254,21 +262,7 @@ SQLite via sqflite_common_ffi
 
 `benchmark/lib/local_database_adapters.dart` normalizes only the narrow operations needed by the matrix: open/close/destroy, put/putAll, get, containsKey, and deleteAll. It is test infrastructure, not a proposed public database abstraction.
 
-Correctness flow:
-
-```text
-shared payload set
-  -> open each engine
-  -> batch insert
-  -> overwrite one record
-  -> existing/missing contains checks
-  -> delete deterministic subset
-  -> close + reopen
-  -> verify deletes and retained values
-  -> compare final canonical snapshot across engines
-```
-
-A mismatch fails CI. Diagnostic timing has no faster/slower threshold. Hosted runner timing remains evidence only.
+Correctness converges each engine on the same post-reopen snapshot and fails CI on mismatch. Diagnostic timing has no faster/slower threshold. Hosted runner timing remains evidence only.
 
 PH-03 was completed by PR #29. See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
 
@@ -293,29 +287,44 @@ repository root
   -> native platform build
 ```
 
-The recursive copy deliberately prunes ignored directories before descending, so `.git/`, `build/`, test fixtures, and the staging output itself are never traversed into the payload.
+The recursive copy deliberately prunes ignored directories before descending. The validator accepts only explicit `.pubignore` file/directory rules; unsupported wildcard/negation syntax fails closed.
 
-The validator currently accepts only explicit `.pubignore` file/directory rules. Wildcards and negation fail closed because approximating richer gitignore semantics could create false publication evidence.
-
-Platform Builds now execute the staged-consumer flow on:
-
-```text
-Android  flutter build apk --debug
-iOS      flutter build ios --debug --no-codesign
-macOS    flutter build macos --debug
-Linux    flutter build linux --debug
-Windows  flutter build windows --debug
-```
-
-The checked-in example remains useful documentation and has local Make targets, but staged consumers are the stronger release-facing platform proof.
-
-Important distinction: the staging helper is complementary evidence, not a byte-for-byte reimplementation of pub packaging. `dart pub publish --dry-run` remains authoritative for pub validation and intended file listing.
+Platform Builds execute staged-consumer builds on Android, iOS, macOS, Linux, and Windows. PH-04 completed in PR #30.
 
 See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
 
-## 16. Current milestone
+## 16. PH-05 public API + storage compatibility guard
 
-0.3 query/index + Hive CE migration is closed. PH-01 native-size regression policy, PH-02 self-contained package hardening, and PH-03 local-database comparison are complete. PH-04 published-payload consumer validation is active.
+PH-05 protects compatibility boundaries without hashing implementation files.
+
+```text
+flutter test
+  -> test/public_api_contract_test.dart
+     -> compile public constructors/enums/typedefs
+     -> compile typed Box method/getter tear-offs
+     -> verifyPublicStorageContract()
+        -> exact package entrypoint export set
+        -> rust/src/db.rs format_version key
+        -> rust/src/db.rs dxtr_box/1 marker
+```
+
+This catches removals/incompatible signature changes through normal Dart compilation and catches accidental entrypoint or durable-format drift explicitly. Internal implementation refactors remain free to change when the consumer contract is preserved.
+
+The standalone check is:
+
+```bash
+dart run tool/verify_public_storage_contract.dart
+```
+
+A deliberate 0.x public API change may update the contract in the same reviewed PR. A storage-format change has a higher bar: old-format readability or an explicit migration path, failure/rollback semantics, encryption/index compatibility, previous-format fixtures, and release documentation must accompany the change.
+
+PH-05 is a review/change-control gate; it does not claim that the pre-1.0 API or storage format is already stable.
+
+See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
+
+## 17. Current milestone
+
+0.3 query/index + Hive CE migration is closed. PH-01 native-size policy, PH-02 package hardening, PH-03 comparison evidence, and PH-04 staged published-consumer validation are complete. PH-05 public API + durable storage contract guard is active.
 
 Preserve these invariants:
 
@@ -332,6 +341,8 @@ Preserve these invariants:
 - self-contained publishable package topology;
 - comparison timing remains diagnostic rather than a release threshold;
 - publication-boundary validation fails closed rather than approximating unsupported ignore rules;
+- `format_version = dxtr_box/1` cannot change without explicit compatibility/migration evidence;
+- public API drift must be an intentional reviewed contract change;
 - hardening must not trade away correctness, durability, encryption, or compatibility.
 
 Important targets:
@@ -339,6 +350,7 @@ Important targets:
 ```text
 make preflight
 make package-readiness
+dart run tool/verify_public_storage_contract.dart
 make frb-generate
 make native-test
 make hive-ce-migration-test
