@@ -98,7 +98,7 @@ benchmark-full: native-build
 	cd benchmark && $(FLUTTER) pub get && DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_FULL_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
 
 benchmark-query-index: native-build
-	cd benchmark && $(FLUTTER) pub get && DXTR_BOX_QUERY_BENCHMARK=1 DXTR_BOX_QUERY_BENCHMARK_SIZES=$(QUERY_BENCHMARK_SIZES) DXTR_BOX_QUERY_BENCHMARK_SAMPLES=$(QUERY_BENCHMARK_SAMPLES) $(FLUTTER) test test/query_index_benchmark_test.dart --reporter expanded
+	cd benchmark && $(FLUTTER) pub get && LD_LIBRARY_PATH="../rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="../rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="../rust/target/release:$$PATH" DXTR_BOX_QUERY_BENCHMARK=1 DXTR_BOX_QUERY_BENCHMARK_SIZES=$(QUERY_BENCHMARK_SIZES) DXTR_BOX_QUERY_BENCHMARK_SAMPLES=$(QUERY_BENCHMARK_SAMPLES) $(FLUTTER) test test/query_index_benchmark_test.dart --reporter expanded
 
 preflight: format-check analyze test rust-check
 
