@@ -1,7 +1,15 @@
+import 'dart:async';
+
 import 'package:dxtr_box/dxtr_box.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../tool/verify_public_storage_contract.dart' as contract;
+
 void main() {
+  test('public export and durable storage identities remain explicit', () {
+    contract.verifyPublicStorageContract();
+  });
+
   test('public value and query types remain constructible', () {
     const event = BoxEvent(
       boxName: 'settings',
@@ -84,7 +92,6 @@ void assertBoxSurface(Box box) {
   ) where = box.where;
   final Stream<BoxEvent> Function({String? key}) watch = box.watch;
 
-  // Keep all typed tear-offs live so analyzer checks every declaration above.
   Object.hash(
     name,
     length,
