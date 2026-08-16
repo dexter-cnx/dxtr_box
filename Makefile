@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -39,16 +39,17 @@ help:
 	@echo "  make benchmark-query-index Query scan/index diagnostic benchmark matrix"
 	@echo "  make diagnose-point-read  Point get/containsKey diagnostic matrix"
 	@echo "  make rust-check           rustfmt + clippy + all native feature profiles"
+	@echo "  make published-consumer-linux Stage the publish payload and build an isolated Linux consumer"
 
 pub-get:
 	$(FLUTTER) pub get
 
 format:
-	dart format lib test example benchmark/lib benchmark/test tool/hive_ce_migration_fixture/test
+	dart format lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
 format-check:
-	dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/hive_ce_migration_fixture/test
+	dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
 analyze: pub-get
@@ -142,6 +143,21 @@ diagnose-point-read: native-build pub-get
 	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_POINT_READ_DIAGNOSIS=1 DXTR_BOX_POINT_READ_ITERATIONS=$(POINT_READ_ITERATIONS) DXTR_BOX_POINT_READ_SAMPLES=$(POINT_READ_SAMPLES) $(FLUTTER) test test/point_read_diagnosis_test.dart --reporter expanded
 
 preflight: format-check analyze test rust-check
+
+published-consumer-android:
+	dart run tool/validate_published_consumer.dart --platform=android
+
+published-consumer-linux:
+	dart run tool/validate_published_consumer.dart --platform=linux
+
+published-consumer-windows:
+	dart run tool/validate_published_consumer.dart --platform=windows
+
+published-consumer-macos:
+	dart run tool/validate_published_consumer.dart --platform=macos
+
+published-consumer-ios:
+	dart run tool/validate_published_consumer.dart --platform=ios
 
 example-android:
 	cd example && $(FLUTTER) pub get && $(FLUTTER) build apk --debug

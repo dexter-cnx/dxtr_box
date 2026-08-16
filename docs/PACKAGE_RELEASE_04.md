@@ -1,6 +1,6 @@
 # dxtr_box 0.4 package / publication hardening
 
-Status: active PH-02 milestone.
+Status: PH-02 complete; PH-04 published-payload consumer validation active.
 
 ## Goal
 
@@ -56,7 +56,7 @@ Cargokit builds the native library `rust_lib_dxtr_box`; the Flutter plugin targe
 ```text
 flutter pub get
 dart doc --output build/doc
-dart pub publish --dry-run
+dart pub publish --dry-run --ignore-warnings
 ```
 
 CI additionally asserts:
@@ -65,7 +65,7 @@ CI additionally asserts:
 - the Rust crate, Cargokit, and all five platform build integrations are present at package root;
 - root publishable dependencies do not use `path:` sources.
 
-The normal CI and Platform Builds remain mandatory because a successful pub dry-run validates package metadata/archive shape but does not prove every native platform build.
+The exact FRB 2.8.0 dependency remains intentional because runtime, codegen, macros, and checked-in bindings must stay version-aligned. Pub's broad-constraint advisory is therefore ignored during the dry-run while validation errors remain fatal.
 
 ## Published payload
 
@@ -80,13 +80,35 @@ The normal CI and Platform Builds remain mandatory because a successful pub dry-
 
 Do not exclude a native build input merely to reduce archive size. Package correctness has priority over cosmetic package-size reduction.
 
+## PH-04 staged-consumer validation
+
+A successful pub dry-run validates metadata and reports intended files, but it does not compile an application from the publication boundary. PH-04 closes that evidence gap with:
+
+```text
+tool/validate_published_consumer.dart
+  -> stage payload using current .pubignore policy
+  -> reject missing required native inputs
+  -> reject repository-only leakage
+  -> reject root path-source dependencies
+  -> create fresh Flutter consumer
+  -> depend only on staged dxtr_box copy
+  -> import public Dart API
+  -> build target platform
+```
+
+`Platform Builds` executes this isolated staged-consumer flow for Android, iOS, macOS, Linux, and Windows. This replaces source-checkout example builds as the release-facing platform proof. The checked-in example remains documentation and retains local Make targets.
+
+The staging helper deliberately supports the current explicit file/directory `.pubignore` rules only. Wildcards or negation fail closed until exact support is added, avoiding silent divergence from pub ignore semantics.
+
+See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
+
 ## Version policy
 
-The active package preview is `0.4.0-dev.1`. Publication is a separate explicit release action; merging PH-02 does not upload anything to pub.dev.
+The active package preview is `0.4.0-dev.1`. Publication is a separate explicit release action; hardening PRs do not upload anything to pub.dev.
 
 Before an actual release:
 
-1. require CI and Platform Builds green on the release candidate;
+1. require CI and all staged Platform Builds green on the release candidate;
 2. inspect `dart pub publish --dry-run` output for the exact archive file list and warnings;
 3. confirm CHANGELOG and README match the release version;
 4. verify API docs generate without errors;
@@ -95,7 +117,7 @@ Before an actual release:
 
 ## Non-goals
 
-PH-02 does not change:
+PH-02/PH-04 do not change:
 
 - storage format;
 - FRB API shape;

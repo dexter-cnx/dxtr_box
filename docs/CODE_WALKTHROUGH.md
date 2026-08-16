@@ -235,8 +235,6 @@ CI first verifies the self-contained layout: no `rust_builder/`, Rust/Cargokit p
 
 `.pubignore` removes repository-only CI, benchmark, tests, and development tooling from the publication archive while preserving all native build inputs required by consumers.
 
-A green pub dry-run is not enough by itself. Normal CI still validates minimum SDK, Flutter tests, FRB drift, Rust host matrix, native integration, migration fixtures, and native-size policy. Platform Builds remain the final proof for Android/iOS/macOS/Linux/Windows consumption.
-
 The active preview version is `0.4.0-dev.1`. PH-02 was completed by PR #28 and does not publish anything automatically.
 
 See `docs/PACKAGE_RELEASE_04.md`.
@@ -245,7 +243,7 @@ See `docs/PACKAGE_RELEASE_04.md`.
 
 Comparison-only dependencies and adapters live under `benchmark/`; they are not part of the published runtime package.
 
-The initial matrix is:
+The matrix is:
 
 ```text
 dxtr_box
@@ -270,32 +268,59 @@ shared payload set
   -> compare final canonical snapshot across engines
 ```
 
-A mismatch fails CI.
+A mismatch fails CI. Diagnostic timing has no faster/slower threshold. Hosted runner timing remains evidence only.
 
-Diagnostic flow:
+PH-03 was completed by PR #29. See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
+
+## 15. PH-04 staged published consumer flow
+
+`dart pub publish --dry-run` validates package metadata and lists intended files, but it does not prove a consumer app can native-build using only the publication boundary. PH-04 adds that proof.
+
+`tool/validate_published_consumer.dart`:
 
 ```text
-for each scenario
-  -> one warmup per engine
-  -> three measured samples
-  -> median/min/max
-  -> print DXTR_BOX_COMPARISON JSON
-  -> optional JSONL artifact
+repository root
+  -> read explicit .pubignore rules
+  -> recursively copy while pruning ignored/hidden directories
+  -> build/published-payload/dxtr_box
+  -> verify required Dart/Rust/Cargokit/platform inputs
+  -> reject repository-only leakage
+  -> reject root path-source dependencies
+  -> flutter create fresh consumer
+  -> dependency: ../published-payload/dxtr_box
+  -> import package:dxtr_box/dxtr_box.dart
+  -> flutter pub get
+  -> native platform build
 ```
 
-Scenarios are `sequential_put`, `batch_put`, `point_get`, `contains`, `delete_all`, and `reopen_read`. No faster/slower threshold exists. Hosted runner timing remains diagnostic evidence only.
+The recursive copy deliberately prunes ignored directories before descending, so `.git/`, `build/`, test fixtures, and the staging output itself are never traversed into the payload.
 
-CI writes `benchmark/build/comparison/local-database-comparison.jsonl` and uploads the `local-database-comparison` artifact.
+The validator currently accepts only explicit `.pubignore` file/directory rules. Wildcards and negation fail closed because approximating richer gitignore semantics could create false publication evidence.
 
-See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
+Platform Builds now execute the staged-consumer flow on:
 
-## 15. Current milestone
+```text
+Android  flutter build apk --debug
+iOS      flutter build ios --debug --no-codesign
+macOS    flutter build macos --debug
+Linux    flutter build linux --debug
+Windows  flutter build windows --debug
+```
 
-0.3 query/index + Hive CE migration is closed. PH-01 native-size regression policy is complete in PR #27. PH-02 self-contained package/publication hardening is complete in PR #28. PH-03 broader local-database comparison is active in PR #29.
+The checked-in example remains useful documentation and has local Make targets, but staged consumers are the stronger release-facing platform proof.
+
+Important distinction: the staging helper is complementary evidence, not a byte-for-byte reimplementation of pub packaging. `dart pub publish --dry-run` remains authoritative for pub validation and intended file listing.
+
+See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
+
+## 16. Current milestone
+
+0.3 query/index + Hive CE migration is closed. PH-01 native-size regression policy, PH-02 self-contained package hardening, and PH-03 local-database comparison are complete. PH-04 published-payload consumer validation is active.
 
 Preserve these invariants:
 
 - Dart >=3.4 / Flutter >=3.22;
+- exact FRB 2.8 alignment;
 - stable native identity `rust_lib_dxtr_box`;
 - exactly three Rust capability profiles;
 - primary data authoritative over indexes;
@@ -306,6 +331,7 @@ Preserve these invariants:
 - migration reservation ownership and ordinary-open exclusion;
 - self-contained publishable package topology;
 - comparison timing remains diagnostic rather than a release threshold;
+- publication-boundary validation fails closed rather than approximating unsupported ignore rules;
 - hardening must not trade away correctness, durability, encryption, or compatibility.
 
 Important targets:
@@ -326,9 +352,9 @@ make rust-check
 make native-size-baseline
 make native-size-stability
 make native-size-regression
-make example-android
-make example-ios
-make example-macos
-make example-linux
-make example-windows
+make published-consumer-android
+make published-consumer-ios
+make published-consumer-macos
+make published-consumer-linux
+make published-consumer-windows
 ```
