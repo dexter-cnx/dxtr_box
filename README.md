@@ -206,7 +206,7 @@ No package is automatically published by CI or by the hardening milestones. See 
 
 PH-04 adds a stronger native package-boundary proof. `tool/validate_published_consumer.dart` stages the files allowed by the current `.pubignore`, verifies required native inputs and absence of repository-only leakage, creates a fresh Flutter app, adds only the staged `dxtr_box` copy as a dependency, imports the public API, and builds the app.
 
-Platform Builds run this staged-consumer flow for all five native targets:
+The main CI DAG validates all five native targets before merge when consumer/native behavior can be affected:
 
 ```bash
 make published-consumer-android
@@ -216,7 +216,7 @@ make published-consumer-linux
 make published-consumer-windows
 ```
 
-The staging helper fails closed if `.pubignore` starts using wildcard/negation rules it does not model exactly. `dart pub publish --dry-run` remains the source of truth for pub validation and intended file listing; the staged consumer gate is complementary build evidence. PH-04 completed in PR #30. See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
+During Draft iteration, platform-specific changes can validate only the affected platform after Fast CI; common native/plugin/package changes still fan out as required. The staging helper fails closed if `.pubignore` starts using wildcard/negation rules it does not model exactly. `dart pub publish --dry-run` remains the source of truth for pub validation and intended file listing. See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md` and `docs/CI_STRATEGY.md`.
 
 ## Public API + durable storage contract guard
 
@@ -249,6 +249,28 @@ make benchmark-comparison
 The correctness gate verifies a shared CRUD/overwrite/delete/close/reopen workload converges to the same persisted snapshot across all four engines. The diagnostic matrix measures sequential put, batch put, point get, contains, delete-all, and reopen-read, but **does not assert that any engine must be faster than another**.
 
 CI uploads machine-readable JSONL evidence as the `local-database-comparison` artifact. Hosted-runner timing is diagnostic only and must not be presented as stable product performance. See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
+
+## Fast local preflight
+
+Run this before pushing:
+
+```bash
+make preflight
+```
+
+It mirrors the mandatory Fast CI gate and catches common cheap failures first: Dart formatting, rustfmt, Flutter analyze, Rust clippy, compile checks for `minimal`/`encryption`/`full`, cheap Dart/Rust tests, and public/storage contract guards.
+
+Individual targets are also available:
+
+```bash
+make format-check
+make rust-check
+make analyze
+make test-fast
+make ci-fast
+```
+
+Expensive migration/native-size/FRB/publication/platform/benchmark validation remains change-aware during Draft iteration and becomes mandatory full validation when a pull request is Ready for review. See `docs/CI_STRATEGY.md`.
 
 ## Developer workflow
 
@@ -291,7 +313,8 @@ make example-windows
 ## Engineering docs
 
 - `docs/PROJECT_HANDOFF.md` — current milestone state and sequencing.
-- `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture.
+- `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture and CI DAG.
+- `docs/CI_STRATEGY.md` — Fast CI, affected CI, full merge validation, and trigger policy.
 - `docs/PACKAGE_RELEASE_04.md` — self-contained plugin and publication-readiness contract.
 - `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md` — PH-04 staged publication-boundary consumer build contract.
 - `docs/PUBLIC_API_STORAGE_CONTRACT_04.md` — PH-05 public API and durable-format change-control contract.

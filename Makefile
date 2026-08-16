@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test contract-check dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read benchmark-read-path preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test test-fast ci-fast contract-check dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-profile-check rust-test-fast rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -10,10 +10,6 @@ QUERY_BENCHMARK_SIZES ?= 100,1000,5000
 QUERY_BENCHMARK_SAMPLES ?= 3
 POINT_READ_ITERATIONS ?= 500
 POINT_READ_SAMPLES ?= 5
-READ_PATH_RUST_ITERATIONS ?= 2000
-READ_PATH_DART_ITERATIONS ?= 1000
-READ_PATH_SAMPLES ?= 7
-READ_PATH_OUTPUT_DIR ?= $(abspath build/read-path)
 SIZE_STABILITY_RUNS ?= 3
 SIZE_BASE_REF ?= HEAD^
 SIZE_MAX_GROWTH_BYTES ?= 65536
@@ -21,7 +17,12 @@ SIZE_MAX_GROWTH_PERCENT ?= 3
 
 help:
 	@echo "dxtr_box developer targets"
-	@echo "  make preflight            Format + analyze + tests + contract + Rust checks"
+	@echo "  make format-check         Resolve Dart packages, then check Dart format + rustfmt"
+	@echo "  make rust-check           rustfmt + clippy + compile all three profiles + cheap Rust unit tests"
+	@echo "  make analyze              Flutter analyze"
+	@echo "  make test-fast            Cheap Dart unit/contract tests"
+	@echo "  make ci-fast              Same cheap gate used by Fast CI"
+	@echo "  make preflight            Local pre-push alias for ci-fast"
 	@echo "  make contract-check       Verify public exports and durable storage format identity"
 	@echo "  make package-readiness    Dart docs + pub.dev dry-run on the publishable root plugin"
 	@echo "  make dart-doc             Generate public API documentation"
@@ -43,18 +44,16 @@ help:
 	@echo "  make benchmark-comparison Four-engine diagnostic timing matrix"
 	@echo "  make benchmark-query-index Query scan/index diagnostic benchmark matrix"
 	@echo "  make diagnose-point-read  Point get/containsKey diagnostic matrix"
-	@echo "  make benchmark-read-path  0.5 decomposed Rust + Dart/FRB read-path diagnostics"
-	@echo "  make rust-check           rustfmt + clippy + all native feature profiles"
 	@echo "  make published-consumer-linux Stage the publish payload and build an isolated Linux consumer"
 
 pub-get:
 	$(FLUTTER) pub get
 
-format:
+format: pub-get
 	dart format lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
-format-check:
+format-check: pub-get
 	dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
@@ -63,6 +62,9 @@ analyze: pub-get
 
 test: pub-get
 	$(FLUTTER) test
+
+test-fast: pub-get
+	$(FLUTTER) test test/codec_test.dart test/box_test.dart test/public_api_contract_test.dart --reporter expanded
 
 contract-check:
 	dart run tool/verify_public_storage_contract.dart
@@ -82,6 +84,14 @@ rust-fmt:
 rust-clippy:
 	$(CARGO) clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
 
+rust-profile-check:
+	$(CARGO) check --manifest-path rust/Cargo.toml --all-targets --no-default-features
+	$(CARGO) check --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
+	$(CARGO) check --manifest-path rust/Cargo.toml --all-targets
+
+rust-test-fast:
+	$(CARGO) test --manifest-path rust/Cargo.toml --lib --no-default-features
+
 rust-test:
 	$(CARGO) test --manifest-path rust/Cargo.toml --all-targets
 
@@ -90,7 +100,9 @@ rust-test-profiles:
 	$(CARGO) test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
 	$(CARGO) test --manifest-path rust/Cargo.toml --all-targets
 
-rust-check: rust-fmt rust-clippy rust-test-profiles
+rust-check: rust-fmt rust-clippy rust-profile-check rust-test-fast
+
+ci-fast: format-check analyze test-fast contract-check rust-check
 
 frb-generate: pub-get
 	$(FRB) generate
@@ -151,15 +163,7 @@ benchmark-query-index: native-build
 diagnose-point-read: native-build pub-get
 	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_POINT_READ_DIAGNOSIS=1 DXTR_BOX_POINT_READ_ITERATIONS=$(POINT_READ_ITERATIONS) DXTR_BOX_POINT_READ_SAMPLES=$(POINT_READ_SAMPLES) $(FLUTTER) test test/point_read_diagnosis_test.dart --reporter expanded
 
-benchmark-read-path: native-build pub-get
-	rm -rf "$(READ_PATH_OUTPUT_DIR)"
-	mkdir -p "$(READ_PATH_OUTPUT_DIR)"
-	DXTR_BOX_READ_PATH_RUST_ITERATIONS=$(READ_PATH_RUST_ITERATIONS) DXTR_BOX_READ_PATH_RUST_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_RUST_OUTPUT="$(READ_PATH_OUTPUT_DIR)/rust-read-path.jsonl" $(CARGO) test --manifest-path rust/Cargo.toml --release read_path_bench::read_path_microbench -- --ignored --nocapture
-	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_READ_PATH_BENCHMARK=1 DXTR_BOX_READ_PATH_DART_ITERATIONS=$(READ_PATH_DART_ITERATIONS) DXTR_BOX_READ_PATH_DART_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_DART_OUTPUT="$(READ_PATH_OUTPUT_DIR)/dart-read-path.jsonl" $(FLUTTER) test test/read_path_benchmark_test.dart --reporter expanded
-	test -s "$(READ_PATH_OUTPUT_DIR)/rust-read-path.jsonl"
-	test -s "$(READ_PATH_OUTPUT_DIR)/dart-read-path.jsonl"
-
-preflight: format-check analyze test contract-check rust-check
+preflight: ci-fast
 
 published-consumer-android:
 	dart run tool/validate_published_consumer.dart --platform=android
