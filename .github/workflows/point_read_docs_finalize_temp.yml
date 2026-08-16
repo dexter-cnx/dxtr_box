@@ -1,0 +1,59 @@
+name: Temporary Point Read Docs Finalize
+
+on:
+  push:
+    branches:
+      - feature/0.3-point-read-diagnosis
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-point-read-diagnosis
+          fetch-depth: 0
+      - name: Sync diagnosis documentation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          handoff = Path('docs/PROJECT_HANDOFF.md')
+          text = handoff.read_text()
+          text = text.replace(
+              '## Current snapshot — 0.3 query/index benchmark complete\n\nMain contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, and explicit native `sortBy`. The active 0.3 slice adds a reproducible diagnostic query/index benchmark matrix on `feature/0.3-query-benchmarks`; it does not change public query semantics or the FRB shape.',
+              '## Current snapshot — 0.3 point-read diagnosis complete\n\nMain contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, explicit native `sortBy`, and the reproducible query/index benchmark matrix. The active 0.3 point-read diagnosis measured `get` / `containsKey` without changing public query semantics, storage format, FRB shape, or profile count.'
+          )
+          text = text.replace(
+              '6. Next: point-get/contains performance diagnosis independently.\n7. Then: Hive CE migration design/implementation and 0.3 closure audit.\n8. Keep encrypted-index design, cross-commit size policy, and Dart 3.13 tree shaking separate.',
+              '6. Completed: point-get/contains performance diagnosis; retain authoritative native semantics and avoid speculative metadata caching.\n7. Next: Hive CE migration design/implementation.\n8. Then: 0.3 closure audit.\n9. Keep encrypted-index design, cross-commit size policy, and Dart 3.13 tree shaking separate.'
+          )
+          marker = '### Point-read diagnosis evidence'
+          if marker not in text:
+              text += '''\n\n### Point-read diagnosis evidence\n\n`make diagnose-point-read` measures public/native point reads, MessagePack decode-only work, authoritative `containsKey`, Dart metadata membership, and plaintext/encrypted reads. Run `31928485185` completed successfully on Flutter 3.47 / Dart 3.13. Median plaintext native `get` hit was about 225.7 µs/op while decode-only was about 6.0 µs/op; native `containsKey` hit was about 193.8 µs/op while Dart metadata membership was about 6.5 µs/op. Shared-runner timings are diagnostic only.\n\nThe evidence points to repeated native point-call cost (FRB boundary plus redb read-transaction/lookup/value-copy work) rather than MessagePack decode. The faster metadata membership result does not justify replacing authoritative `containsKey`, because `_metadata.keys` is not durable cross-process truth. Plaintext/encrypted differences were within noisy shared-runner variation, so crypto/storage-format changes are not justified. The 0.3 decision is no speculative point-read optimization; proceed to Hive CE migration.\n'''
+          handoff.write_text(text)
+
+          walkthrough = Path('docs/CODE_WALKTHROUGH.md')
+          text = walkthrough.read_text()
+          marker = '## 18. Point-read diagnosis'
+          if marker not in text:
+              text += '''\n\n## 18. Point-read diagnosis\n\nThe 0.3 diagnostic harness keeps the production path unchanged and measures the existing public/native layers directly:\n\n```text\nBox.get\n  -> Dart validation / async wrapper\n  -> NativeDxtrApi.get\n  -> FRB\n  -> api::get\n  -> db::get\n  -> redb read transaction + point lookup\n  -> optional decrypt/authenticate\n  -> payload copy through FRB\n  -> DxtrCodec.decode\n```\n\nRun `31928485185` measured a plaintext native `get` hit around 225.7 µs/op and decode-only around 6.0 µs/op on a shared Ubuntu runner. This makes MessagePack decode a minor part of the observed point-read path. `containsKey` showed the same pattern: native authoritative lookup around 193.8 µs/op versus about 6.5 µs/op for local Dart metadata membership.\n\nThe metadata number is deliberately not used to optimize public `containsKey`: `_metadata.keys` is a convenience snapshot synchronized within the current runtime, not durable authority across processes. `Box.get` and `Box.containsKey` therefore remain native/redb-backed. Encrypted/plaintext timing deltas were noisy and do not justify crypto or storage-format changes. If point-read throughput later becomes a demonstrated product bottleneck, benchmark batching or a safe native read-session design separately rather than introducing a whole-box Dart cache.\n'''
+          walkthrough.write_text(text)
+          PY
+      - name: Validate documentation markers
+        run: |
+          grep -q 'Point-read diagnosis evidence' docs/PROJECT_HANDOFF.md
+          grep -q '## 18. Point-read diagnosis' docs/CODE_WALKTHROUGH.md
+          grep -q 'Diagnosis complete' docs/POINT_READ_DIAGNOSIS_03.md
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/point_read_docs_finalize_temp.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'docs: finalize point-read diagnosis'
+          git push origin HEAD:feature/0.3-point-read-diagnosis
