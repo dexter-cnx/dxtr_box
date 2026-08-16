@@ -6,6 +6,7 @@ use rmpv::Value;
 #[derive(Debug, Clone)]
 pub struct QuerySpec {
     pub filter: Filter,
+    pub sort_by: Vec<SortSpec>,
     pub limit: Option<usize>,
     pub offset: usize,
 }
@@ -43,8 +44,27 @@ pub enum CompareOp {
     IsNotNull,
 }
 
+#[derive(Debug, Clone)]
+pub struct SortSpec {
+    pub field: String,
+    pub direction: SortDirection,
+    pub nulls: NullOrder,
+}
+
 #[derive(Debug, Clone, Copy)]
-enum NumericValue {
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum NullOrder {
+    First,
+    Last,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum NumericValue {
     Signed(i64),
     Unsigned(u64),
     Float(f64),
@@ -54,6 +74,16 @@ pub fn decode_query(bytes: &[u8]) -> Result<QuerySpec, String> {
     let value = decode_dxtr(bytes)?;
     let map = as_map(&value)?;
     let filter = parse_filter(required(map, "where")?)?;
+    let sort_by = match optional(map, "sortBy") {
+        None => Vec::new(),
+        Some(value) if value.is_nil() => Vec::new(),
+        Some(value) => value
+            .as_array()
+            .ok_or_else(|| "query sortBy must be a list".to_string())?
+            .iter()
+            .map(parse_sort)
+            .collect::<Result<Vec<_>, _>>()?,
+    };
     let limit = optional(map, "limit").map(as_usize).transpose()?.flatten();
     let offset = optional(map, "offset")
         .map(as_usize)
@@ -65,6 +95,7 @@ pub fn decode_query(bytes: &[u8]) -> Result<QuerySpec, String> {
     }
     Ok(QuerySpec {
         filter,
+        sort_by,
         limit,
         offset,
     })
@@ -73,6 +104,121 @@ pub fn decode_query(bytes: &[u8]) -> Result<QuerySpec, String> {
 pub fn matches_record(payload: &[u8], filter: &Filter) -> Result<bool, String> {
     let record = decode_dxtr(payload)?;
     matches_filter(&record, filter)
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum SortValue {
+    Nullish,
+    Numeric(NumericValue),
+    Text(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SortKind {
+    Numeric,
+    Text,
+}
+
+pub(crate) fn sort_values(payload: &[u8], sorts: &[SortSpec]) -> Result<Vec<SortValue>, String> {
+    let record = decode_dxtr(payload)?;
+    sorts
+        .iter()
+        .map(|sort| {
+            let Some(value) = lookup_field(&record, &sort.field) else {
+                return Ok(SortValue::Nullish);
+            };
+            if value.is_nil() {
+                return Ok(SortValue::Nullish);
+            }
+            if let Some(number) = as_numeric(value) {
+                if matches!(number, NumericValue::Float(value) if value.is_nan()) {
+                    return Err(format!(
+                        "sort field '{}' contains NaN, which is not orderable",
+                        sort.field
+                    ));
+                }
+                return Ok(SortValue::Numeric(number));
+            }
+            if let Some(value) = value.as_str() {
+                return Ok(SortValue::Text(value.to_string()));
+            }
+            Err(format!(
+                "sort field '{}' contains a non-null value unsupported by ordered sorting",
+                sort.field
+            ))
+        })
+        .collect()
+}
+
+pub(crate) fn validate_sort_rows(
+    rows: &[Vec<SortValue>],
+    sorts: &[SortSpec],
+) -> Result<(), String> {
+    for (column, sort) in sorts.iter().enumerate() {
+        let mut kind = None;
+        for row in rows {
+            let current = match row.get(column) {
+                Some(SortValue::Nullish) => continue,
+                Some(SortValue::Numeric(_)) => SortKind::Numeric,
+                Some(SortValue::Text(_)) => SortKind::Text,
+                None => return Err("sort row width does not match sort specification".to_string()),
+            };
+            match kind {
+                None => kind = Some(current),
+                Some(existing) if existing == current => {}
+                Some(_) => {
+                    return Err(format!(
+                        "sort field '{}' mixes incompatible non-null ordered types",
+                        sort.field
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn compare_sort_rows(
+    left: &[SortValue],
+    left_key: &str,
+    right: &[SortValue],
+    right_key: &str,
+    sorts: &[SortSpec],
+) -> Ordering {
+    for (column, sort) in sorts.iter().enumerate() {
+        let Some(left_value) = left.get(column) else {
+            continue;
+        };
+        let Some(right_value) = right.get(column) else {
+            continue;
+        };
+        let ordering = match (left_value, right_value) {
+            (SortValue::Nullish, SortValue::Nullish) => Ordering::Equal,
+            (SortValue::Nullish, _) => match sort.nulls {
+                NullOrder::First => Ordering::Less,
+                NullOrder::Last => Ordering::Greater,
+            },
+            (_, SortValue::Nullish) => match sort.nulls {
+                NullOrder::First => Ordering::Greater,
+                NullOrder::Last => Ordering::Less,
+            },
+            (SortValue::Numeric(left), SortValue::Numeric(right)) => {
+                compare_numeric(*left, *right).unwrap_or(Ordering::Equal)
+            }
+            (SortValue::Text(left), SortValue::Text(right)) => left.cmp(right),
+            _ => Ordering::Equal,
+        };
+        if ordering != Ordering::Equal {
+            return match (left_value, right_value) {
+                (SortValue::Nullish, _) | (_, SortValue::Nullish) => ordering,
+                _ => match sort.direction {
+                    SortDirection::Ascending => ordering,
+                    SortDirection::Descending => ordering.reverse(),
+                },
+            };
+        }
+    }
+    left_key.cmp(right_key)
 }
 
 pub fn validate_index_definition(name: &str, field: &str) -> Result<(), String> {
@@ -213,6 +359,27 @@ pub fn index_candidate_matches(scalar: &[u8], candidate: &IndexCandidate) -> Res
 fn decode_messagepack_value(bytes: &[u8], context: &str) -> Result<Value, String> {
     let mut cursor = Cursor::new(bytes);
     rmpv::decode::read_value(&mut cursor).map_err(|e| format!("{context}: {e}"))
+}
+
+fn parse_sort(value: &Value) -> Result<SortSpec, String> {
+    let map = as_map(value)?;
+    let field = as_str(required(map, "field")?)?.to_string();
+    validate_field(&field)?;
+    let direction = match as_str(required(map, "direction")?)? {
+        "ascending" => SortDirection::Ascending,
+        "descending" => SortDirection::Descending,
+        other => return Err(format!("unsupported sort direction '{other}'")),
+    };
+    let nulls = match as_str(required(map, "nulls")?)? {
+        "first" => NullOrder::First,
+        "last" => NullOrder::Last,
+        other => return Err(format!("unsupported sort null placement '{other}'")),
+    };
+    Ok(SortSpec {
+        field,
+        direction,
+        nulls,
+    })
 }
 
 fn parse_filter(value: &Value) -> Result<Filter, String> {

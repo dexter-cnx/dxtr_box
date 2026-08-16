@@ -343,3 +343,9 @@ Important constraint: this is **not** scalar-order range seeking. MessagePack sc
 
 The planner now also has a pure deterministic selection step with direct tests for exact-field matching, partial/multi-index AND behavior, duplicate-field choice, and fallback. Next candidates are an explicit sort contract and focused benchmark scenarios; scalar-level redb seeks still require a separately proven order-preserving scalar encoding.
 
+
+### Query sort milestone completed
+
+The public declarative query contract now includes deterministic multi-clause `sortBy` via `QuerySort`, `QuerySortDirection`, and `QueryNullOrder` without changing the FRB function signature. Native execution sorts authoritative predicate matches inside the same redb read snapshot before pagination, supports nested dotted fields, exact numeric ordering, lexical strings, explicit null placement, and record-key tie-breaking. Mixed incompatible non-null sort domains, unsupported ordered values, and NaN are rejected explicitly. Focused Dart/Rust coverage is available through `make query-sort-test`, including scan/index ordered-result equivalence.
+
+Next query/index work should benchmark the now-stable planner/sort execution before introducing a new persisted scalar representation. Scalar-level redb range seeks or index-order sort satisfaction remain deferred until an order-preserving encoding contract and migration/rebuild semantics are justified.

@@ -309,6 +309,184 @@ fn encrypted_box_uses_scan_but_rejects_persisted_index_creation() {
     close_box("secure".to_string()).unwrap();
 }
 
+fn sorted_query_payload(
+    filter: (&str, &str, Value),
+    sort: (&str, &str, &str),
+    limit: Option<u64>,
+    offset: u64,
+) -> Vec<u8> {
+    let (filter_field, filter_operator, filter_value) = filter;
+    let (sort_field, direction, nulls) = sort;
+    let comparison = dxtr_map(vec![
+        ("type", Value::from("comparison")),
+        ("field", Value::from(filter_field)),
+        ("operator", Value::from(filter_operator)),
+        ("value", filter_value),
+        ("upperValue", Value::Nil),
+    ]);
+    let sort = dxtr_map(vec![
+        ("field", Value::from(sort_field)),
+        ("direction", Value::from(direction)),
+        ("nulls", Value::from(nulls)),
+    ]);
+    encode(&dxtr_map(vec![
+        ("where", comparison),
+        ("sortBy", Value::Array(vec![sort])),
+        ("limit", limit.map(Value::from).unwrap_or(Value::Nil)),
+        ("offset", Value::from(offset)),
+    ]))
+}
+
+#[test]
+fn explicit_sort_orders_before_pagination_and_matches_index_execution() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    init_db(dir.path().to_string_lossy().to_string()).unwrap();
+    open_box("sorted".to_string(), None).unwrap();
+
+    for (key, age) in [("a", 22), ("b", 40), ("c", 22), ("d", 17)] {
+        put("sorted".to_string(), key.to_string(), person("active", age)).unwrap();
+    }
+
+    let payload = sorted_query_payload(
+        ("profile.age", "greaterThanOrEqual", Value::from(0_i64)),
+        ("profile.age", "descending", "last"),
+        Some(2),
+        1,
+    );
+    let scan = result_keys("sorted", payload.clone());
+    assert_eq!(scan, vec!["a", "c"]);
+
+    create_index(
+        "sorted".to_string(),
+        "by-age".to_string(),
+        "profile.age".to_string(),
+    )
+    .unwrap();
+    let indexed = result_keys("sorted", payload);
+    assert_eq!(indexed, scan);
+
+    close_box("sorted".to_string()).unwrap();
+}
+
+#[test]
+fn explicit_sort_treats_missing_and_null_as_one_nullish_category() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    init_db(dir.path().to_string_lossy().to_string()).unwrap();
+    open_box("null_sort".to_string(), None).unwrap();
+
+    put(
+        "null_sort".to_string(),
+        "a".to_string(),
+        person("active", 22),
+    )
+    .unwrap();
+    put(
+        "null_sort".to_string(),
+        "b".to_string(),
+        encode(&dxtr_map(vec![
+            ("status", Value::from("active")),
+            ("profile", dxtr_map(vec![("age", Value::Nil)])),
+        ])),
+    )
+    .unwrap();
+    put(
+        "null_sort".to_string(),
+        "c".to_string(),
+        encode(&dxtr_map(vec![("status", Value::from("active"))])),
+    )
+    .unwrap();
+    put(
+        "null_sort".to_string(),
+        "d".to_string(),
+        person("active", 40),
+    )
+    .unwrap();
+
+    let payload = sorted_query_payload(
+        ("status", "isNotNull", Value::Nil),
+        ("profile.age", "ascending", "first"),
+        None,
+        0,
+    );
+    assert_eq!(result_keys("null_sort", payload), vec!["b", "c", "a", "d"]);
+
+    close_box("null_sort".to_string()).unwrap();
+}
+
+#[test]
+fn explicit_sort_rejects_mixed_non_null_ordered_types() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    init_db(dir.path().to_string_lossy().to_string()).unwrap();
+    open_box("mixed_sort".to_string(), None).unwrap();
+
+    put(
+        "mixed_sort".to_string(),
+        "a".to_string(),
+        person("active", 22),
+    )
+    .unwrap();
+    put(
+        "mixed_sort".to_string(),
+        "b".to_string(),
+        encode(&dxtr_map(vec![
+            ("status", Value::from("active")),
+            ("profile", dxtr_map(vec![("age", Value::from("22"))])),
+        ])),
+    )
+    .unwrap();
+
+    let payload = sorted_query_payload(
+        ("status", "isNotNull", Value::Nil),
+        ("profile.age", "ascending", "last"),
+        None,
+        0,
+    );
+    let error = match scan_query("mixed_sort".to_string(), payload) {
+        Ok(_) => panic!("mixed ordered sort types must be rejected"),
+        Err(error) => error,
+    };
+    assert!(error.contains("mixes incompatible"));
+
+    close_box("mixed_sort".to_string()).unwrap();
+}
+
+#[test]
+fn explicit_sort_preserves_large_integer_precision() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    init_db(dir.path().to_string_lossy().to_string()).unwrap();
+    open_box("precise_sort".to_string(), None).unwrap();
+
+    put(
+        "precise_sort".to_string(),
+        "higher".to_string(),
+        person("active", 9_007_199_254_740_993_i64),
+    )
+    .unwrap();
+    put(
+        "precise_sort".to_string(),
+        "lower".to_string(),
+        person("active", 9_007_199_254_740_992_i64),
+    )
+    .unwrap();
+
+    let payload = sorted_query_payload(
+        ("status", "isNotNull", Value::Nil),
+        ("profile.age", "ascending", "last"),
+        None,
+        0,
+    );
+    assert_eq!(
+        result_keys("precise_sort", payload),
+        vec!["lower", "higher"]
+    );
+
+    close_box("precise_sort".to_string()).unwrap();
+}
+
 #[test]
 fn query_payload_is_valid_messagepack() {
     let _guard = TEST_LOCK.lock().unwrap();

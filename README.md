@@ -269,3 +269,30 @@ MIT
 
 Index-backed queries bound redb iteration to the selected persisted index name rather than scanning unrelated `index_entries`. Range predicates still decode stored MessagePack scalars and use the query comparator; raw MessagePack byte order is not used as numeric order.
 
+
+### Deterministic query sorting
+
+Declarative queries can apply ordered sort clauses before pagination:
+
+```dart
+final rows = await box.query(
+  BoxQuery(
+    where: QueryComparison(
+      field: 'status',
+      operator: QueryOperator.equal,
+      value: 'active',
+    ),
+    sortBy: [
+      QuerySort(
+        field: 'profile.age',
+        direction: QuerySortDirection.descending,
+        nulls: QueryNullOrder.last,
+      ),
+      QuerySort(field: 'name'),
+    ],
+    limit: 20,
+  ),
+);
+```
+
+Sort fields support nested dotted paths. Ordered non-null values must be consistently numeric or consistently strings per field; null/missing placement is explicit, and record key ordering is the deterministic final tie-break. Persisted indexes currently narrow query candidates but do not claim to satisfy requested sort order.

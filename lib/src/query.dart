@@ -44,6 +44,24 @@ enum QueryOperator {
 
 enum QueryLogicalOperator { and, or }
 
+enum QuerySortDirection { ascending, descending }
+
+enum QueryNullOrder { first, last }
+
+final class QuerySort {
+  QuerySort({
+    required this.field,
+    this.direction = QuerySortDirection.ascending,
+    this.nulls = QueryNullOrder.last,
+  }) {
+    _validateField(field);
+  }
+
+  final String field;
+  final QuerySortDirection direction;
+  final QueryNullOrder nulls;
+}
+
 final class QueryGroup extends QueryFilter {
   QueryGroup.and(Iterable<QueryFilter> filters)
       : this._(QueryLogicalOperator.and, filters);
@@ -69,9 +87,10 @@ final class QueryGroup extends QueryFilter {
 final class BoxQuery {
   BoxQuery({
     required this.where,
+    Iterable<QuerySort> sortBy = const <QuerySort>[],
     this.limit,
     this.offset = 0,
-  }) {
+  }) : sortBy = List<QuerySort>.unmodifiable(sortBy) {
     if (limit != null && limit! <= 0) {
       throw ArgumentError.value(limit, 'limit', 'limit must be greater than 0');
     }
@@ -81,6 +100,7 @@ final class BoxQuery {
   }
 
   final QueryFilter where;
+  final List<QuerySort> sortBy;
   final int? limit;
   final int offset;
 }
@@ -90,10 +110,7 @@ final class BoxQuery {
 /// 0.3 starts with one scalar value index per field path. Composite, text,
 /// multi-value, and unique-index semantics remain separate future extensions.
 final class IndexDefinition {
-  IndexDefinition({
-    required this.name,
-    required this.field,
-  }) {
+  IndexDefinition({required this.name, required this.field}) {
     _validateIdentifier(name, 'name');
     _validateField(field);
   }

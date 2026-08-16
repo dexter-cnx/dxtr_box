@@ -24,10 +24,40 @@ void main() {
       expect(query.limit, 25);
       expect(query.offset, 50);
       expect((query.where as QueryGroup).filters, hasLength(2));
-      expect(
-        (query.where as QueryGroup).operator,
-        QueryLogicalOperator.and,
+      expect((query.where as QueryGroup).operator, QueryLogicalOperator.and);
+    });
+
+    test('supports ordered sort clauses with explicit null placement', () {
+      final query = BoxQuery(
+        where: QueryComparison(
+          field: 'status',
+          operator: QueryOperator.equal,
+          value: 'active',
+        ),
+        sortBy: <QuerySort>[
+          QuerySort(
+            field: 'profile.age',
+            direction: QuerySortDirection.descending,
+            nulls: QueryNullOrder.first,
+          ),
+          QuerySort(field: 'name'),
+        ],
       );
+
+      expect(query.sortBy, hasLength(2));
+      expect(query.sortBy.first.field, 'profile.age');
+      expect(query.sortBy.first.direction, QuerySortDirection.descending);
+      expect(query.sortBy.first.nulls, QueryNullOrder.first);
+      expect(query.sortBy.last.direction, QuerySortDirection.ascending);
+      expect(query.sortBy.last.nulls, QueryNullOrder.last);
+      expect(
+        () => query.sortBy.add(QuerySort(field: 'id')),
+        throwsUnsupportedError,
+      );
+    });
+
+    test('rejects malformed sort field paths', () {
+      expect(() => QuerySort(field: 'profile..age'), throwsArgumentError);
     });
 
     test('between requires an upper value', () {
@@ -87,10 +117,7 @@ void main() {
 
   group('index contract', () {
     test('supports a named scalar field index', () {
-      final index = IndexDefinition(
-        name: 'by-status',
-        field: 'status',
-      );
+      final index = IndexDefinition(name: 'by-status', field: 'status');
 
       expect(index.name, 'by-status');
       expect(index.field, 'status');
