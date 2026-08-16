@@ -12,7 +12,7 @@ The 1.0 claim is functional replacement for practical Hive/Hive CE local-databas
 
 The 0.3 implementation scope is complete and closure-verified: native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, explicit native `sortBy`, query/index diagnostics, point-read diagnosis, and Hive CE migration with exclusive destination reservation.
 
-PR #24 is the closure PR. During closure, Codex review `4945584625` from merged PR #23 exposed two release-blocking migration defects: a destination creation TOCTOU race and cleanup failure when handle initialization throws. Both are fixed in #24 with regression coverage.
+PR #24 performed the 0.3 closure audit and fixed two release-blocking migration defects exposed by Codex review `4945584625` on merged PR #23: a destination creation TOCTOU race and cleanup failure when handle initialization throws. A follow-up Codex review on #24 identified one remaining correctness race: ordinary `DxtrBox.open(destinationName)` could still join a migration-owned destination. PR #25 is the **final 0.3 correctness closure**: it adds a distinct migration reservation marker, blocks ordinary opens while migration owns the destination, re-checks the reservation after native open to close the in-flight race, releases the marker on success/failure cleanup, and adds direct regression coverage. Final `main` CI after #25 is green.
 
 Current capabilities include:
 
@@ -36,7 +36,8 @@ Current capabilities include:
 - Deterministic native sorting before pagination.
 - Diagnostic query/index and point-read benchmark harnesses.
 - Explicit Hive CE 2.19.3 migration validation through a separate fixture package.
-- Exclusive migration destination reservation and initialization-failure cleanup.
+- Migration reservation marker that excludes ordinary opens for the lifetime of a migration-owned destination.
+- Initialization/write failure cleanup for migration-owned destination + reservation state.
 
 ## Hive CE migration contract
 
@@ -67,12 +68,16 @@ Migration invariants:
 - custom key/value conversion is explicit;
 - converted-key collisions fail before destination creation;
 - every converted value is `DxtrCodec`-preflighted before destination creation;
-- `{destination}.dxtr` is reserved using exclusive filesystem creation, so concurrent migrations cannot both own one destination;
+- migration first acquires an exclusive reservation marker, then re-checks destination absence and atomically creates `{destination}.dxtr`;
+- concurrent migrations targeting the same destination cannot both proceed;
+- ordinary `DxtrBox.open(destinationName)` rejects an active migration reservation before native open and re-checks immediately after native open so an in-flight ordinary open cannot escape with a usable handle;
+- an ordinary open that creates the destination before migration wins causes migration creation to fail rather than merge/overwrite;
 - an existing destination is rejected without mutation;
-- if `DxtrBox.open` fails during watch/metadata initialization, cleanup removes the reservation owned by that migration;
+- if destination handle initialization fails, cleanup removes the migration-owned destination and releases its reservation marker;
 - migrated entries are committed through one `Box.putAll` / one native redb write transaction;
-- if `putAll` throws, the newly-created destination is closed and removed;
-- a hard process kill during destination creation/commit is not claimed to provide file-level crash-atomic staging/promotion.
+- if `putAll` throws, the newly-created destination is closed/deleted and the reservation marker is released;
+- successful migration closes the destination and releases the reservation marker;
+- a hard process kill while migration owns the reservation may leave an incomplete destination and reservation marker; 0.3 does not claim file-level crash-atomic staging/promotion or automatic stale-reservation recovery.
 
 Real Hive CE 2.19.3 fixtures live under `tool/hive_ce_migration_fixture/` and are isolated from root dependency resolution. Use `make hive-ce-migration-test`.
 
@@ -285,7 +290,9 @@ Rust Ubuntu + macOS + Windows
   full tests
 Native Linux FRB round trip
 Hive CE 2.19.3 migration fixture analyze + native tests
-Migration destination race + initialization-failure regression coverage
+Migration-vs-migration destination exclusion
+Ordinary-open-vs-migration destination exclusion
+Migration destination + reservation cleanup regressions
 Native-size same-commit reproducibility
 Platform Builds: Android/iOS/macOS/Linux/Windows
 ```
@@ -299,9 +306,10 @@ Platform Builds: Android/iOS/macOS/Linux/Windows
 5. Focused query/index benchmark matrix with machine-readable diagnostic output.
 6. Point-get/contains performance diagnosis; authoritative native semantics retained.
 7. Explicit Hive CE migration path with isolated Hive CE 2.19.3 fixture validation.
-8. Closure review fix: exclusive migration destination reservation.
+8. Closure review fix: exclusive migration destination creation and concurrent-migration exclusion.
 9. Closure review fix: cleanup when destination handle initialization fails.
-10. Documentation/parity audit and explicit deferral of out-of-scope work.
+10. Final correctness fix: reservation marker excludes ordinary opens before/after native open and is released on completion/cleanup (PR #25).
+11. Documentation/parity audit and explicit deferral of out-of-scope work.
 
 ## Deferred beyond 0.3
 
@@ -311,7 +319,7 @@ Platform Builds: Android/iOS/macOS/Linux/Windows
 - cross-commit native-size regression thresholds;
 - Dart 3.13 recorded-use/native tree shaking;
 - LazyBox migration and direct `.hive` parsing;
-- file-level crash-atomic Hive migration staging/promotion;
+- file-level crash-atomic Hive migration staging/promotion and stale-reservation recovery;
 - Web/IndexedDB and remaining 1.0 Hive functional-parity gaps.
 
 ## Next roadmap
