@@ -276,17 +276,18 @@ pub fn scan_query(
     #[cfg(feature = "full")]
     {
         let spec = query::decode_query(&query_payload)?;
-        let (database, _) = db::database(&box_name)?;
-        let mut keys = match index::candidate_keys(&database, &spec.filter)? {
+        let (database, encryption) = db::database(&box_name)?;
+        let read = database.begin_read().map_err(|e| e.to_string())?;
+        let mut keys = match index::candidate_keys(&read, &spec.filter)? {
             Some(keys) => keys,
-            None => db::all_keys(&box_name)?,
+            None => db::query_all_keys(&read)?,
         };
         keys.sort();
         keys.dedup();
         let mut matched = 0usize;
         let mut results = Vec::new();
         for key in keys {
-            let Some(value) = db::get(&box_name, &key)? else {
+            let Some(value) = db::query_get(&read, &encryption, &key)? else {
                 continue;
             };
             if !query::matches_record(&value, &spec.filter)? {

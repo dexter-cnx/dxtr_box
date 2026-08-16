@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use redb::{Database, ReadableTable, TableDefinition, WriteTransaction};
+use redb::{Database, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction};
 
 use crate::{db::EncryptionState, query};
 
@@ -86,8 +86,22 @@ pub(crate) fn list(db: &Database) -> Result<Vec<(String, String)>, String> {
         .collect()
 }
 
+fn list_in_read(read: &ReadTransaction) -> Result<Vec<(String, String)>, String> {
+    let table = read
+        .open_table(INDEX_DEFINITIONS)
+        .map_err(|e| e.to_string())?;
+    table
+        .iter()
+        .map_err(|e| e.to_string())?
+        .map(|item| {
+            item.map(|(name, field)| (name.value().to_string(), field.value().to_string()))
+                .map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
 pub(crate) fn candidate_keys(
-    db: &Database,
+    read: &ReadTransaction,
     filter: &query::Filter,
 ) -> Result<Option<Vec<String>>, String> {
     let candidates = query::index_candidates(filter)?;
@@ -95,7 +109,7 @@ pub(crate) fn candidate_keys(
         return Ok(None);
     }
 
-    let definitions = list(db)?;
+    let definitions = list_in_read(read)?;
     let mut candidate_sets = Vec::<HashSet<String>>::new();
     for candidate in candidates {
         let Some((index_name, _)) = definitions
@@ -105,7 +119,7 @@ pub(crate) fn candidate_keys(
             continue;
         };
         candidate_sets.push(
-            lookup_candidate(db, index_name, &candidate)?
+            lookup_candidate(read, index_name, &candidate)?
                 .into_iter()
                 .collect(),
         );
@@ -127,14 +141,13 @@ pub(crate) fn candidate_keys(
 }
 
 fn lookup_candidate(
-    db: &Database,
+    read: &ReadTransaction,
     index_name: &str,
     candidate: &query::IndexCandidate,
 ) -> Result<Vec<String>, String> {
     let prefix = index_prefix(index_name);
     let upper = prefix_successor(&prefix)
         .ok_or_else(|| "persisted index prefix has no lexicographic successor".to_string())?;
-    let read = db.begin_read().map_err(|e| e.to_string())?;
     let entries = read.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     entries
         .range(prefix.as_slice()..upper.as_slice())
