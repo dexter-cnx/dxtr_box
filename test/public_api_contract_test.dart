@@ -119,18 +119,18 @@ void assertBoxSurface(Box box) {
 
 void assertDxtrBoxSurface() {
   final bool isInitialized = DxtrBox.isInitialized;
-  final Future<void> Function({String? path}) init = DxtrBox.init;
-  final Future<Box> Function(
+  const Future<void> Function({String? path}) init = DxtrBox.init;
+  const Future<Box> Function(
     String, {
     String? encryptionKey,
     bool lazy,
   }) open = DxtrBox.open;
-  final Future<void> Function(String) deleteBox = DxtrBox.deleteBox;
-  final Future<void> Function(
+  const Future<void> Function(String) deleteBox = DxtrBox.deleteBox;
+  const Future<void> Function(
     String, {
     required String encryptionKey,
   }) encryptBox = DxtrBox.encryptBox;
-  final Future<bool> Function(String) boxExists = DxtrBox.boxExists;
+  const Future<bool> Function(String) boxExists = DxtrBox.boxExists;
 
   Object.hash(
     isInitialized,
@@ -143,7 +143,7 @@ void assertDxtrBoxSurface() {
 }
 
 void assertHiveCeMigrationSurface() {
-  final Future<HiveCeMigrationResult> Function(
+  const Future<HiveCeMigrationResult> Function(
     HiveCeMigrationSource, {
     required String destinationName,
     String? destinationEncryptionKey,
@@ -151,7 +151,7 @@ void assertHiveCeMigrationSurface() {
     HiveCeKeyConverter? keyConverter,
   }) migrate = migrateFromHiveCe;
 
-  Object.hash(migrate);
+  Object.hash(migrate, migrate);
 }
 
 bool _true() => true;
