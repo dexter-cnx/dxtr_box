@@ -56,8 +56,8 @@ void main() {
     );
     expect(result.entriesMigrated, 0);
 
-    final HiveCeValueConverter valueConverter = _identity;
-    final HiveCeKeyConverter keyConverter = _stringKey;
+    const HiveCeValueConverter valueConverter = _identity;
+    const HiveCeKeyConverter keyConverter = _stringKey;
     expect(valueConverter('value'), 'value');
     expect(keyConverter(1), '1');
 
