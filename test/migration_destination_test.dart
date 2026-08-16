@@ -27,39 +27,78 @@ void main() {
 
     expect(await DxtrBox.boxExists('failed-destination'), isFalse);
     expect(File('${root.path}/failed-destination.dxtr').existsSync(), isFalse);
+    expect(
+      File('${root.path}/.failed-destination.dxtr.migrating').existsSync(),
+      isFalse,
+    );
+  });
+
+  test('ordinary open is rejected while migration reservation is active',
+      () async {
+    final root =
+        await Directory.systemTemp.createTemp('dxtr_open_new_reserved_');
+    addTearDown(() async {
+      if (root.existsSync()) {
+        await root.delete(recursive: true);
+      }
+    });
+
+    final api = _SuccessfulApi();
+    DxtrBox.bindNativeApi(api);
+    await DxtrBox.init(path: root.path);
+
+    final migrationBox =
+        await DxtrBoxMigrationInternals.openNew('reserved-destination');
+
+    await expectLater(
+      DxtrBox.open('reserved-destination'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('reserved'),
+        ),
+      ),
+    );
+
+    await migrationBox.close();
+    await DxtrBoxMigrationInternals.releaseReservation('reserved-destination');
+
+    final reopened = await DxtrBox.open('reserved-destination');
+    await reopened.close();
   });
 }
 
-final class _FailingWatchApi implements NativeDxtrApi {
-  String? _basePath;
-  final Set<String> _boxes = <String>{};
-  final Set<String> _open = <String>{};
+class _SuccessfulApi implements NativeDxtrApi {
+  String? basePath;
+  final Set<String> boxes = <String>{};
+  final Set<String> open = <String>{};
 
   @override
   Future<void> initDb(String path) async {
-    _basePath = path;
+    basePath = path;
   }
 
   @override
   Future<void> openBox(String name, {String? encryptionKey}) async {
-    _boxes.add(name);
-    _open.add(name);
+    boxes.add(name);
+    open.add(name);
   }
 
   @override
   Future<void> closeBox(String name) async {
-    _open.remove(name);
+    open.remove(name);
   }
 
   @override
   Future<void> deleteBox(String name) async {
-    if (_open.contains(name)) {
+    if (open.contains(name)) {
       throw StateError('cannot delete open box');
     }
-    _boxes.remove(name);
-    final basePath = _basePath;
-    if (basePath != null) {
-      final file = File('$basePath/$name.dxtr');
+    boxes.remove(name);
+    final path = basePath;
+    if (path != null) {
+      final file = File('$path/$name.dxtr');
       if (file.existsSync()) {
         file.deleteSync();
       }
@@ -67,24 +106,40 @@ final class _FailingWatchApi implements NativeDxtrApi {
   }
 
   @override
-  Future<bool> boxExists(String name) async => _boxes.contains(name);
+  Future<bool> boxExists(String name) async => boxes.contains(name);
 
   @override
   Future<Stream<NativeWatchEvent>> watchBox(
     String boxName,
     String watcherId,
   ) async {
-    if (!_open.contains(boxName)) {
+    if (!open.contains(boxName)) {
       throw StateError('box is not open');
     }
-    throw StateError('injected watch initialization failure');
+    return const Stream<NativeWatchEvent>.empty();
   }
 
   @override
   Future<void> unwatchBox(String boxName, String watcherId) async {}
 
   @override
+  Future<List<String>> getAllKeys(String boxName) async => const <String>[];
+
+  @override
   dynamic noSuchMethod(Invocation invocation) {
     throw UnimplementedError(invocation.memberName.toString());
+  }
+}
+
+final class _FailingWatchApi extends _SuccessfulApi {
+  @override
+  Future<Stream<NativeWatchEvent>> watchBox(
+    String boxName,
+    String watcherId,
+  ) async {
+    if (!open.contains(boxName)) {
+      throw StateError('box is not open');
+    }
+    throw StateError('injected watch initialization failure');
   }
 }
