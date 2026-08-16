@@ -265,3 +265,11 @@ Persisted index lookup and `dropIndex` cleanup now use a redb half-open range bo
 
 The optimization does **not** use MessagePack scalar bytes as numeric range bounds. Candidate scalar components are still decoded and evaluated with the same exact comparator used by the authoritative query engine. Scan/index equivalence therefore remains unchanged.
 
+
+## Explicit query sorting
+
+`BoxQuery.sortBy` is an ordered list of `QuerySort` clauses. Each clause names an exact dotted field path, an ascending/descending direction, and explicit null placement (`first` or `last`). Sorting occurs after candidate discovery and authoritative predicate re-evaluation but before `offset`/`limit`.
+
+Ordering domains are intentionally strict: non-null values for one sort field must be all numeric or all strings. Numeric comparison uses the same exact signed/unsigned/float semantics as query predicates and does not coerce integers through `f64`. NaN and unsupported structured/bool values are rejected for ordered sorting. Missing and explicit null are one nullish category. The primary record key is the final deterministic tie-break after all user clauses compare equal.
+
+Index use does not change sort semantics: the same sorted query before and after matching index creation must return the exact same ordered records. Current persisted indexes narrow candidates only; they are not claimed to satisfy sort order and no raw MessagePack scalar byte ordering is used as an ordering shortcut.

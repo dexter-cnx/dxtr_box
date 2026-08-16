@@ -323,7 +323,7 @@ make example-windows
 The range-capable planner is now implemented with equivalence coverage. Next work should stay correctness-driven:
 
 1. keep bounded index-name ranges, deterministic planner selection, and the single-read-transaction query snapshot as execution invariants;
-2. define explicit `sortBy` semantics as a separate public API decision;
+2. preserve deterministic `sortBy` semantics and scan/index equivalence as query execution invariants;
 3. add focused query/index benchmark scenarios now that planner selection and execution semantics are stable;
 4. define an order-preserving scalar encoding only if scalar-level redb range seek is justified by benchmarks;
 6. keep encrypted persisted-index design, cross-commit native-size policy, and Dart 3.13 tree shaking as separate workstreams.
@@ -336,3 +336,29 @@ This optimization is deliberately limited to the **index-name component**. Scala
 
 A future scalar-level redb range seek still requires a proven order-preserving scalar encoding.
 
+
+## 20. Deterministic native query sorting
+
+`BoxQuery` now accepts an ordered `sortBy` list. Public sort clauses are represented by `QuerySort`, `QuerySortDirection`, and `QueryNullOrder`; they are serialized inside the existing opaque MessagePack query payload, so the FRB function shape does not change.
+
+Sorted execution deliberately separates filtering/planning from ordering:
+
+```text
+Box.query(sortBy: ...)
+  -> planner discovers candidate keys as before
+  -> one redb read snapshot
+  -> primary records are re-read and full predicates re-evaluated
+  -> extract ordered sort values from nested dotted fields
+  -> validate non-null values for each sort field use one compatible ordered domain
+  -> stable semantic comparison across sort clauses
+  -> record key is the final deterministic tie-break
+  -> offset / limit are applied after sorting
+```
+
+Numeric ordering reuses the exact query comparator and therefore preserves signed/unsigned integer precision, including values above 2^53. String ordering is lexical. Missing fields and explicit null values form one nullish category whose placement is controlled independently with `QueryNullOrder.first` or `.last`; sort direction does not invert explicit null placement.
+
+A sort field rejects unsupported non-null values, NaN, and mixtures of numeric and string values in the same ordered column. This makes ordering behavior explicit instead of relying on an implicit cross-type total order.
+
+The unsorted path keeps its existing deterministic record-key order and early pagination behavior. The sorted path must collect all predicate matches visible in the same redb snapshot before applying ordering and pagination.
+
+`rust/tests/query_index.rs` verifies order-before-pagination, nested sort fields, null/missing placement, mixed-type rejection, large-integer precision, deterministic key tie-breaking, and exact scan/index result equivalence. `make query-sort-test` runs the focused Dart contract and Rust integration coverage.
