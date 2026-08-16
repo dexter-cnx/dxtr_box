@@ -1,0 +1,57 @@
+name: Read-path Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: read-path-benchmark-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnostic:
+    name: 0.5 read-path decomposition / Linux x64
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - name: Toolchain metadata
+        run: |
+          mkdir -p build/read-path
+          flutter --version | tee build/read-path/flutter-version.txt
+          rustc --version | tee build/read-path/rust-version.txt
+          cargo --version | tee build/read-path/cargo-version.txt
+          uname -a | tee build/read-path/runner.txt
+          lscpu > build/read-path/cpu.txt || true
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Run decomposed read-path diagnostics
+        env:
+          READ_PATH_RUST_ITERATIONS: '1000'
+          READ_PATH_DART_ITERATIONS: '500'
+          READ_PATH_SAMPLES: '5'
+        run: make benchmark-read-path
+      - name: Upload read-path evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-path-benchmark-linux-x64
+          path: build/read-path
+          if-no-files-found: warn
+          retention-days: 14
