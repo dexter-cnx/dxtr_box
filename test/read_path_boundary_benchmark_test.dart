@@ -268,8 +268,7 @@ void _emit(Map<String, Object> result) {
   final line = jsonEncode(result);
   // ignore: avoid_print
   print('DXTR_BOX_READ_PATH_BOUNDARY $line');
-  final outputPath =
-      Platform.environment['DXTR_BOX_READ_PATH_BOUNDARY_OUTPUT'];
+  final outputPath = Platform.environment['DXTR_BOX_READ_PATH_BOUNDARY_OUTPUT'];
   if (outputPath == null || outputPath.isEmpty) return;
   final file = File(outputPath);
   file.parent.createSync(recursive: true);
