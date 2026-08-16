@@ -90,7 +90,7 @@ jobs:
           test -f macos/dxtr_box.podspec
           test -f linux/CMakeLists.txt
           test -f windows/CMakeLists.txt
-          if grep -A30 '^dependencies:' pubspec.yaml | grep -q 'path:'; then
+          if grep -q '^    path:' pubspec.yaml; then
             echo 'publishable dependencies must not use path sources' >&2
             exit 1
           fi
