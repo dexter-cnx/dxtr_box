@@ -19,6 +19,20 @@ final class NativeWatchEvent {
   final Uint8List? value;
 }
 
+final class NativeQueryRecord {
+  const NativeQueryRecord({required this.key, required this.value});
+
+  final String key;
+  final Uint8List value;
+}
+
+final class NativeIndexDefinition {
+  const NativeIndexDefinition({required this.name, required this.field});
+
+  final String name;
+  final String field;
+}
+
 /// Small seam over generated flutter_rust_bridge symbols.
 abstract interface class NativeDxtrApi {
   Future<void> initDb(String path);
@@ -40,6 +54,19 @@ abstract interface class NativeDxtrApi {
   Future<int> length(String boxName);
 }
 
+abstract interface class NativeQueryApi {
+  Future<List<NativeQueryRecord>> scanQuery(
+    String boxName,
+    Uint8List queryPayload,
+  );
+}
+
+abstract interface class NativeIndexApi {
+  Future<void> createIndex(String boxName, String name, String field);
+  Future<List<NativeIndexDefinition>> listIndexes(String boxName);
+  Future<bool> dropIndex(String boxName, String name);
+}
+
 /// Optional maintenance capability for engines that can migrate plaintext
 /// storage into the encrypted dxtr_box format.
 abstract interface class NativeEncryptionMigrationApi {
@@ -48,7 +75,11 @@ abstract interface class NativeEncryptionMigrationApi {
 
 /// Production adapter backed by generated flutter_rust_bridge bindings.
 final class FrbNativeDxtrApi
-    implements NativeDxtrApi, NativeEncryptionMigrationApi {
+    implements
+        NativeDxtrApi,
+        NativeQueryApi,
+        NativeIndexApi,
+        NativeEncryptionMigrationApi {
   const FrbNativeDxtrApi();
 
   static Future<void>? _initializing;
@@ -170,6 +201,52 @@ final class FrbNativeDxtrApi
   Future<bool> compact(String boxName) async {
     await _ensureInitialized();
     return frb.compact(boxName: boxName);
+  }
+
+  @override
+  Future<List<NativeQueryRecord>> scanQuery(
+    String boxName,
+    Uint8List queryPayload,
+  ) async {
+    await _ensureInitialized();
+    final records = await frb.scanQuery(
+      boxName: boxName,
+      queryPayload: queryPayload,
+    );
+    return records
+        .map(
+          (record) => NativeQueryRecord(
+            key: record.key,
+            value: Uint8List.fromList(record.value),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<void> createIndex(String boxName, String name, String field) async {
+    await _ensureInitialized();
+    await frb.createIndex(boxName: boxName, name: name, field: field);
+  }
+
+  @override
+  Future<List<NativeIndexDefinition>> listIndexes(String boxName) async {
+    await _ensureInitialized();
+    final definitions = await frb.listIndexes(boxName: boxName);
+    return definitions
+        .map(
+          (definition) => NativeIndexDefinition(
+            name: definition.name,
+            field: definition.field,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<bool> dropIndex(String boxName, String name) async {
+    await _ensureInitialized();
+    return frb.dropIndex(boxName: boxName, name: name);
   }
 
   @override

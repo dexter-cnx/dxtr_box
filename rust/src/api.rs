@@ -5,6 +5,8 @@ use once_cell::sync::Lazy;
 use parking_lot::{Mutex, RwLock};
 
 use crate::{db, frb_generated::StreamSink};
+#[cfg(feature = "full")]
+use crate::{index, query};
 
 #[derive(Clone)]
 pub enum NativeBoxEventType {
@@ -19,6 +21,16 @@ pub struct NativeBoxEvent {
     pub event_type: NativeBoxEventType,
     pub key: Option<String>,
     pub value: Option<Vec<u8>>,
+}
+
+pub struct NativeQueryRecord {
+    pub key: String,
+    pub value: Vec<u8>,
+}
+
+pub struct NativeIndexDefinition {
+    pub name: String,
+    pub field: String,
 }
 
 type Watchers = HashMap<String, HashMap<String, StreamSink<NativeBoxEvent>>>;
@@ -139,10 +151,6 @@ pub fn watch_box(
 
     let mutation_lock = mutation_lock(&box_name);
     let _mutation_guard = mutation_lock.lock();
-
-    // The mutation lock makes registration an ordering boundary: a watcher is
-    // either present before a committed mutation is published or is registered
-    // only after that mutation and its event have completed.
     db::len(&box_name)?;
     WATCHERS
         .write()
@@ -258,6 +266,95 @@ pub fn compact(box_name: String) -> Result<bool, String> {
     {
         let _ = box_name;
         Err("compaction requires native feature 'maintenance'".to_string())
+    }
+}
+
+pub fn scan_query(
+    box_name: String,
+    query_payload: Vec<u8>,
+) -> Result<Vec<NativeQueryRecord>, String> {
+    #[cfg(feature = "full")]
+    {
+        let spec = query::decode_query(&query_payload)?;
+        let mut keys = db::all_keys(&box_name)?;
+        keys.sort();
+        let mut matched = 0usize;
+        let mut results = Vec::new();
+        for key in keys {
+            let Some(value) = db::get(&box_name, &key)? else {
+                continue;
+            };
+            if !query::matches_record(&value, &spec.filter)? {
+                continue;
+            }
+            if matched < spec.offset {
+                matched += 1;
+                continue;
+            }
+            results.push(NativeQueryRecord { key, value });
+            matched += 1;
+            if spec.limit.is_some_and(|limit| results.len() >= limit) {
+                break;
+            }
+        }
+        Ok(results)
+    }
+
+    #[cfg(not(feature = "full"))]
+    {
+        let _ = (box_name, query_payload);
+        Err("native query execution requires the full profile".to_string())
+    }
+}
+
+pub fn create_index(box_name: String, name: String, field: String) -> Result<(), String> {
+    #[cfg(feature = "full")]
+    {
+        let mutation_lock = mutation_lock(&box_name);
+        let _mutation_guard = mutation_lock.lock();
+        let (db, encryption) = db::database(&box_name)?;
+        index::create(&db, &encryption, &name, &field)
+    }
+
+    #[cfg(not(feature = "full"))]
+    {
+        let _ = (box_name, name, field);
+        Err("persisted indexes require the full profile".to_string())
+    }
+}
+
+pub fn list_indexes(box_name: String) -> Result<Vec<NativeIndexDefinition>, String> {
+    #[cfg(feature = "full")]
+    {
+        let (db, _) = db::database(&box_name)?;
+        index::list(&db).map(|definitions| {
+            definitions
+                .into_iter()
+                .map(|(name, field)| NativeIndexDefinition { name, field })
+                .collect()
+        })
+    }
+
+    #[cfg(not(feature = "full"))]
+    {
+        let _ = box_name;
+        Err("persisted indexes require the full profile".to_string())
+    }
+}
+
+pub fn drop_index(box_name: String, name: String) -> Result<bool, String> {
+    #[cfg(feature = "full")]
+    {
+        let mutation_lock = mutation_lock(&box_name);
+        let _mutation_guard = mutation_lock.lock();
+        let (db, _) = db::database(&box_name)?;
+        index::drop_index(&db, &name)
+    }
+
+    #[cfg(not(feature = "full"))]
+    {
+        let _ = (box_name, name);
+        Err("persisted indexes require the full profile".to_string())
     }
 }
 

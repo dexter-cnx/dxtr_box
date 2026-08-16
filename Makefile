@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-test process-crash benchmark-smoke benchmark-full preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-test query-index-test process-crash benchmark-smoke benchmark-full preflight example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -12,6 +12,7 @@ help:
 	@echo "  make preflight            Format check + analyze + Dart/Rust tests"
 	@echo "  make frb-generate         Refresh flutter_rust_bridge bindings"
 	@echo "  make native-test          Native FRB round-trip test"
+	@echo "  make query-index-test     Rust full-profile query/index integration test"
 	@echo "  make native-build-minimal Build core CRUD/lifecycle/watch only"
 	@echo "  make native-build-encryption Build minimal + encrypted open/create"
 	@echo "  make native-size-baseline Measure minimal/encryption/full native artifacts"
@@ -75,6 +76,9 @@ native-size-stability:
 
 native-test: pub-get native-build
 	DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test test/native_integration_test.dart --reporter expanded
+
+query-index-test:
+	$(CARGO) test --manifest-path rust/Cargo.toml --test query_index -- --nocapture
 
 process-crash:
 	$(CARGO) test --manifest-path rust/Cargo.toml --test process_crash -- --nocapture
