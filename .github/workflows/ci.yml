@@ -156,12 +156,15 @@ jobs:
         run: flutter test test/benchmark_smoke_test.dart --reporter expanded
 
   native-size:
-    name: Native size / Linux x64 stability
+    name: Native size / Linux x64 policy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
-      - name: Checkout
+      - name: Checkout exact candidate with comparison history
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -174,14 +177,22 @@ jobs:
         env:
           DXTR_BOX_SIZE_RUNS: '3'
         run: bash tool/native_size_stability.sh
+      - name: Enforce controlled cross-commit growth budget
+        env:
+          DXTR_BOX_SIZE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          DXTR_BOX_SIZE_MAX_GROWTH_BYTES: '65536'
+          DXTR_BOX_SIZE_MAX_GROWTH_PERCENT: '3'
+        run: bash tool/native_size_regression.sh
       - name: Upload native size measurements
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: native-size-linux-x64
           path: |
             build/native-size/native-size-baseline.tsv
             build/native-size-stability/native-size-stability.tsv
-          if-no-files-found: error
+            build/native-size-regression/native-size-regression.tsv
+          if-no-files-found: warn
           retention-days: 14
 
   rust:

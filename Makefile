@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -10,6 +10,9 @@ QUERY_BENCHMARK_SAMPLES ?= 3
 POINT_READ_ITERATIONS ?= 500
 POINT_READ_SAMPLES ?= 5
 SIZE_STABILITY_RUNS ?= 3
+SIZE_BASE_REF ?= HEAD^
+SIZE_MAX_GROWTH_BYTES ?= 65536
+SIZE_MAX_GROWTH_PERCENT ?= 3
 
 help:
 	@echo "dxtr_box developer targets"
@@ -23,6 +26,7 @@ help:
 	@echo "  make native-build-encryption Build minimal + encrypted open/create"
 	@echo "  make native-size-baseline Measure minimal/encryption/full native artifacts"
 	@echo "  make native-size-stability Repeat profile builds and verify same-run size stability"
+	@echo "  make native-size-regression Compare base/head native sizes with the 0.4 growth budget"
 	@echo "  make process-crash        Process-kill + reopen durability test"
 	@echo "  make benchmark-smoke      dxtr_box vs hive_ce smoke benchmark"
 	@echo "  make benchmark-full       Larger local benchmark run"
@@ -81,6 +85,12 @@ native-size-baseline:
 
 native-size-stability:
 	DXTR_BOX_SIZE_RUNS=$(SIZE_STABILITY_RUNS) bash tool/native_size_stability.sh
+
+native-size-regression:
+	DXTR_BOX_SIZE_BASE_REF=$(SIZE_BASE_REF) \
+	DXTR_BOX_SIZE_MAX_GROWTH_BYTES=$(SIZE_MAX_GROWTH_BYTES) \
+	DXTR_BOX_SIZE_MAX_GROWTH_PERCENT=$(SIZE_MAX_GROWTH_PERCENT) \
+	bash tool/native_size_regression.sh
 
 native-test: pub-get native-build
 	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test test/native_integration_test.dart --reporter expanded
