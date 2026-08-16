@@ -9,6 +9,7 @@ MAX_GROWTH_PERCENT="${DXTR_BOX_SIZE_MAX_GROWTH_PERCENT:-3}"
 OUT_DIR="${DXTR_BOX_SIZE_REGRESSION_OUT_DIR:-$ROOT_DIR/build/native-size-regression}"
 SUMMARY="$OUT_DIR/native-size-regression.tsv"
 BASE_WORKTREE="$OUT_DIR/base-worktree"
+HEAD_WORKTREE="$OUT_DIR/head-worktree"
 
 for value_name in MAX_GROWTH_BYTES MAX_GROWTH_PERCENT; do
   value="${!value_name}"
@@ -41,11 +42,13 @@ if [[ "$HEAD_SHA" == "$BASE_SHA" ]]; then
 fi
 
 mkdir -p "$OUT_DIR"
-rm -rf "$BASE_WORKTREE" "$OUT_DIR/base" "$OUT_DIR/head"
+rm -rf "$BASE_WORKTREE" "$HEAD_WORKTREE" "$OUT_DIR/base" "$OUT_DIR/head"
 
 git -C "$ROOT_DIR" worktree add --detach "$BASE_WORKTREE" "$BASE_SHA" >/dev/null
+git -C "$ROOT_DIR" worktree add --detach "$HEAD_WORKTREE" "$HEAD_SHA" >/dev/null
 cleanup() {
   git -C "$ROOT_DIR" worktree remove --force "$BASE_WORKTREE" >/dev/null 2>&1 || true
+  git -C "$ROOT_DIR" worktree remove --force "$HEAD_WORKTREE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -96,7 +99,7 @@ printf 'profile\tbase_bytes\thead_bytes\tdelta_bytes\tallowed_growth_bytes\tgrow
 failed=0
 for profile in minimal encryption full; do
   base_bytes="$(build_profile "$BASE_WORKTREE" base "$profile")"
-  head_bytes="$(build_profile "$ROOT_DIR" head "$profile")"
+  head_bytes="$(build_profile "$HEAD_WORKTREE" head "$profile")"
   delta=$((head_bytes - base_bytes))
   percent_allowance=$(((base_bytes * MAX_GROWTH_PERCENT + 99) / 100))
   allowed_growth="$MAX_GROWTH_BYTES"
