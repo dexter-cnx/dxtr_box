@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.4 Production Hardening active**. PH-01 native-size policy, PH-02 package hardening, PH-03 broader local-database comparison, and PH-04 staged published-payload consumer validation are complete. PH-05 public API + durable storage contract guarding is active. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are still pre-1.0 and not declared stable.
+> Status: **0.4 Production Hardening complete**. PH-01 native-size policy, PH-02 package hardening, PH-03 broader local-database comparison, PH-04 staged published-payload consumer validation, and PH-05 public API + durable storage contract guarding are complete. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are still pre-1.0 and not declared stable. Next work returns to the Hive/Hive CE functional-parity release gate.
 
 ## Compatibility
 
@@ -206,7 +206,7 @@ No package is automatically published by CI or by the hardening milestones. See 
 
 PH-04 adds a stronger native package-boundary proof. `tool/validate_published_consumer.dart` stages the files allowed by the current `.pubignore`, verifies required native inputs and absence of repository-only leakage, creates a fresh Flutter app, adds only the staged `dxtr_box` copy as a dependency, imports the public API, and builds the app.
 
-Platform Builds run this staged-consumer flow for all five native targets:
+Platform Builds now run this staged-consumer flow for all five native targets rather than building directly against the repository checkout:
 
 ```bash
 make published-consumer-android
@@ -216,24 +216,7 @@ make published-consumer-linux
 make published-consumer-windows
 ```
 
-The staging helper fails closed if `.pubignore` starts using wildcard/negation rules it does not model exactly. `dart pub publish --dry-run` remains the source of truth for pub validation and intended file listing; the staged consumer gate is complementary build evidence. PH-04 completed in PR #30. See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
-
-## Public API + durable storage contract guard
-
-PH-05 adds fail-fast compatibility change control without claiming pre-1.0 stability.
-
-```bash
-dart run tool/verify_public_storage_contract.dart
-```
-
-The normal Flutter test suite also runs this contract. It verifies the package entrypoint export set, compiles representative public constructors/enums/typedefs and typed `Box` method/getter signatures, and guards the current durable metadata identity:
-
-```text
-meta key: format_version
-value:    dxtr_box/1
-```
-
-A deliberate 0.x API change is allowed only with an intentional contract/doc update. A future storage-format change must include backward-read or migration behavior plus compatibility evidence rather than merely updating the marker. See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
+The staging helper fails closed if `.pubignore` starts using wildcard/negation rules it does not model exactly. `dart pub publish --dry-run` remains the source of truth for pub validation and intended file listing; the staged consumer gate is complementary build evidence. See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
 
 ## Local database comparison
 
@@ -257,7 +240,6 @@ Common root targets:
 ```bash
 make preflight
 make package-readiness
-dart run tool/verify_public_storage_contract.dart
 make dart-doc
 make pub-dry-run
 make frb-generate
@@ -294,7 +276,7 @@ make example-windows
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture.
 - `docs/PACKAGE_RELEASE_04.md` — self-contained plugin and publication-readiness contract.
 - `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md` — PH-04 staged publication-boundary consumer build contract.
-- `docs/PUBLIC_API_STORAGE_CONTRACT_04.md` — PH-05 public API and durable-format change-control contract.
+- `docs/PUBLIC_API_STORAGE_CONTRACT_04.md` — PH-05 public API + durable storage compatibility guard.
 - `docs/NATIVE_SIZE_POLICY_04.md` — controlled native-size regression policy.
 - `docs/LOCAL_DATABASE_COMPARISON_04.md` — PH-03 correctness + diagnostic comparison contract.
 - `docs/QUERY_INDEX_03.md` — query/index semantics and planner constraints.
