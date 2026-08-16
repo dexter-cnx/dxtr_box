@@ -1,0 +1,16 @@
+name: dxtr_box_hive_ce_migration_fixture
+publish_to: none
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  dxtr_box:
+    path: ../..
+  flutter:
+    sdk: flutter
+  hive_ce: 2.19.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
