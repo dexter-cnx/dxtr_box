@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test contract-check dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -17,7 +17,8 @@ SIZE_MAX_GROWTH_PERCENT ?= 3
 
 help:
 	@echo "dxtr_box developer targets"
-	@echo "  make preflight            Format check + analyze + Dart/Rust tests"
+	@echo "  make preflight            Format + analyze + tests + contract + Rust checks"
+	@echo "  make contract-check       Verify public exports and durable storage format identity"
 	@echo "  make package-readiness    Dart docs + pub.dev dry-run on the publishable root plugin"
 	@echo "  make dart-doc             Generate public API documentation"
 	@echo "  make pub-dry-run          Validate the package archive with dart pub publish --dry-run"
@@ -45,11 +46,11 @@ pub-get:
 	$(FLUTTER) pub get
 
 format:
-	dart format lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/hive_ce_migration_fixture/test
+	dart format lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
 format-check:
-	dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/hive_ce_migration_fixture/test
+	dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
 analyze: pub-get
@@ -57,6 +58,9 @@ analyze: pub-get
 
 test: pub-get
 	$(FLUTTER) test
+
+contract-check:
+	dart run tool/verify_public_storage_contract.dart
 
 dart-doc: pub-get
 	rm -rf build/doc
@@ -142,7 +146,7 @@ benchmark-query-index: native-build
 diagnose-point-read: native-build pub-get
 	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_POINT_READ_DIAGNOSIS=1 DXTR_BOX_POINT_READ_ITERATIONS=$(POINT_READ_ITERATIONS) DXTR_BOX_POINT_READ_SAMPLES=$(POINT_READ_SAMPLES) $(FLUTTER) test test/point_read_diagnosis_test.dart --reporter expanded
 
-preflight: format-check analyze test rust-check
+preflight: format-check analyze test contract-check rust-check
 
 published-consumer-android:
 	dart run tool/validate_published_consumer.dart --platform=android

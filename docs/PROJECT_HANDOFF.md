@@ -17,13 +17,15 @@ Closed milestones:
 - PR #27 PH-01 controlled cross-commit native-size regression policy.
 - PR #28 PH-02 self-contained package/publication hardening.
 - PR #29 PH-03 broader Flutter local-database correctness + diagnostic comparison.
+- PR #30 PH-04 published-payload consumer validation on Android/iOS/macOS/Linux/Windows.
 
-**PH-04 published-payload consumer validation is active.** The remaining package-evidence gap is that `dart pub publish --dry-run` validates metadata and intended files while prior Platform Builds consumed the repository checkout directly. PH-04 stages the publication boundary and builds fresh consumer applications from that staged package copy on all five native targets.
+**PH-05 public API + durable storage contract guard is active.** Package/build evidence is now strong enough that the next hardening gap is accidental compatibility drift: consumer-visible exports/signatures or the current `dxtr_box/1` on-disk format identity must not change silently inside ordinary refactors.
 
 Normative 0.4 docs:
 
 - `docs/PACKAGE_RELEASE_04.md`
 - `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`
+- `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`
 - `docs/NATIVE_SIZE_POLICY_04.md`
 - `docs/LOCAL_DATABASE_COMPARISON_04.md`
 
@@ -79,6 +81,8 @@ FRB is intentionally pinned exactly because checked-in generated bindings, Dart 
 - Native-size absolute measurement, same-commit reproducibility, and cross-commit regression gating.
 - Self-contained publishable Flutter FFI package topology with docs/pub validation.
 - Four-engine local-database correctness + diagnostic comparison harness.
+- Fresh staged-payload consumer builds on all five native targets.
+- PH-05 public-export and durable-format compatibility guard under the normal Flutter test suite.
 
 ## Core correctness invariants
 
@@ -189,6 +193,22 @@ make published-consumer-windows
 
 `Platform Builds` runs the staged-consumer flow on all five targets. The validator fails closed if `.pubignore` introduces wildcard/negation syntax it does not model exactly. `dart pub publish --dry-run` remains authoritative for pub validation/file listing; PH-04 is complementary build evidence, not a replacement.
 
+## PH-05 public API + storage contract policy
+
+The current public entrypoint export set and durable storage identity are reviewed compatibility boundaries, not implementation hashes.
+
+```text
+package:dxtr_box/dxtr_box.dart
+storage meta key: format_version
+storage format:   dxtr_box/1
+```
+
+`test/public_api_contract_test.dart` compiles representative public constructors/enums/typedefs and typed `Box` method/getter tear-offs. It also invokes `tool/verify_public_storage_contract.dart`, which checks the exact package export set and storage format identity.
+
+A deliberate 0.x breaking API change is still allowed, but its contract test/verifier and migration guidance must change in the same reviewed PR. A storage-format change additionally requires explicit backward-read or migration behavior and compatibility evidence. PH-05 does **not** claim 1.0 stability.
+
+See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
+
 ## 0.4 local-database comparison policy
 
 Comparison-only dependencies stay under `benchmark/` and do not affect root SDK or production dependencies.
@@ -211,6 +231,7 @@ Preferred root targets:
 ```text
 make preflight
 make package-readiness
+dart run tool/verify_public_storage_contract.dart
 make dart-doc
 make pub-dry-run
 make frb-generate
@@ -247,17 +268,21 @@ make published-consumer-windows
 
 Acceptance completed: four engines, benchmark-only comparison dependencies, correctness hard gate, timing-only diagnostics, machine-readable CI evidence, no speculative threshold optimization.
 
-### PH-04 — Published-payload consumer validation — active
+### PH-04 — Published-payload consumer validation — complete (PR #30)
+
+Acceptance completed: staged package boundary, required-input/leakage validation, fresh public-API consumer, and green Android/iOS/macOS/Linux/Windows builds from the staged package rather than repository-relative source assumptions.
+
+### PH-05 — Public API + durable storage contract guard — active
 
 Acceptance:
 
-- staged payload follows current publication exclusions and prunes ignored directories before traversal;
-- required Dart/Rust/Cargokit/platform files are present;
-- repository-only files and root path-source dependencies are absent;
-- a fresh consumer imports the public API from staged `dxtr_box` only;
-- Android/iOS/macOS/Linux/Windows consumer builds pass;
-- `.pubignore` and validator changes trigger Platform Builds;
-- README, handoff, walkthrough, `PACKAGE_RELEASE_04.md`, and `PUBLISHED_PAYLOAD_CONSUMER_04.md` agree.
+- package entrypoint export set is guarded explicitly;
+- representative public Dart API signatures compile under the normal test suite;
+- `format_version` / `dxtr_box/1` durable format identity is guarded;
+- deliberate API changes require contract/doc updates in the same PR;
+- storage-format changes require backward compatibility or migration evidence;
+- no claim of 1.0 stability is introduced;
+- README, handoff, walkthrough, and `PUBLIC_API_STORAGE_CONTRACT_04.md` agree.
 
 ## Deferred beyond current 0.4 slice
 
