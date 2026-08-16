@@ -15,8 +15,9 @@ This document is the release-closure checklist for the 0.3 query/index + migrati
 - [x] Hive CE String keys are preserved; int keys default to `@hive-int:<decimal>`; conversion collisions fail before destination creation.
 - [x] Unsupported/custom Hive CE values require explicit conversion.
 - [x] Existing migration destinations are rejected rather than overwritten.
-- [x] Migration destination creation uses an exclusive filesystem reservation so concurrent migrations cannot both claim the same new destination.
-- [x] A migration-owned destination reservation is cleaned up if `DxtrBox.open` fails during handle initialization.
+- [x] Concurrent migrations cannot both claim the same new destination.
+- [x] Ordinary `DxtrBox.open()` is prevented from returning a usable handle while migration owns the destination reservation.
+- [x] A migration-owned destination/reservation is cleaned up if `DxtrBox.open` fails during handle initialization.
 
 ## Query / index correctness
 
@@ -74,15 +75,20 @@ full
 - [x] Point-read measurements do not over-attribute the native region because native MessagePack validation is included in that region.
 - [x] Real Hive CE 2.19.3 fixtures cover primitive/list/map/binary/DateTime data, String/int keys, custom conversion, collision rejection, encrypted source/destination, unsupported-value preflight, source preservation, existing-destination preservation, and concurrent-destination rejection.
 - [x] Root regression coverage injects a handle-initialization failure and verifies the migration-owned destination file is removed.
+- [x] Root regression coverage verifies an ordinary open is rejected while migration owns the destination and works again after reservation release.
 
-## Review follow-up discovered during closure
+## Review follow-ups discovered during closure
 
-Codex review `4945584625` on merged PR #23 identified two migration correctness gaps after that PR merged:
+Codex review `4945584625` on merged PR #23 identified two migration correctness gaps:
 
 1. a TOCTOU race between `boxExists()` and normal `DxtrBox.open()` allowed two migrations to target the same destination;
 2. if native open succeeded but watch/metadata initialization failed, the destination file could remain because the migration had not yet marked the handle as opened.
 
-PR #24 treats these as release-blocking defects rather than expanding 0.3 scope. The fix reserves `{destination}.dxtr` with exclusive filesystem creation before opening it, keeps that helper internal to `src`, cleans up the reservation on open-initialization failure, and adds direct race/failure regression tests. Both original PR #23 review threads were answered with regression/CI evidence and resolved during closure.
+PR #24 fixed those with exclusive migration destination creation and cleanup coverage. Both original PR #23 review threads were answered and resolved.
+
+Codex review `4945685965` on merged PR #24 then identified a remaining P1: an ordinary `DxtrBox.open(destinationName)` could still join the already-reserved destination while migration was in progress. PR #25 is the release-blocking follow-up. It adds a distinct migration reservation marker, makes normal open check that reservation both before and immediately after native open, keeps only the migration-owned internal open path eligible to bypass the marker, and adds direct regression coverage.
+
+The second post-open check is intentional: it closes the race where a normal open started immediately before migration acquired the reservation. If migration wins destination creation, the normal native handle is closed before a `Box` is returned to application code. If normal open creates the destination first, migration's post-reservation existence check / exclusive create fails.
 
 ## Documentation closure
 
@@ -111,17 +117,21 @@ These are not blockers for 0.3 closure:
 - LazyBox migration;
 - direct `.hive` file parsing;
 - overwrite/merge migration into an existing dxtr_box destination;
-- file-level crash-atomic Hive migration staging/promotion;
+- file-level crash-atomic Hive migration staging/promotion and automatic stale-reservation recovery;
 - Web/IndexedDB support and 1.0 parity closure.
 
-## Final merge gate
+## Final merge evidence
 
-0.3 may be marked closed only when the closure PR itself has:
+PR #24 final implementation/documentation head `93e69251d5f01d613c2cc3376a3c0c1bd03c87a1` passed CI #286 (`31933799866`) and Platform Builds #196 (`31933799871`) and was squash-merged as `ff84dc1c3dc879da3ed73f79a4358659a3ea189b`. Its branch was deleted and branch API returned only `main`.
 
-- [ ] current CI green on the final head;
-- [ ] Platform Builds green on the final head;
-- [ ] no unresolved review threads or request-changes reviews after Ready-for-review;
-- [x] no temporary workflows or helper workflow files in the final diff;
-- [x] no stale 0.3 roadmap entries that describe already-completed work as `Next`;
-- [ ] merged branch deleted after merge;
-- [ ] repository branch list verified clean after merge.
+Because review `4945685965` arrived after that merge, 0.3 closure is **re-opened only for PR #25** until this final correctness follow-up has green CI, no unresolved blocker, is merged, and its branch is deleted.
+
+Final PR #25 gate:
+
+- [ ] current CI green on final head;
+- [ ] no unresolved review threads / request-changes review;
+- [ ] merge PR #25;
+- [ ] delete `docs/0.3-final-evidence` after merge;
+- [ ] verify branch API returns only `main`.
+
+**0.3 status: closure pending PR #25 final correctness follow-up.**

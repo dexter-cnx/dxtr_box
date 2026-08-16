@@ -75,6 +75,20 @@ abstract final class DxtrBox {
     String name, {
     String? encryptionKey,
     bool lazy = false,
+  }) {
+    return _open(
+      name,
+      encryptionKey: encryptionKey,
+      lazy: lazy,
+      allowMigrationReservation: false,
+    );
+  }
+
+  static Future<Box> _open(
+    String name, {
+    String? encryptionKey,
+    required bool lazy,
+    required bool allowMigrationReservation,
   }) async {
     _ensureInitialized();
     _validateBoxName(name);
@@ -84,7 +98,25 @@ abstract final class DxtrBox {
         'native storage on demand instead of caching whole-box values in Dart.',
       );
     }
+
+    final migrationReservation = _migrationReservationFile(name);
+    if (!allowMigrationReservation && await migrationReservation.exists()) {
+      throw StateError(
+        'Box "$name" is reserved by an in-progress Hive CE migration.',
+      );
+    }
+
     await _api.openBox(name, encryptionKey: encryptionKey);
+
+    // Close the race where a normal open started just before migration acquired
+    // the reservation. If migration won destination creation, this handle must
+    // not escape to application code and mutate the migration target.
+    if (!allowMigrationReservation && await migrationReservation.exists()) {
+      await _api.closeBox(name);
+      throw StateError(
+        'Box "$name" became reserved by a Hive CE migration while opening.',
+      );
+    }
 
     final metadata = _metadataByName.putIfAbsent(name, BoxMetadata.new);
     final box = Box.internal(
@@ -167,6 +199,10 @@ abstract final class DxtrBox {
     return _api.boxExists(name);
   }
 
+  static File _migrationReservationFile(String name) {
+    return File(p.join(_basePath!, '.$name.dxtr.migrating'));
+  }
+
   static String _newWatcherId() {
     final bytes = List<int>.generate(16, (_) => _watcherRandom.nextInt(256));
     return bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
@@ -204,17 +240,36 @@ abstract final class DxtrBoxMigrationInternals {
     DxtrBox._validateBoxName(name);
 
     final path = File(p.join(DxtrBox._basePath!, '$name.dxtr'));
+    final reservation = DxtrBox._migrationReservationFile(name);
+
+    if (await path.exists()) {
+      throw StateError('Destination dxtr_box "$name" already exists.');
+    }
+
     try {
-      await path.create(exclusive: true);
+      await reservation.create(exclusive: true);
     } on FileSystemException {
-      if (await path.exists()) {
-        throw StateError('Destination dxtr_box "$name" already exists.');
+      if (await reservation.exists()) {
+        throw StateError(
+          'Destination dxtr_box "$name" is already reserved by a migration.',
+        );
       }
       rethrow;
     }
 
     try {
-      return await DxtrBox.open(name, encryptionKey: encryptionKey);
+      // Re-check after acquiring the reservation to close the race with an
+      // ordinary open that may have created the destination just beforehand.
+      if (await path.exists()) {
+        throw StateError('Destination dxtr_box "$name" already exists.');
+      }
+      await path.create(exclusive: true);
+      return await DxtrBox._open(
+        name,
+        encryptionKey: encryptionKey,
+        lazy: false,
+        allowMigrationReservation: true,
+      );
     } catch (_) {
       try {
         await DxtrBox._api.closeBox(name);
@@ -233,7 +288,20 @@ abstract final class DxtrBoxMigrationInternals {
         }
       }
       DxtrBox._metadataByName.remove(name);
+      await releaseReservation(name);
       rethrow;
+    }
+  }
+
+  static Future<void> releaseReservation(String name) async {
+    final reservation = DxtrBox._migrationReservationFile(name);
+    try {
+      if (await reservation.exists()) {
+        await reservation.delete();
+      }
+    } on FileSystemException {
+      // A successful migration must not be reported as failed only because the
+      // advisory reservation marker disappeared concurrently.
     }
   }
 }

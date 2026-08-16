@@ -78,14 +78,20 @@ Future<HiveCeMigrationResult> migrateFromHiveCe(
     destinationName,
     encryptionKey: destinationEncryptionKey,
   );
+  var destinationClosed = false;
   try {
     await destination.putAll(prepared);
-  } catch (_) {
     await destination.close();
+    destinationClosed = true;
+  } catch (_) {
+    if (!destinationClosed) {
+      await destination.close();
+    }
     await DxtrBox.deleteBox(destinationName);
     rethrow;
+  } finally {
+    await DxtrBoxMigrationInternals.releaseReservation(destinationName);
   }
-  await destination.close();
 
   return HiveCeMigrationResult(
     sourceName: source.name,
