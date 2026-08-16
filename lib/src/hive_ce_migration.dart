@@ -1,12 +1,35 @@
 import 'dart:typed_data';
 
-import 'package:hive_ce/hive.dart' as hive;
-
 import 'codec.dart';
 import 'dxtr_box.dart';
 
 typedef HiveCeValueConverter = dynamic Function(dynamic value);
 typedef HiveCeKeyConverter = String Function(dynamic key);
+
+/// Adapter over an already-open Hive CE box.
+///
+/// Keeping the adapter callback-based lets dxtr_box preserve its Dart 3.4 /
+/// Flutter 3.22 minimum SDK contract without taking a runtime dependency on
+/// Hive CE. Applications can wrap their current Hive CE box directly.
+final class HiveCeMigrationSource {
+  const HiveCeMigrationSource({
+    required this.name,
+    required bool Function() isOpen,
+    required Iterable<dynamic> Function() keys,
+    required dynamic Function(dynamic key) get,
+  })  : _isOpen = isOpen,
+        _keys = keys,
+        _get = get;
+
+  final String name;
+  final bool Function() _isOpen;
+  final Iterable<dynamic> Function() _keys;
+  final dynamic Function(dynamic key) _get;
+
+  bool get isOpen => _isOpen();
+  Iterable<dynamic> get keys => _keys();
+  dynamic get(dynamic key) => _get(key);
+}
 
 final class HiveCeMigrationResult {
   const HiveCeMigrationResult({
@@ -21,7 +44,7 @@ final class HiveCeMigrationResult {
 }
 
 Future<HiveCeMigrationResult> migrateFromHiveCe(
-  hive.Box<dynamic> source, {
+  HiveCeMigrationSource source, {
   required String destinationName,
   String? destinationEncryptionKey,
   HiveCeValueConverter? valueConverter,
@@ -86,7 +109,11 @@ String _convertHiveCeKey(dynamic key, HiveCeKeyConverter? converter) {
   if (converter != null) {
     final converted = converter(key);
     if (converted.isEmpty) {
-      throw ArgumentError.value(converted, 'keyConverter', 'Key cannot be empty');
+      throw ArgumentError.value(
+        converted,
+        'keyConverter',
+        'Key cannot be empty',
+      );
     }
     return converted;
   }
