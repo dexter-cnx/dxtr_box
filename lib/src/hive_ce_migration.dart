@@ -56,11 +56,6 @@ Future<HiveCeMigrationResult> migrateFromHiveCe(
   if (!source.isOpen) {
     throw StateError('Hive CE source box "${source.name}" must be open.');
   }
-  if (await DxtrBox.boxExists(destinationName)) {
-    throw StateError(
-      'Destination dxtr_box "$destinationName" already exists.',
-    );
-  }
 
   final prepared = <String, dynamic>{};
   for (final sourceKey in source.keys) {
@@ -79,24 +74,18 @@ Future<HiveCeMigrationResult> migrateFromHiveCe(
     prepared[destinationKey] = normalized;
   }
 
-  var destinationOpened = false;
+  final destination = await DxtrBoxMigrationInternals.openNew(
+    destinationName,
+    encryptionKey: destinationEncryptionKey,
+  );
   try {
-    final destination = await DxtrBox.open(
-      destinationName,
-      encryptionKey: destinationEncryptionKey,
-    );
-    destinationOpened = true;
-    try {
-      await destination.putAll(prepared);
-    } finally {
-      await destination.close();
-    }
+    await destination.putAll(prepared);
   } catch (_) {
-    if (destinationOpened && await DxtrBox.boxExists(destinationName)) {
-      await DxtrBox.deleteBox(destinationName);
-    }
+    await destination.close();
+    await DxtrBox.deleteBox(destinationName);
     rethrow;
   }
+  await destination.close();
 
   return HiveCeMigrationResult(
     sourceName: source.name,
