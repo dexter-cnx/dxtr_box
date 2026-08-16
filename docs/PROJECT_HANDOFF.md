@@ -30,6 +30,30 @@ Normative 0.4 docs:
 - `docs/NATIVE_SIZE_POLICY_04.md`
 - `docs/LOCAL_DATABASE_COMPARISON_04.md`
 
+## CI optimization in progress
+
+A focused infrastructure-only CI optimization is being developed separately from the 0.5 read-path production/benchmark work. It must not change authoritative native `get`/`containsKey`, encryption authentication, cross-process semantics, durable format, or introduce a Dart whole-box cache.
+
+The target CI topology is:
+
+```text
+change-detection
+      |
+      v
+   Fast CI
+      |
+      +--> affected expensive validation
+      |
+      v
+Merge Gate / full quality bar
+```
+
+Fast CI is mandatory on every PR commit and owns generic Dart formatting, rustfmt, Flutter analysis, Rust clippy/profile compile checks, cheap unit tests, and inexpensive public/storage contract guards on Ubuntu. Expensive native, FRB, package, native-size, platform-consumer, migration, and benchmark jobs wait for Fast CI and then run only when materially affected during Draft iteration.
+
+Draft PRs are the selective iteration mode. Ready-for-review and subsequent non-draft commits switch to full validation. The terminal status `Merge Gate / full quality bar` must be the protected-branch required check so intentionally skipped affected jobs do not become permanently Pending while selective CI still cannot be used as merge evidence.
+
+The five-platform staged consumer validation remains mandatory in full mode. The native-size policy remains `max(65,536 bytes, 3% of base artifact)`. FRB codegen remains pinned to 2.8.0. See `docs/CI_STRATEGY.md`.
+
 ## Stable package/runtime contract
 
 `dxtr_box` is one self-contained Flutter FFI plugin:
@@ -192,7 +216,7 @@ make published-consumer-linux
 make published-consumer-windows
 ```
 
-`Platform Builds` runs the staged-consumer flow on all five targets. The validator fails closed if `.pubignore` introduces wildcard/negation syntax it does not model exactly. `dart pub publish --dry-run` remains authoritative for pub validation/file listing; PH-04 is complementary build evidence, not a replacement.
+The main `CI` workflow now owns the staged-consumer flow on all five targets after Fast CI rather than launching a separate workflow immediately. The validator still fails closed if `.pubignore` introduces wildcard/negation syntax it does not model exactly. `dart pub publish --dry-run` remains authoritative for pub validation/file listing; PH-04 is complementary build evidence, not a replacement.
 
 ## PH-05 public API + storage contract policy
 
@@ -232,6 +256,11 @@ Correctness CRUD/delete/reopen equivalence is a hard gate. Timing scenarios (`se
 Preferred root targets:
 
 ```text
+make format-check
+make rust-check
+make analyze
+make test-fast
+make ci-fast
 make preflight
 make package-readiness
 dart run tool/verify_public_storage_contract.dart
@@ -248,7 +277,6 @@ make benchmark-comparison-correctness
 make benchmark-comparison
 make benchmark-query-index
 make diagnose-point-read
-make rust-check
 make native-build-minimal
 make native-build-encryption
 make native-size-baseline
@@ -260,6 +288,8 @@ make published-consumer-macos
 make published-consumer-linux
 make published-consumer-windows
 ```
+
+`make preflight` is intentionally cheap enough to run before push and mirrors Fast CI. Full profile tests, migration fixtures, native-size, publication, five-platform consumers, and benchmark diagnostics remain separate affected/full gates.
 
 ## 0.4 Production Hardening sequence
 
@@ -290,6 +320,8 @@ Acceptance completed:
 ## Next development direction
 
 Return to `docs/HIVE_FUNCTIONAL_PARITY.md`. The remaining practical gaps, rather than a new hardening-number milestone, drive the next implementation sequence. Current high-value gaps include custom values/schema evolution, remaining primitive coverage, multi-isolate semantics, and Web/IndexedDB support.
+
+The CI optimization remains infrastructure-only and must stay separate from PR #33 / 0.5 read-path production and benchmark semantics.
 
 ## Deferred beyond current 0.4 slice
 

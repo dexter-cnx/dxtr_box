@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, and the completed 0.4 production-hardening gates.
+This walkthrough describes the current publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, the completed 0.4 production-hardening gates, and the change-aware CI topology.
 
 ## 1. Self-contained package boundary
 
@@ -110,7 +110,7 @@ Box.get
   -> DxtrCodec.decode
 ```
 
-Point reads remain authoritative and native-backed. The 0.3 diagnosis did not justify a Dart whole-box cache.
+Point reads remain authoritative and native-backed. `containsKey` is also authoritative native state. The 0.3/0.5 performance work must not introduce a misleading Dart whole-box cache.
 
 ## 6. Query execution
 
@@ -207,11 +207,11 @@ Real Hive CE 2.19.3 fixtures are isolated under `tool/hive_ce_migration_fixture/
 
 ## 11. FRB drift gate
 
-Checked-in Flutter Rust Bridge 2.8 bindings are regenerated in CI. Any diff under generated Dart/Rust binding output fails the binding-current job.
+Checked-in Flutter Rust Bridge 2.8 bindings are regenerated only when the affected policy requires it or during full merge validation. Any diff under generated Dart/Rust binding output fails the binding-current job.
 
-The Dart runtime dependency remains pinned to FRB 2.8.0 because generated bindings, Dart runtime, Rust runtime, codegen, and macros must remain aligned. The package dry-run ignores pub's broad-constraint advisory warning rather than allowing pub resolution to silently select a newer incompatible FRB runtime.
+The Dart runtime dependency and codegen remain pinned to FRB 2.8.0 because generated bindings, Dart runtime, Rust runtime, codegen, and macros must remain aligned. CI caches only the versioned codegen binary; it does not cache generated native artifacts in a way that can hide ABI/profile changes.
 
-The package refactor does not rename the native Rust library; generated native loading remains based on `rust_lib_dxtr_box`.
+The separate `FRB Probe` workflow is manual diagnostic tooling. The package refactor does not rename the native Rust library; generated native loading remains based on `rust_lib_dxtr_box`.
 
 ## 12. Native-size policy
 
@@ -230,7 +230,7 @@ See `docs/NATIVE_SIZE_POLICY_04.md`.
 
 ## 13. Package publication readiness
 
-PH-02 adds a separate package gate:
+PH-02 adds a package gate:
 
 ```text
 make package-readiness
@@ -289,7 +289,7 @@ repository root
 
 The recursive copy deliberately prunes ignored directories before descending. The validator accepts only explicit `.pubignore` file/directory rules; unsupported wildcard/negation syntax fails closed.
 
-Platform Builds execute staged-consumer builds on Android, iOS, macOS, Linux, and Windows. PH-04 completed in PR #30.
+Five staged-consumer builds still cover Android, iOS, macOS, Linux, and Windows. They now live inside the main CI DAG behind Fast CI instead of an independently-triggered workflow. PH-04 completed in PR #30.
 
 See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md`.
 
@@ -322,9 +322,66 @@ PH-05 is a review/change-control gate; it does not claim that the pre-1.0 API or
 
 See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
 
-## 17. Current milestone
+## 17. Change-aware CI execution
 
-0.3 query/index + Hive CE migration is closed. PH-01 native-size policy, PH-02 package hardening, PH-03 comparison evidence, PH-04 staged published-consumer validation, and PH-05 public API + durable storage contract guarding are complete. The next implementation work returns to `docs/HIVE_FUNCTIONAL_PARITY.md` rather than inventing a new hardening milestone without a product gap.
+The main workflow now has one central change classifier and one fast mandatory gate:
+
+```text
+change-detection
+      |
+      v
+   Fast CI
+      |
+      +--> minimum SDK
+      +--> full Dart tests
+      +--> three Rust profiles
+      |       +--> macOS/Windows platform compilation
+      +--> native integration
+      +--> storage/migration/query regression
+      +--> FRB drift
+      +--> package/publication readiness
+      +--> native-size
+      +--> five staged consumers
+      +--> benchmark correctness/diagnostic smoke
+                  |
+                  v
+        Merge Gate / full quality bar
+```
+
+The detector exports the domains `docs`, `dart_core`, `rust_core`, `encryption`, `ffi`, `durable_storage`, `packaging`, `platform`, `native_size`, `benchmark`, and `ci`, plus public-API and per-platform refinements.
+
+Fast CI runs `make ci-fast`, which is also the basis of local `make preflight`:
+
+```text
+format-check
+  -> Dart format check
+  -> cargo fmt --check
+analyze
+  -> flutter analyze
+test-fast
+  -> codec/Box/public contract Dart tests
+contract-check
+  -> public export + format_version/dxtr_box/1 verifier
+rust-check
+  -> rustfmt
+  -> clippy
+  -> cargo check minimal
+  -> cargo check encryption
+  -> cargo check full
+  -> cheap minimal-profile Rust lib tests
+```
+
+Generic formatting/lint is therefore performed once on Ubuntu. macOS/Windows Rust jobs focus on cross-platform compilation rather than repeating rustfmt/clippy.
+
+Draft PRs use affected CI. Ready-for-review and every later non-draft commit set full validation, so all expensive quality gates must succeed. The stable protected-branch status should be `CI / Merge Gate / full quality bar`; the terminal job rejects skipped jobs in full mode and rejects any failed/cancelled affected job in selective mode.
+
+This is infrastructure scheduling only. It does not change current 0.5 point-read implementation or benchmark semantics.
+
+See `docs/CI_STRATEGY.md`.
+
+## 18. Current milestone
+
+0.3 query/index + Hive CE migration is closed. PH-01 native-size policy, PH-02 package hardening, PH-03 comparison evidence, PH-04 staged published-consumer validation, and PH-05 public API + durable storage contract guarding are complete. The CI optimization is a focused infrastructure PR and must remain separate from PR #33 read-path production/benchmark semantics.
 
 Preserve these invariants:
 
@@ -333,21 +390,28 @@ Preserve these invariants:
 - stable native identity `rust_lib_dxtr_box`;
 - exactly three Rust capability profiles;
 - primary data authoritative over indexes;
+- authoritative native `get` and `containsKey`;
 - one redb read snapshot per declarative query;
 - full predicate re-evaluation after index narrowing;
 - deterministic sorting semantics;
-- encrypted-index leakage prevention;
+- encrypted-index leakage prevention and authenticated encrypted reads/writes;
 - migration reservation ownership and ordinary-open exclusion;
 - self-contained publishable package topology;
 - comparison timing remains diagnostic rather than a release threshold;
 - publication-boundary validation fails closed rather than approximating unsupported ignore rules;
 - `format_version = dxtr_box/1` cannot change without explicit compatibility/migration evidence;
 - public API drift must be an intentional reviewed contract change;
-- hardening must not trade away correctness, durability, encryption, or compatibility.
+- hardening/CI optimization must not trade away correctness, durability, encryption, or compatibility;
+- Dart 3.13 recorded-use/native tree shaking remains deferred.
 
 Important targets:
 
 ```text
+make format-check
+make rust-check
+make analyze
+make test-fast
+make ci-fast
 make preflight
 make package-readiness
 dart run tool/verify_public_storage_contract.dart
@@ -360,7 +424,6 @@ make benchmark-comparison-correctness
 make benchmark-comparison
 make benchmark-query-index
 make diagnose-point-read
-make rust-check
 make native-size-baseline
 make native-size-stability
 make native-size-regression

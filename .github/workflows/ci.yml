@@ -5,84 +5,338 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  FRB_CODEGEN_VERSION: '2.8.0'
+
 jobs:
+  change-detection:
+    name: Change Detection
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+      dart_core: ${{ steps.filter.outputs.dart_core }}
+      rust_core: ${{ steps.filter.outputs.rust_core }}
+      encryption: ${{ steps.filter.outputs.encryption }}
+      ffi: ${{ steps.filter.outputs.ffi }}
+      durable_storage: ${{ steps.filter.outputs.durable_storage }}
+      packaging: ${{ steps.filter.outputs.packaging }}
+      platform: ${{ steps.filter.outputs.platform }}
+      native_size: ${{ steps.filter.outputs.native_size }}
+      benchmark: ${{ steps.filter.outputs.benchmark }}
+      ci: ${{ steps.filter.outputs.ci }}
+      public_api: ${{ steps.filter.outputs.public_api }}
+      android: ${{ steps.filter.outputs.android }}
+      ios: ${{ steps.filter.outputs.ios }}
+      macos: ${{ steps.filter.outputs.macos }}
+      linux: ${{ steps.filter.outputs.linux }}
+      windows: ${{ steps.filter.outputs.windows }}
+      full_validation: ${{ steps.mode.outputs.full_validation }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Classify changed files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+              - 'README.md'
+              - '**/*.md'
+            dart_core:
+              - 'lib/**'
+              - 'test/**'
+              - 'example/**'
+            rust_core:
+              - 'rust/src/**'
+              - 'rust/tests/**'
+              - 'rust/Cargo.toml'
+              - 'rust/Cargo.lock'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            encryption:
+              - 'rust/src/**encrypt**'
+              - 'rust/src/**crypto**'
+              - 'rust/src/**migration**'
+              - 'rust/Cargo.toml'
+              - 'rust/Cargo.lock'
+              - 'test/**encrypt**'
+              - 'test/**migration**'
+            ffi:
+              - 'rust/src/api.rs'
+              - 'rust/src/frb_generated.rs'
+              - 'lib/src/native_api.dart'
+              - 'lib/src/rust/**'
+              - 'flutter_rust_bridge.yaml'
+              - 'tool/scaffold_platforms.sh'
+            durable_storage:
+              - 'rust/src/db.rs'
+              - 'rust/src/**migration**'
+              - 'rust/src/**query**'
+              - 'rust/src/**index**'
+              - 'lib/src/hive_ce_migration.dart'
+              - 'lib/src/query.dart'
+              - 'test/migration_destination_test.dart'
+              - 'test/query_test.dart'
+              - 'test/native_integration_test.dart'
+              - 'tool/hive_ce_migration_fixture/**'
+              - 'tool/verify_public_storage_contract.dart'
+            packaging:
+              - 'pubspec.yaml'
+              - '.pubignore'
+              - 'cargokit/**'
+              - 'cargokit_options.yaml'
+              - 'tool/validate_published_consumer.dart'
+            platform:
+              - 'android/**'
+              - 'ios/**'
+              - 'macos/**'
+              - 'linux/**'
+              - 'windows/**'
+              - 'cargokit/**'
+              - 'cargokit_options.yaml'
+            native_size:
+              - 'rust/src/**'
+              - 'rust/Cargo.toml'
+              - 'rust/Cargo.lock'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'cargokit/**'
+              - 'android/**/CMakeLists.txt'
+              - 'android/**/build.gradle'
+              - 'ios/**/*.podspec'
+              - 'macos/**/*.podspec'
+              - 'linux/**/CMakeLists.txt'
+              - 'windows/**/CMakeLists.txt'
+              - 'tool/native_size_*.sh'
+            benchmark:
+              - 'benchmark/**'
+              - 'test/point_read_diagnosis_test.dart'
+              - 'lib/src/box.dart'
+              - 'lib/src/native_api.dart'
+              - 'rust/src/api.rs'
+              - 'rust/src/db.rs'
+            ci:
+              - '.github/workflows/**'
+              - 'Makefile'
+              - 'tool/**'
+            public_api:
+              - 'lib/dxtr_box.dart'
+              - 'lib/src/box.dart'
+              - 'lib/src/box_event.dart'
+              - 'lib/src/dxtr_box.dart'
+              - 'lib/src/hive_ce_migration.dart'
+              - 'lib/src/query.dart'
+              - 'test/public_api_contract_test.dart'
+              - 'tool/verify_public_storage_contract.dart'
+            android:
+              - 'android/**'
+            ios:
+              - 'ios/**'
+            macos:
+              - 'macos/**'
+            linux:
+              - 'linux/**'
+            windows:
+              - 'windows/**'
+      - name: Resolve validation mode
+        id: mode
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" || "${{ github.event.pull_request.draft }}" == "false" ]]; then
+            echo 'full_validation=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'full_validation=false' >> "$GITHUB_OUTPUT"
+          fi
+
+  fast-ci:
+    name: Fast CI
+    needs: change-detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          cache: true
+          cache-workspaces: rust
+      - name: Fast mandatory gate
+        run: make ci-fast
+
   minimum-sdk:
     name: Minimum SDK / Flutter 3.22.0 + Dart 3.4.0
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.dart_core == 'true' || needs.change-detection.outputs.public_api == 'true' || needs.change-detection.outputs.packaging == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up minimum Flutter
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.0'
           channel: stable
           cache: true
-      - name: Verify minimum toolchain
-        run: flutter --version
-      - name: Install dependencies at minimum SDK
-        run: flutter pub get
-      - name: Analyze at minimum SDK
-        run: flutter analyze
-      - name: Test at minimum SDK
-        run: flutter test --reporter expanded
+      - run: flutter --version
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test --reporter expanded
 
-  flutter:
-    name: Flutter / analyze + test
+  dart-tests:
+    name: Dart / full tests
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.dart_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.durable_storage == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-      - name: Flutter version
-        run: flutter --version
-      - name: Install dependencies
-        run: flutter pub get
-      - name: Check formatting
-        run: |
-          dart format lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
-          git diff --exit-code -- lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
-      - name: Analyze
-        run: flutter analyze
-      - name: Public API + durable storage contract
-        run: dart run tool/verify_public_storage_contract.dart
-      - name: Test
-        run: flutter test --reporter expanded
-      - name: Install benchmark dependencies
-        working-directory: benchmark
-        run: flutter pub get
-      - name: Analyze benchmark package
-        working-directory: benchmark
-        run: flutter analyze
+      - run: flutter pub get
+      - run: flutter test --reporter expanded
 
-  package-readiness:
-    name: Package / docs + pub dry-run
+  rust-profiles:
+    name: Rust / three profiles
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.encryption == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.durable_storage == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - name: Test exactly minimal, encryption, and full
+        run: make rust-test-profiles
+
+  rust-cross-platform:
+    name: Rust platform / ${{ matrix.os }}
+    needs: [change-detection, fast-ci, rust-profiles]
+    if: ${{ always() && needs.fast-ci.result == 'success' && (needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.encryption == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.durable_storage == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: cargo check --manifest-path rust/Cargo.toml --all-targets --no-default-features
+      - run: cargo check --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
+      - run: cargo check --manifest-path rust/Cargo.toml --all-targets
+
+  native-integration:
+    name: Native / integration
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.encryption == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.durable_storage == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: make native-test
+
+  storage-migration:
+    name: Storage / migration + query regression
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.durable_storage == 'true' || needs.change-detection.outputs.encryption == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: make contract-check
+      - run: make hive-ce-migration-test
+      - run: make query-index-test
+      - run: make query-sort-test
+      - run: make process-crash
+
+  frb-bindings:
+    name: FRB / generated bindings current
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.ffi == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: flutter pub get
+      - name: Cache FRB codegen binary
+        id: frb-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/flutter_rust_bridge_codegen
+          key: frb-codegen-${{ runner.os }}-${{ env.FRB_CODEGEN_VERSION }}
+      - name: Install pinned FRB codegen
+        if: steps.frb-cache.outputs.cache-hit != 'true'
+        run: cargo install flutter_rust_bridge_codegen --version "${FRB_CODEGEN_VERSION}" --locked
+      - run: flutter_rust_bridge_codegen generate
+      - run: git diff --exit-code -- lib/src/rust rust/src/frb_generated.rs
+
+  package-readiness:
+    name: Package / docs + pub dry-run
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.public_api == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
       - name: Verify self-contained native plugin layout
+        shell: bash
         run: |
           test ! -d rust_builder
           test -f rust/Cargo.toml
@@ -96,152 +350,34 @@ jobs:
             echo 'publishable dependencies must not use path sources' >&2
             exit 1
           fi
-      - name: Install dependencies
-        run: flutter pub get
-      - name: Generate public API docs
-        run: dart doc --output build/doc
-      - name: Pub publication dry-run
-        run: dart pub publish --dry-run --ignore-warnings
-
-  frb-bindings:
-    name: FRB / generated bindings current
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          cache: true
-          cache-workspaces: rust
-      - name: Install dependencies
-        run: flutter pub get
-      - name: Install flutter_rust_bridge_codegen 2.8.0
-        run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
-      - name: Regenerate FRB bindings
-        run: flutter_rust_bridge_codegen generate
-      - name: Upload regenerated bindings
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: frb-generated-bindings
-          path: |
-            lib/src/rust
-            rust/src/frb_generated.rs
-          if-no-files-found: error
-          retention-days: 3
-      - name: Verify generated bindings are committed
-        run: git diff --exit-code -- lib/src/rust rust/src/frb_generated.rs
-
-  native-linux:
-    name: Native / Linux FRB + comparison gates
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          cache: true
-          cache-workspaces: rust
-      - name: Install dependencies
-        run: flutter pub get
-      - name: Build Rust release library
-        run: cargo build --manifest-path rust/Cargo.toml --release
-      - name: Native round-trip test
-        env:
-          DXTR_BOX_NATIVE_TEST: '1'
-          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
-        run: flutter test test/native_integration_test.dart --reporter expanded
-      - name: Install Hive CE migration fixture dependencies
-        working-directory: tool/hive_ce_migration_fixture
-        run: flutter pub get
-      - name: Analyze Hive CE migration fixture
-        working-directory: tool/hive_ce_migration_fixture
-        run: flutter analyze
-      - name: Real Hive CE 2.19.3 migration fixtures
-        working-directory: tool/hive_ce_migration_fixture
-        env:
-          DXTR_BOX_NATIVE_TEST: '1'
-          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
-        run: flutter test --reporter expanded
-      - name: Install benchmark dependencies
-        working-directory: benchmark
-        run: flutter pub get
-      - name: Benchmark smoke harness
-        working-directory: benchmark
-        env:
-          DXTR_BOX_BENCHMARK: '1'
-          DXTR_BOX_BENCHMARK_OPS: '100'
-          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
-        run: flutter test test/benchmark_smoke_test.dart --reporter expanded
-      - name: Broader local database correctness gate
-        working-directory: benchmark
-        env:
-          DXTR_BOX_COMPARISON: '1'
-          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
-        run: flutter test test/local_database_correctness_test.dart --reporter expanded
-      - name: Broader local database diagnostic smoke
-        working-directory: benchmark
-        env:
-          DXTR_BOX_COMPARISON_BENCHMARK: '1'
-          DXTR_BOX_COMPARISON_OPS: '100'
-          DXTR_BOX_COMPARISON_OUTPUT: build/comparison/local-database-comparison.jsonl
-          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
-        run: flutter test test/local_database_benchmark_test.dart --reporter expanded
-      - name: Upload local database comparison evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: local-database-comparison
-          path: benchmark/build/comparison/local-database-comparison.jsonl
-          if-no-files-found: warn
-          retention-days: 14
+      - run: make package-readiness
 
   native-size:
     name: Native size / Linux x64 policy
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.native_size == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout exact candidate with comparison history
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Measure minimal, encryption, and full profiles
-        run: bash tool/native_size_baseline.sh
-      - name: Verify same-commit size reproducibility
-        env:
-          DXTR_BOX_SIZE_RUNS: '3'
-        run: bash tool/native_size_stability.sh
-      - name: Enforce controlled cross-commit growth budget
-        env:
-          DXTR_BOX_SIZE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
-          DXTR_BOX_SIZE_MAX_GROWTH_BYTES: '65536'
-          DXTR_BOX_SIZE_MAX_GROWTH_PERCENT: '3'
-        run: bash tool/native_size_regression.sh
-      - name: Upload native size measurements
-        if: always()
+      - run: make native-size-baseline
+      - env:
+          SIZE_STABILITY_RUNS: '3'
+        run: make native-size-stability
+      - env:
+          SIZE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          SIZE_MAX_GROWTH_BYTES: '65536'
+          SIZE_MAX_GROWTH_PERCENT: '3'
+        run: make native-size-regression
+      - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: native-size-linux-x64
@@ -252,31 +388,201 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  rust:
-    name: Rust / ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+  platform-android:
+    name: Platform consumer / Android
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.android == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          components: rustfmt, clippy
           cache: true
           cache-workspaces: rust
-      - name: Check formatting
-        run: cargo fmt --manifest-path rust/Cargo.toml -- --check
-      - name: Clippy full profile
-        run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
-      - name: Test minimal profile
-        run: cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features
-      - name: Test encryption profile
-        run: cargo test --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
-      - name: Test full profile
-        run: cargo test --manifest-path rust/Cargo.toml --all-targets
+      - run: dart run tool/validate_published_consumer.dart --platform=android
+
+  platform-linux:
+    name: Platform consumer / Linux
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.linux == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build libgtk-3-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: dart run tool/validate_published_consumer.dart --platform=linux
+
+  platform-windows:
+    name: Platform consumer / Windows
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.windows == 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: dart run tool/validate_published_consumer.dart --platform=windows
+
+  platform-macos:
+    name: Platform consumer / macOS
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.macos == 'true' }}
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: dart run tool/validate_published_consumer.dart --platform=macos
+
+  platform-ios:
+    name: Platform consumer / iOS
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.ios == 'true' }}
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: dart run tool/validate_published_consumer.dart --platform=ios
+
+  benchmark-diagnostics:
+    name: Benchmark / correctness + diagnostic smoke
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.benchmark == 'true' || needs.change-detection.outputs.durable_storage == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: make benchmark-smoke
+      - run: make benchmark-comparison-correctness
+      - name: Diagnostic comparison timing
+        env:
+          DXTR_BOX_COMPARISON_OUTPUT: build/comparison/local-database-comparison.jsonl
+        run: make benchmark-comparison
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-database-comparison
+          path: benchmark/build/comparison/local-database-comparison.jsonl
+          if-no-files-found: warn
+          retention-days: 14
+
+  merge-gate:
+    name: Merge Gate / full quality bar
+    if: always()
+    needs:
+      - change-detection
+      - fast-ci
+      - minimum-sdk
+      - dart-tests
+      - rust-profiles
+      - rust-cross-platform
+      - native-integration
+      - storage-migration
+      - frb-bindings
+      - package-readiness
+      - native-size
+      - platform-android
+      - platform-linux
+      - platform-windows
+      - platform-macos
+      - platform-ios
+      - benchmark-diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required validation results
+        env:
+          FULL: ${{ needs.change-detection.outputs.full_validation }}
+          CHANGE_DETECTION: ${{ needs.change-detection.result }}
+          FAST_CI: ${{ needs.fast-ci.result }}
+          MINIMUM_SDK: ${{ needs.minimum-sdk.result }}
+          DART_TESTS: ${{ needs.dart-tests.result }}
+          RUST_PROFILES: ${{ needs.rust-profiles.result }}
+          RUST_CROSS_PLATFORM: ${{ needs.rust-cross-platform.result }}
+          NATIVE_INTEGRATION: ${{ needs.native-integration.result }}
+          STORAGE_MIGRATION: ${{ needs.storage-migration.result }}
+          FRB_BINDINGS: ${{ needs.frb-bindings.result }}
+          PACKAGE_READINESS: ${{ needs.package-readiness.result }}
+          NATIVE_SIZE: ${{ needs.native-size.result }}
+          PLATFORM_ANDROID: ${{ needs.platform-android.result }}
+          PLATFORM_LINUX: ${{ needs.platform-linux.result }}
+          PLATFORM_WINDOWS: ${{ needs.platform-windows.result }}
+          PLATFORM_MACOS: ${{ needs.platform-macos.result }}
+          PLATFORM_IOS: ${{ needs.platform-ios.result }}
+          BENCHMARK_DIAGNOSTICS: ${{ needs.benchmark-diagnostics.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CHANGE_DETECTION" == success ]]
+          [[ "$FAST_CI" == success ]]
+
+          results=(
+            "$MINIMUM_SDK" "$DART_TESTS" "$RUST_PROFILES" "$RUST_CROSS_PLATFORM"
+            "$NATIVE_INTEGRATION" "$STORAGE_MIGRATION" "$FRB_BINDINGS"
+            "$PACKAGE_READINESS" "$NATIVE_SIZE" "$PLATFORM_ANDROID"
+            "$PLATFORM_LINUX" "$PLATFORM_WINDOWS" "$PLATFORM_MACOS"
+            "$PLATFORM_IOS" "$BENCHMARK_DIAGNOSTICS"
+          )
+          for result in "${results[@]}"; do
+            if [[ "$result" == failure || "$result" == cancelled ]]; then
+              echo "A required/affected validation job ended as $result" >&2
+              exit 1
+            fi
+          done
+
+          if [[ "$FULL" == true ]]; then
+            for result in "${results[@]}"; do
+              if [[ "$result" != success ]]; then
+                echo "Full validation requires success, got: $result" >&2
+                exit 1
+              fi
+            done
+          fi
