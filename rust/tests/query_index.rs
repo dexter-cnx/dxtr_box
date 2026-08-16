@@ -159,6 +159,131 @@ fn native_scan_and_persisted_index_lifecycle() {
     close_box("people".to_string()).unwrap();
 }
 
+fn comparison_query(field: &str, operator: &str, value: Value, upper: Value) -> Vec<u8> {
+    let comparison = dxtr_map(vec![
+        ("type", Value::from("comparison")),
+        ("field", Value::from(field)),
+        ("operator", Value::from(operator)),
+        ("value", value),
+        ("upperValue", upper),
+    ]);
+    encode(&dxtr_map(vec![
+        ("where", comparison),
+        ("limit", Value::Nil),
+        ("offset", Value::from(0_u64)),
+    ]))
+}
+
+fn result_keys(box_name: &str, payload: Vec<u8>) -> Vec<String> {
+    scan_query(box_name.to_string(), payload)
+        .unwrap()
+        .into_iter()
+        .map(|record| record.key)
+        .collect()
+}
+
+#[test]
+fn nested_range_index_matches_scan_for_all_ordered_operators() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    init_db(dir.path().to_string_lossy().to_string()).unwrap();
+    open_box("ages".to_string(), None).unwrap();
+
+    for (key, age) in [("a", 17), ("b", 18), ("c", 22), ("d", 40), ("e", 65)] {
+        put("ages".to_string(), key.to_string(), person("active", age)).unwrap();
+    }
+
+    let queries = vec![
+        comparison_query(
+            "profile.age",
+            "greaterThan",
+            Value::from(18_i64),
+            Value::Nil,
+        ),
+        comparison_query(
+            "profile.age",
+            "greaterThanOrEqual",
+            Value::from(18_i64),
+            Value::Nil,
+        ),
+        comparison_query("profile.age", "lessThan", Value::from(40_i64), Value::Nil),
+        comparison_query(
+            "profile.age",
+            "lessThanOrEqual",
+            Value::from(40_i64),
+            Value::Nil,
+        ),
+        comparison_query(
+            "profile.age",
+            "between",
+            Value::from(18_i64),
+            Value::from(40_i64),
+        ),
+    ];
+    let scan_results = queries
+        .iter()
+        .cloned()
+        .map(|payload| result_keys("ages", payload))
+        .collect::<Vec<_>>();
+
+    create_index(
+        "ages".to_string(),
+        "by-age".to_string(),
+        "profile.age".to_string(),
+    )
+    .unwrap();
+
+    let indexed_results = queries
+        .into_iter()
+        .map(|payload| result_keys("ages", payload))
+        .collect::<Vec<_>>();
+    assert_eq!(indexed_results, scan_results);
+
+    close_box("ages".to_string()).unwrap();
+}
+
+#[test]
+fn and_group_intersects_multiple_persisted_indexes() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    init_db(dir.path().to_string_lossy().to_string()).unwrap();
+    open_box("intersection".to_string(), None).unwrap();
+
+    for (key, status, age) in [
+        ("alice", "active", 22),
+        ("bob", "inactive", 35),
+        ("charlie", "active", 40),
+        ("teen", "active", 17),
+    ] {
+        put(
+            "intersection".to_string(),
+            key.to_string(),
+            person(status, age),
+        )
+        .unwrap();
+    }
+
+    let scan = result_keys("intersection", query_payload());
+    create_index(
+        "intersection".to_string(),
+        "by-status".to_string(),
+        "status".to_string(),
+    )
+    .unwrap();
+    create_index(
+        "intersection".to_string(),
+        "by-age".to_string(),
+        "profile.age".to_string(),
+    )
+    .unwrap();
+
+    let indexed = result_keys("intersection", query_payload());
+    assert_eq!(indexed, scan);
+    assert_eq!(indexed, vec!["alice", "charlie"]);
+
+    close_box("intersection".to_string()).unwrap();
+}
+
 #[test]
 fn encrypted_box_uses_scan_but_rejects_persisted_index_creation() {
     let _guard = TEST_LOCK.lock().unwrap();

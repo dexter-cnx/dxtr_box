@@ -2,29 +2,25 @@
 
 ## Current status
 
-The 0.3 query/index engine now has both an authoritative native scan path and a conservative persisted-index planner path.
+The 0.3 query/index engine has an authoritative native scan path plus a conservative persisted-index planner path.
 
 Implemented:
 
-- `Box.query(BoxQuery)` serializes the public Dart AST with `DxtrCodec` and performs one FRB call per query.
-- Rust decodes the query once, evaluates comparisons/groups against committed native records, supports dotted nested-field lookup, and applies deterministic record-key ordering before pagination.
-- Integer comparisons preserve signed/unsigned MessagePack precision instead of collapsing all numbers through `f64`.
-- Native scans work for plaintext and encrypted boxes. Encrypted records are decrypted only inside the trusted native storage path.
-- Persisted named scalar secondary-index definitions and entries exist in redb under the `full` profile.
-- Index create/backfill/drop and primary mutation maintenance are transactionally coupled to redb writes.
-- A conservative planner can use a matching persisted index for scalar `equal` predicates at the top level or underneath an `AND` group.
-- Index-backed execution only narrows candidate record keys. The normal predicate evaluator always re-checks candidates before ordering/pagination.
-- Queries without a safe planner candidate fall back to native scan.
-- Scan/index equivalence coverage runs the same logical query before and after index creation and verifies identical result payloads and indexed-field mutation behavior.
-- Encrypted boxes intentionally reject persisted index creation until a non-leaking encrypted-index representation is designed; native scan queries remain available.
-- Plaintext -> encrypted migration is rejected while persisted index definitions exist.
-- Reduced profiles reject opening a box that already contains persisted index definitions, preventing primary mutation without derived-index maintenance.
-
-## Scope
-
-0.3 introduces structured query and secondary-index capabilities without weakening storage, encryption, durability, lifecycle, SDK, or Cargo profile contracts.
-
-The Dart AST remains execution-agnostic. Planner changes are internal native implementation details and must not alter normal query construction or logical results.
+- `Box.query(BoxQuery)` performs one FRB call per query.
+- Rust decodes the query once and evaluates committed native records.
+- Dotted nested-field lookup is supported.
+- Numeric comparison preserves signed/unsigned MessagePack integer precision.
+- Native scans work for plaintext and encrypted boxes.
+- Persisted named single-field scalar indexes exist in the `full` profile.
+- Index creation/backfill/drop and primary mutation maintenance are transactionally coupled to redb writes.
+- Planner eligibility now includes scalar `equal`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, `lessThanOrEqual`, and `between` predicates at the top level or underneath `AND` groups.
+- Matching indexes may be combined by intersecting candidate key sets for `AND` groups.
+- Nested indexed fields such as `profile.age` are planner-eligible when the persisted definition exactly matches the dotted field path.
+- The complete original predicate is always re-evaluated against current primary data before ordering/pagination.
+- Queries without a safe usable index fall back to native scan.
+- Scan/index equivalence coverage exists for equality, nested range operators, inclusive `between`, and multi-index AND intersection.
+- Encrypted boxes reject persisted index creation until a non-leaking representation exists; native scan remains supported.
+- Reduced profiles reject boxes that already contain persisted index definitions.
 
 ## Public profile contract
 
@@ -38,23 +34,7 @@ full        = encryption + maintenance + query/index implementation
 
 Do not add a fourth public query profile.
 
-`full` may include internal optional dependencies required by query/index implementation. Reduced profiles retain the stable FRB symbol surface and fail explicitly for unavailable capabilities. Boxes containing persisted index definitions require `full` for safe mutation.
-
-## Public naming policy
-
-`Dxtr` is reserved for the product/root namespace such as `DxtrBox`. Feature-level public types use domain names:
-
-```text
-BoxQuery
-QueryFilter
-QueryComparison
-QueryGroup
-QueryOperator
-QueryLogicalOperator
-IndexDefinition
-```
-
-## Dart query model
+## Public query model
 
 ```text
 BoxQuery
@@ -82,7 +62,7 @@ isNull
 isNotNull
 ```
 
-Fields use dotted paths such as `status`, `profile.age`, and `address.country`.
+Fields may be dotted paths such as `status`, `profile.age`, and `address.country`.
 
 ## Persisted index contract
 
@@ -90,65 +70,106 @@ Initial indexes are named single-field scalar indexes:
 
 ```dart
 IndexDefinition(
-  name: 'by-status',
-  field: 'status',
+  name: 'by-age',
+  field: 'profile.age',
 )
 ```
 
-Current constraints:
+Constraints:
 
-- one indexed dotted field path per index;
+- one dotted field path per index;
 - scalar index keys only;
-- no composite indexes;
-- no uniqueness contract;
-- no full text;
+- no composite or unique indexes;
 - no list expansion;
+- no full text;
 - no custom collation;
 - persisted index creation is plaintext-only.
 
-Primary `data` remains authoritative. Secondary indexes are always derived state.
+Primary `data` is authoritative. Secondary indexes are derived state.
 
 redb layout:
 
 ```text
 data
 meta
-index_definitions   # name -> dotted field path
-index_entries       # length-aware encoded index name + scalar + record key
+index_definitions
+index_entries
 ```
 
-Index mutation is transactionally coupled to primary mutation. A committed `put`, `putAll`, `delete`, `deleteAll`, or `clear` cannot leave persisted index state describing a different committed primary state.
+## Planner eligibility
 
-## Planner contract
-
-The first planner is intentionally conservative.
-
-Planner-eligible narrowing currently means:
+The planner may narrow candidates for these operators when the query bound is index-compatible and a persisted index exists for the exact field:
 
 ```text
-QueryComparison(equal)
-  where value is scalar
-  and persisted index exists for the exact field
-
-OR
-
-QueryGroup.and([...])
-  containing at least one such equality comparison
+equal
+greaterThan
+greaterThanOrEqual
+lessThan
+lessThanOrEqual
+between
 ```
 
-The planner deliberately does **not** use an equality predicate found only inside an `OR` group. It also does not yet use range, `between`, inequality, or null-specific operators for index narrowing.
+Range operators currently accept ordered numeric or string scalar bounds.
 
-Execution shape:
+Planner extraction is allowed at the top level and recursively through `AND` groups. The planner deliberately does not descend into `OR` groups because narrowing by only some OR branches could remove valid results.
+
+`notEqual`, `isNull`, and `isNotNull` remain scan-backed.
+
+## Multi-index AND planning
+
+For an AND query with multiple usable persisted indexes, each indexed predicate produces a candidate record-key set. Sets are sorted by cardinality and intersected starting from the smallest.
+
+```text
+AND
+  status == active      -> by-status candidate set
+  profile.age >= 18     -> by-age candidate set
+
+intersection
+  -> candidate record keys
+  -> current primary reads
+  -> full predicate recheck
+```
+
+A missing index does not make the query fail. Remaining usable indexes may still narrow the candidate set, and any non-indexed predicates are evaluated against primary data during the mandatory recheck.
+
+## Persisted entry representation
+
+Index entries use length-prefixed binary components:
+
+```text
+[index-name length][index-name bytes]
+[scalar length][MessagePack scalar bytes]
+[record-key length][record-key UTF-8 bytes]
+```
+
+This avoids delimiter ambiguity.
+
+## Range lookup correctness rule
+
+MessagePack scalar bytes are not treated as a general sort-preserving numeric representation. In particular, lexicographic byte order must not be assumed to equal query numeric order across MessagePack integer encodings.
+
+Therefore the current range planner is correctness-first:
+
+```text
+matching index definition
+  -> inspect entries belonging to that index
+  -> decode persisted scalar component
+  -> compare scalar with the same comparator used by the query engine
+  -> collect matching record keys
+```
+
+A future redb range-seek optimization requires an order-preserving scalar encoding or equivalent proven ordering contract. Raw MessagePack numeric bytes are not sufficient by themselves.
+
+## Execution shape
 
 ```text
 Box.query(BoxQuery)
   -> one FRB call
   -> query::decode_query once
-  -> planner inspects filter
-  -> if safe matching persisted equality index exists:
-       read candidate record keys from index_entries
-     else:
-       enumerate primary keys
+  -> index::candidate_keys(filter)
+       -> usable index candidate sets
+       -> optional AND intersection
+       -> None when scan is required
   -> sort + deduplicate candidate keys
   -> read current primary record
   -> decrypt if needed
@@ -158,76 +179,43 @@ Box.query(BoxQuery)
   -> return matching key + payload records
 ```
 
-The index is never trusted as the final predicate result. Candidate re-evaluation protects semantics from planner broadening and keeps the primary table authoritative.
+The index is candidate narrowing only. It is never final truth.
 
-## Equality lookup representation
+## Scan/index equivalence gate
 
-The persisted entry encoding uses length-prefixed binary components rather than delimiter concatenation:
+Equivalence is required for every planner-eligible operator.
 
-```text
-[index-name length][index-name bytes]
-[scalar length][MessagePack scalar bytes]
-[record-key length][record-key UTF-8 bytes]
-```
+Current integration coverage verifies:
 
-For an eligible equality query the planner reconstructs the index-name + scalar prefix, finds matching derived entries, decodes record keys, and then re-checks primary records.
+1. A query before index creation executes through scan.
+2. The exact same query after index creation returns the same ordered results.
+3. Nested `profile.age` indexes match scan semantics for `>`, `>=`, `<`, `<=`, and inclusive `between`.
+4. An AND query with indexes on both `status` and `profile.age` returns the same results after candidate-set intersection.
+5. Transactional indexed-field mutation changes planner results correctly.
+6. Reopen preserves index definitions.
+7. Encrypted boxes continue to use scan and reject persisted index creation.
 
-This slice prioritizes correctness. Entry lookup currently iterates the index table and filters by the encoded prefix rather than introducing a more aggressive redb range implementation. Range-level optimization can follow after planner semantics are stable.
-
-## Scan/index equivalence
-
-Equivalence is a release gate for every planner-eligible operator.
-
-Current integration coverage proves:
-
-1. Query without an index executes via native scan.
-2. The exact same query after index creation returns the same ordered keys and payloads.
-3. Changing an indexed field transactionally updates the index and changes planner results correctly.
-4. Closing/reopening preserves index definitions.
-5. Encrypted boxes continue to use scan because persisted index creation is rejected.
-
-Any future planner eligibility expansion must add matching scan-vs-index equivalence tests before being considered complete.
+Future planner rules must add equivalent scan-vs-index coverage first.
 
 ## Numeric correctness
 
-MessagePack integers are compared exactly across signed and unsigned integer domains. Large integers above the exact `f64` range must not become equal merely because both would round to the same float.
+MessagePack integers are compared exactly across signed and unsigned domains. Large integers above the exact `f64` range must not become equal due to float rounding. Mixed integer/float comparisons use explicit boundary handling.
 
-Mixed integer/float comparison handles finite bounds and infinities explicitly while preserving integer precision where possible.
+The same comparator semantics are reused for persisted range candidate matching.
 
 ## Encryption semantics
 
-For encrypted boxes:
-
-- primary payloads remain authenticated ciphertext at rest;
-- native scan code may inspect decrypted MessagePack only inside the trusted storage path;
-- persisted secondary index keys must not silently leak plaintext indexed values.
-
-Therefore encrypted boxes reject persisted index creation. Native scan queries remain supported.
-
-A plaintext box with persisted index definitions cannot be migrated to encrypted storage until encrypted-index representation and migration semantics are designed.
+Encrypted boxes may use native scan query. Persisted index creation is rejected because plaintext-derived scalar keys would leak indexed values. Plaintext-to-encrypted migration is rejected while persisted index definitions exist.
 
 ## Reduced-profile safety
 
-`minimal` and `encryption` builds do not include persisted-index maintenance. Therefore they reject opening a box that already contains persisted index definitions.
+`minimal` and `encryption` builds do not maintain persisted indexes and therefore reject opening boxes that already contain index definitions. Explicit rejection prevents stale derived state.
 
-This avoids the unsafe state:
+## Binary-size and SDK policy
 
-```text
-full creates index
--> reduced profile opens box
--> reduced profile mutates primary data without index maintenance
--> full reopens stale index
-```
+Cross-commit binary-size regression policy remains separate from query/index work. Dart 3.13 recorded-use/native tree shaking remains deferred. The package floor remains Dart >= 3.4.0 and Flutter >= 3.22.0.
 
-The safe contract is explicit rejection rather than silent index corruption.
-
-## Binary-size policy
-
-PR #13 same-commit native-size reproducibility remains intact. Query/index work must not invent a cross-commit binary-size threshold. That remains a separate hardening policy.
-
-## Next planner sequence
-
-Completed:
+## Completed 0.3 planner sequence
 
 1. Dart query/index AST and validation.
 2. Stable native transport representation.
@@ -235,39 +223,28 @@ Completed:
 4. Persisted scalar index metadata and entries.
 5. Transactional index maintenance.
 6. Index lifecycle create/backfill/list/drop.
-7. Conservative equality planner.
-8. Scan/index equivalence for the first eligible planner path.
+7. Equality planner.
+8. Equality scan/index equivalence.
 9. Reduced-profile persisted-index safety guard.
+10. Nested range planner for `>`, `>=`, `<`, `<=`, and `between`.
+11. Multi-index candidate intersection for AND groups.
+12. Range and intersection scan/index equivalence coverage.
 
-Next:
+## Next
 
-10. Add planner diagnostics/selection tests if needed without changing public API prematurely.
-11. Consider multiple-index candidate intersection for `AND` groups after measuring value.
-12. Add safe range/index execution only with exact ordering and equivalence coverage.
-13. Improve index lookup from table-prefix filtering to an efficient redb range strategy where semantics remain identical.
-14. Consider one-redb-read-transaction native scan execution as a separate architecture/performance improvement.
-15. Add query/index benchmarks only after each semantic path is proven equivalent.
+1. Improve persisted-index lookup efficiency without relying on raw MessagePack numeric byte ordering.
+2. Consider one-redb-read-transaction query execution.
+3. Add planner diagnostics/selection tests only if they improve maintainability without expanding public API prematurely.
+4. Define `sortBy` as a separate public API contract.
+5. Add query/index benchmark scenarios only after semantic paths remain stable.
 
 ## Correctness rules
 
-- Query results come from committed native truth, not stale Dart metadata.
+- Query results come from committed native truth.
 - Primary `data` is authoritative; indexes are derived state.
-- The planner may narrow candidates but may not skip complete predicate re-evaluation.
-- Scan and indexed execution must return equivalent logical results.
-- Pagination is applied after deterministic record-key ordering unless a future explicit sort contract supersedes it.
-- Index creation/backfill failure must not corrupt primary data.
-- Reduced profiles must reject unsafe persisted-index boxes rather than silently changing behavior.
-- Encrypted indexed fields must never leak through plaintext persisted index keys.
-- No Dart whole-box value cache is introduced merely to improve benchmark numbers.
-
-## Out of scope for this slice
-
-- range/index planner eligibility;
-- OR-index union planning;
-- composite or unique indexes;
-- full-text search;
-- encrypted persisted-index representation;
-- explicit `sortBy` contract;
-- cross-commit binary-size policy;
-- Dart 3.13 recorded-use/native tree shaking;
-- Hive-file migration implementation.
+- The planner may narrow candidates but may not skip full predicate re-evaluation.
+- Scan and indexed execution must be logically equivalent.
+- Pagination occurs after deterministic key ordering until an explicit sort contract supersedes it.
+- Reduced profiles reject unsafe persisted-index boxes.
+- Encrypted indexed fields must not leak through plaintext persisted index keys.
+- Raw MessagePack numeric byte ordering must not be used as query numeric ordering.
