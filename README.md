@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.4 Production Hardening active**. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are not stable yet.
+> Status: **0.4 Production Hardening active**. PH-01 native-size policy and PH-02 package hardening are complete; PH-03 broader local-database comparison is active. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are not stable yet.
 
 ## Compatibility
 
@@ -198,7 +198,24 @@ make package-readiness
 
 This runs public API documentation generation and `dart pub publish --dry-run`. CI also checks that consumer-required Rust/Cargokit/platform files are present and that no publishable dependency uses a path source. The five-platform example build workflow remains mandatory because a successful pub dry-run does not prove native builds.
 
+`flutter_rust_bridge` remains pinned to 2.8.0 because checked-in generated bindings and native runtime must remain on the same FRB version; the pub dry-run therefore ignores the advisory broad-dependency warning while still failing validation errors.
+
 No package is automatically published by CI or by PH-02. See `docs/PACKAGE_RELEASE_04.md`.
+
+## Local database comparison
+
+PH-03 broadens benchmark evidence beyond Hive CE. The current matrix runs `dxtr_box`, Hive CE, Sembast, and SQLite through `sqflite_common_ffi`.
+
+Correctness and timing are intentionally separate:
+
+```bash
+make benchmark-comparison-correctness
+make benchmark-comparison
+```
+
+The correctness gate verifies a shared CRUD/overwrite/delete/close/reopen workload converges to the same persisted snapshot across all four engines. The diagnostic matrix measures sequential put, batch put, point get, contains, delete-all, and reopen-read, but **does not assert that any engine must be faster than another**.
+
+CI uploads machine-readable JSONL evidence as the `local-database-comparison` artifact. Hosted-runner timing is diagnostic only and must not be presented as stable product performance. See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
 
 ## Developer workflow
 
@@ -216,6 +233,8 @@ make query-index-test
 make query-sort-test
 make process-crash
 make benchmark-smoke
+make benchmark-comparison-correctness
+make benchmark-comparison
 make benchmark-query-index
 make diagnose-point-read
 make rust-check
@@ -240,6 +259,7 @@ make example-windows
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture.
 - `docs/PACKAGE_RELEASE_04.md` — self-contained plugin and publication-readiness contract.
 - `docs/NATIVE_SIZE_POLICY_04.md` — controlled native-size regression policy.
+- `docs/LOCAL_DATABASE_COMPARISON_04.md` — PH-03 correctness + diagnostic comparison contract.
 - `docs/QUERY_INDEX_03.md` — query/index semantics and planner constraints.
 - `docs/HIVE_CE_MIGRATION_03.md` — Hive CE migration contract and failure behavior.
 - `docs/HIVE_FUNCTIONAL_PARITY.md` — 1.0 Hive/Hive CE functional-parity release gate.
