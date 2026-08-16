@@ -64,13 +64,13 @@ final class QuerySort {
 
 final class QueryGroup extends QueryFilter {
   QueryGroup.and(Iterable<QueryFilter> filters)
-    : this._(QueryLogicalOperator.and, filters);
+      : this._(QueryLogicalOperator.and, filters);
 
   QueryGroup.or(Iterable<QueryFilter> filters)
-    : this._(QueryLogicalOperator.or, filters);
+      : this._(QueryLogicalOperator.or, filters);
 
   QueryGroup._(this.operator, Iterable<QueryFilter> filters)
-    : filters = List<QueryFilter>.unmodifiable(filters) {
+      : filters = List<QueryFilter>.unmodifiable(filters) {
     if (this.filters.isEmpty) {
       throw ArgumentError.value(
         filters,
