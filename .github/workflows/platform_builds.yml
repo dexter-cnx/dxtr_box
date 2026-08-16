@@ -14,6 +14,8 @@ on:
       - linux/**
       - windows/**
       - pubspec.yaml
+      - .pubignore
+      - tool/validate_published_consumer.dart
       - .github/workflows/platform_builds.yml
   workflow_dispatch:
 
@@ -26,7 +28,7 @@ concurrency:
 
 jobs:
   android:
-    name: Android example
+    name: Android published consumer
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -40,14 +42,11 @@ jobs:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Build Android debug APK
-        working-directory: example
-        run: |
-          flutter pub get
-          flutter build apk --debug
+      - name: Stage payload and build Android consumer
+        run: dart run tool/validate_published_consumer.dart --platform=android
 
   linux:
-    name: Linux example
+    name: Linux published consumer
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -63,15 +62,11 @@ jobs:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Build Linux debug app
-        working-directory: example
-        run: |
-          flutter pub get
-          flutter config --enable-linux-desktop
-          flutter build linux --debug
+      - name: Stage payload and build Linux consumer
+        run: dart run tool/validate_published_consumer.dart --platform=linux
 
   windows:
-    name: Windows example
+    name: Windows published consumer
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -85,15 +80,11 @@ jobs:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Build Windows debug app
-        working-directory: example
-        run: |
-          flutter pub get
-          flutter config --enable-windows-desktop
-          flutter build windows --debug --verbose
+      - name: Stage payload and build Windows consumer
+        run: dart run tool/validate_published_consumer.dart --platform=windows
 
   macos:
-    name: macOS example
+    name: macOS published consumer
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -107,15 +98,11 @@ jobs:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Build macOS debug app
-        working-directory: example
-        run: |
-          flutter pub get
-          flutter config --enable-macos-desktop
-          flutter build macos --debug
+      - name: Stage payload and build macOS consumer
+        run: dart run tool/validate_published_consumer.dart --platform=macos
 
   ios:
-    name: iOS example no-codesign
+    name: iOS published consumer no-codesign
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -129,8 +116,5 @@ jobs:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Build iOS debug app without signing
-        working-directory: example
-        run: |
-          flutter pub get
-          flutter build ios --debug --no-codesign
+      - name: Stage payload and build iOS consumer without signing
+        run: dart run tool/validate_published_consumer.dart --platform=ios
