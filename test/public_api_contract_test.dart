@@ -65,8 +65,8 @@ void main() {
   });
 }
 
-// This helper is intentionally not executed. Its body is a compile-time API
-// contract for the Box methods/getters applications can call.
+// These helpers are intentionally not executed. Their typed tear-offs are
+// compile-time contracts for the consumer-facing methods and named parameters.
 void assertBoxSurface(Box box) {
   final String name = box.name;
   final int length = box.length;
@@ -76,6 +76,7 @@ void assertBoxSurface(Box box) {
 
   final Future<void> Function(String, dynamic) put = box.put;
   final Future<void> Function(Map<String, dynamic>) putAll = box.putAll;
+  final Future<dynamic> Function(String, {dynamic defaultValue}) get = box.get;
   final Future<bool> Function(String) containsKey = box.containsKey;
   final Future<void> Function(String) delete = box.delete;
   final Future<void> Function(Iterable<String>) deleteAll = box.deleteAll;
@@ -100,6 +101,7 @@ void assertBoxSurface(Box box) {
     values,
     put,
     putAll,
+    get,
     containsKey,
     delete,
     deleteAll,
@@ -113,6 +115,43 @@ void assertBoxSurface(Box box) {
     where,
     watch,
   );
+}
+
+void assertDxtrBoxSurface() {
+  final bool isInitialized = DxtrBox.isInitialized;
+  final Future<void> Function({String? path}) init = DxtrBox.init;
+  final Future<Box> Function(
+    String, {
+    String? encryptionKey,
+    bool lazy,
+  }) open = DxtrBox.open;
+  final Future<void> Function(String) deleteBox = DxtrBox.deleteBox;
+  final Future<void> Function(
+    String, {
+    required String encryptionKey,
+  }) encryptBox = DxtrBox.encryptBox;
+  final Future<bool> Function(String) boxExists = DxtrBox.boxExists;
+
+  Object.hash(
+    isInitialized,
+    init,
+    open,
+    deleteBox,
+    encryptBox,
+    boxExists,
+  );
+}
+
+void assertHiveCeMigrationSurface() {
+  final Future<HiveCeMigrationResult> Function(
+    HiveCeMigrationSource, {
+    required String destinationName,
+    String? destinationEncryptionKey,
+    HiveCeValueConverter? valueConverter,
+    HiveCeKeyConverter? keyConverter,
+  }) migrate = migrateFromHiveCe;
+
+  Object.hash(migrate);
 }
 
 bool _true() => true;
