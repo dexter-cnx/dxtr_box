@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.3 query/index + migration milestone implemented and closure-verified**. Public API and storage format are not stable yet.
+> Status: **0.3 query/index + migration milestone implemented and closure-verified**. PR #25 is the final 0.3 correctness closure; `main` CI is green. Public API and storage format are not stable yet.
 
 ## Compatibility
 
@@ -96,9 +96,9 @@ final result = await migrateFromHiveCe(
 );
 ```
 
-Migration preserves String keys, maps int keys to `@hive-int:<decimal>` by default, detects converted-key collisions, and preflights all converted values before destination creation. Destination creation is reserved exclusively at the filesystem level, so concurrent migrations cannot silently merge into the same target. An existing destination is rejected, and initialization/write failures clean up the destination reservation owned by that migration. Migrated entries are written through one `putAll` / one native redb write transaction. Encrypted Hive CE sources are opened by the application with Hive CE first; encrypted dxtr_box destinations use `destinationEncryptionKey`.
+Migration preserves String keys, maps int keys to `@hive-int:<decimal>` by default, detects converted-key collisions, and preflights all converted values before destination creation. Migration acquires a distinct exclusive reservation marker, re-checks that the target does not exist, and then creates the destination exclusively. Concurrent migrations therefore cannot both own the same target. Ordinary `DxtrBox.open(destinationName)` also rejects an active migration reservation before native open and re-checks immediately after native open, preventing an in-flight ordinary open from escaping with a usable handle while migration owns the destination. Initialization/write failures clean up the migration-owned destination and release its reservation; successful migration also releases the marker. Migrated entries are written through one `putAll` / one native redb write transaction. Encrypted Hive CE sources are opened by the application with Hive CE first; encrypted dxtr_box destinations use `destinationEncryptionKey`.
 
-A hard process kill during destination creation/commit is not claimed to provide file-level crash-atomic staging/promotion. Compatibility is validated against a separate Hive CE 2.19.3 fixture package so Hive CE cannot raise dxtr_box's Dart 3.4 / Flutter 3.22 minimum. See [`docs/HIVE_CE_MIGRATION_03.md`](docs/HIVE_CE_MIGRATION_03.md).
+A hard process kill while migration owns the reservation may leave an incomplete destination and reservation marker. 0.3 does not claim file-level crash-atomic staging/promotion or automatic stale-reservation recovery. Compatibility is validated against a separate Hive CE 2.19.3 fixture package so Hive CE cannot raise dxtr_box's Dart 3.4 / Flutter 3.22 minimum. See [`docs/HIVE_CE_MIGRATION_03.md`](docs/HIVE_CE_MIGRATION_03.md).
 
 ## Declarative query API
 
@@ -255,8 +255,8 @@ Additional targets cover FRB regeneration, larger local benchmarks, Rust-only ch
 - [Query / Index 0.3 contract](docs/QUERY_INDEX_03.md) — query semantics, planner eligibility, equivalence rules, and persisted-index security.
 - [Query/index benchmark](docs/QUERY_BENCHMARK_03.md) — reproducible diagnostic benchmark contract and baseline evidence.
 - [Point-read diagnosis](docs/POINT_READ_DIAGNOSIS_03.md) — measured point-read regions and optimization decision.
-- [Hive CE migration 0.3](docs/HIVE_CE_MIGRATION_03.md) — source adapter, key/value conversion, exclusive destination semantics, failure behavior, and fixture validation.
-- [0.3 release audit](docs/RELEASE_03_AUDIT.md) — milestone closure gate and explicit deferrals.
+- [Hive CE migration 0.3](docs/HIVE_CE_MIGRATION_03.md) — source adapter, key/value conversion, exclusive destination/reservation semantics, ordinary-open exclusion, failure behavior, and fixture validation.
+- [0.3 release audit](docs/RELEASE_03_AUDIT.md) — milestone closure gate, final #25 correctness follow-up, and explicit deferrals.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation state and sequencing.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmarks, profiles, and CI gates.
 - [Native feature profiles](docs/NATIVE_FEATURE_PROFILES.md) — minimal/encryption/full contracts.
@@ -267,11 +267,11 @@ Additional targets cover FRB regeneration, larger local benchmarks, Rust-only ch
 
 ## Test suite
 
-Coverage includes minimum-SDK and current Flutter checks, native lifecycle/watch semantics, FRB round trips, encryption/migration, real Hive CE 2.19.3 migration fixtures, migration destination race/cleanup regressions, process-kill durability, query AST behavior, scan/index equivalence, range/index equivalence, multi-index AND intersection, deterministic sorting, persisted-index mutation maintenance, encrypted index rejection, FRB drift detection, all three Rust profiles on Ubuntu/macOS/Windows, native-size reproducibility, and Android/iOS/macOS/Linux/Windows example compilation.
+Coverage includes minimum-SDK and current Flutter checks, native lifecycle/watch semantics, FRB round trips, encryption/migration, real Hive CE 2.19.3 migration fixtures, migration-vs-migration destination exclusion, ordinary-open-vs-migration reservation regressions, destination/reservation cleanup regressions, process-kill durability, query AST behavior, scan/index equivalence, range/index equivalence, multi-index AND intersection, deterministic sorting, persisted-index mutation maintenance, encrypted index rejection, FRB drift detection, all three Rust profiles on Ubuntu/macOS/Windows, native-size reproducibility, and Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Roadmap
 
-### 0.3.x — Query & migration
+### 0.3.x — Query & migration — closed
 
 Milestone implementation and closure scope:
 
@@ -289,7 +289,9 @@ Milestone implementation and closure scope:
 - query/index diagnostic benchmark matrix;
 - point-get/contains diagnosis;
 - explicit Hive CE migration path with Hive CE 2.19.3 fixtures;
-- exclusive migration destination reservation and initialization-failure cleanup;
+- exclusive migration destination creation and concurrent-migration exclusion;
+- destination/handle initialization cleanup;
+- final PR #25 migration reservation marker with ordinary-open exclusion and release semantics;
 - release closure audit and documentation alignment.
 
 Deferred beyond 0.3:
@@ -300,7 +302,7 @@ Deferred beyond 0.3:
 - controlled cross-commit binary-size regression thresholds;
 - Dart 3.13 recorded-use/native tree shaking;
 - LazyBox migration / direct `.hive` parsing;
-- file-level crash-atomic migration staging/promotion.
+- file-level crash-atomic migration staging/promotion and stale-reservation recovery.
 
 ### 0.4.x — Production hardening
 
