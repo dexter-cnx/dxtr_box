@@ -39,7 +39,7 @@ The minimum is verified in CI using Flutter 3.22.0 / Dart 3.4.0. Minimum SDK inc
 - Avoid loading an entire box into Dart RAM.
 - Control native binary size without sacrificing the supported SDK floor.
 
-Dart 3.13 recorded-use/native tree shaking is intentionally **future-only**. It must not raise the minimum SDK or become required for correctness. See [`docs/FUTURE_NATIVE_TREE_SHAKING.md`](docs/FUTURE_NATIVE_TREE_SHAKING.md).
+Dart 3.13 recorded-use/native tree shaking is intentionally future-only. It must not raise the minimum SDK or become required for correctness. See [`docs/FUTURE_NATIVE_TREE_SHAKING.md`](docs/FUTURE_NATIVE_TREE_SHAKING.md).
 
 ## Basic API
 
@@ -69,22 +69,7 @@ await secure.put('token', 'secret');
 await secure.close();
 ```
 
-An encrypted box must be reopened with the same key. Missing or incorrect keys are rejected. Plaintext boxes are never silently reinterpreted as encrypted.
-
-Explicit migration:
-
-```dart
-final legacy = await DxtrBox.open('legacy');
-await legacy.put('theme', 'dark');
-await legacy.close();
-
-await DxtrBox.encryptBox(
-  'legacy',
-  encryptionKey: 'correct horse battery staple',
-);
-```
-
-Migration rewrites values and encryption metadata in one redb write transaction.
+Encrypted boxes require the same key on reopen. Plaintext boxes are never silently reinterpreted as encrypted. Plaintext-to-encrypted migration is explicit and transactional.
 
 ## Declarative query API
 
@@ -114,38 +99,42 @@ Current native query behavior:
 
 - one FRB call per query;
 - dotted field paths such as `profile.age`;
-- equality/inequality, ordering, `between`, null checks;
+- equality/inequality, ordering, `between`, and null checks;
 - AND/OR groups;
 - exact integer comparisons without collapsing large MessagePack integers through `f64`;
 - deterministic record-key ordering before offset/limit;
 - plaintext and encrypted native scans;
-- full-profile planner can narrow candidates through a matching persisted scalar equality index.
+- full-profile planner can narrow candidates through matching persisted scalar indexes for `equal`, `>`, `>=`, `<`, `<=`, and `between`;
+- multiple usable persisted indexes under an AND group may be intersected;
+- every candidate is still re-read and re-evaluated from primary committed data.
 
-Legacy `Box.where(predicate)` remains available as a Dart-side linear scan, but it is not the native declarative engine.
+Legacy `Box.where(predicate)` remains available as a Dart-side linear scan, separate from the declarative native engine.
 
 ## Persisted secondary indexes
-
-Initial named scalar index facade:
 
 ```dart
 await box.createIndex(
   const IndexDefinition(
-    name: 'by-status',
-    field: 'status',
+    name: 'by-age',
+    field: 'profile.age',
   ),
 );
 
 final indexes = await box.listIndexes();
-final removed = await box.dropIndex('by-status');
+final removed = await box.dropIndex('by-age');
 ```
 
 Persisted index definitions and entries live in redb and are maintained in the same write transaction as primary record mutations.
 
-The planner is deliberately conservative in this slice. It may use a persisted index for an `equal` predicate at the top level or underneath an `AND` group when an index exists for that exact field. The index only narrows candidate record keys: the normal predicate engine still re-evaluates every candidate, then applies deterministic key ordering and pagination. Queries that are not currently planner-eligible, including `OR`-driven narrowing and range operators, fall back to native scan without changing public semantics.
+Planner eligibility applies at the top level or recursively beneath `AND` groups when an index exists for the exact field. The planner deliberately does not narrow through `OR` groups. `notEqual`, `isNull`, and `isNotNull` remain scan-backed.
 
-Integration coverage runs the same logical query before index creation and after index creation, then verifies identical rows and mutation behavior. This keeps scan/index equivalence a correctness gate rather than a performance assumption.
+For AND queries with several usable indexes, candidate key sets are intersected starting from the smallest set. The full original predicate is then re-evaluated against current primary data before deterministic ordering and pagination.
 
-Encrypted boxes can use native scan queries, but persisted index creation is intentionally rejected until a non-leaking encrypted-index representation is designed. Plaintext -> encrypted migration is also rejected while persisted index definitions exist. Reduced native profiles reject opening boxes that already contain persisted index definitions so they cannot mutate primary data without maintaining derived index state.
+Range planning is correctness-first. Persisted scalar components use MessagePack encoding, whose raw lexicographic byte order is not a general numeric order. Therefore current range matching decodes indexed scalar components and applies the same exact comparator as the query engine instead of treating MessagePack bytes as redb numeric range bounds. A faster range seek requires an order-preserving scalar encoding or equivalent proven ordering contract.
+
+Integration coverage compares scan results with indexed execution for equality, nested `profile.age` ranges (`>`, `>=`, `<`, `<=`), inclusive `between`, and multi-index AND intersection.
+
+Encrypted boxes can use native scan queries, but persisted index creation is intentionally rejected until a non-leaking encrypted-index representation is designed. Plaintext-to-encrypted migration is rejected while persisted index definitions exist. Reduced native profiles reject opening boxes that already contain persisted index definitions.
 
 See [`docs/QUERY_INDEX_03.md`](docs/QUERY_INDEX_03.md).
 
@@ -174,13 +163,9 @@ There are exactly three public native product profiles:
 
 `full` remains the default production build. Do not add a fourth public query profile.
 
-Reduced profiles retain the stable FRB surface and fail explicitly when a requested operation requires a capability that is not compiled into that profile. Boxes containing persisted indexes require the full profile for safe mutation.
+Reduced profiles retain the stable FRB surface and fail explicitly when a requested operation requires a capability not compiled into that profile. Boxes containing persisted indexes require `full` for safe mutation.
 
-PR #12 established the first Linux x86_64 native profile baseline. PR #13 then verified zero-byte spread across repeated same-commit builds for each profile. This is a same-commit reproducibility gate, not a cross-commit size budget.
-
-Cross-commit binary-size regression policy remains separate from query/index work.
-
-See [`docs/NATIVE_FEATURE_PROFILES.md`](docs/NATIVE_FEATURE_PROFILES.md) and [`docs/CARGO_FEATURE_SIZE_HANDOFF.md`](docs/CARGO_FEATURE_SIZE_HANDOFF.md).
+PR #12 established the first Linux x86_64 native profile baseline. PR #13 verified zero-byte spread across repeated same-commit builds for each profile. This remains a same-commit reproducibility gate, not a cross-commit size budget.
 
 ## Storage/encryption contract
 
@@ -200,7 +185,7 @@ index_entries
 
 Primary `data` is authoritative. Indexes are derived state.
 
-Encrypted boxes persist a format marker, encryption mode, unique salt, and encrypted key-check sentinel. Values are validated as MessagePack before storage and encrypted with a fresh nonce per value. Record keys are used as AAD.
+Encrypted boxes persist a format marker, encryption mode, unique salt, and encrypted key-check sentinel. Record keys are used as AAD.
 
 ## Developer workflow
 
@@ -222,9 +207,9 @@ Additional targets cover FRB regeneration, larger local benchmarks, Rust-only ch
 
 ## Engineering docs
 
-- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB -> Rust -> redb, including planner/index paths.
+- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB -> Rust -> redb, including range planner and multi-index intersection paths.
 - [Query / Index 0.3 contract](docs/QUERY_INDEX_03.md) — query semantics, planner eligibility, equivalence rules, and persisted-index security.
-- [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and sequencing.
+- [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation state and sequencing.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmarks, profiles, and CI gates.
 - [Native feature profiles](docs/NATIVE_FEATURE_PROFILES.md) — minimal/encryption/full contracts.
 - [Cargo feature + size handoff](docs/CARGO_FEATURE_SIZE_HANDOFF.md) — feature/profile and size-measurement policy.
@@ -234,24 +219,7 @@ Additional targets cover FRB regeneration, larger local benchmarks, Rust-only ch
 
 ## Test suite
 
-Coverage includes:
-
-- Flutter 3.22.0 / Dart 3.4.0 minimum-SDK analyze/tests;
-- current Flutter format/analyze/tests;
-- Dart codec and Box/DxtrBox semantics;
-- native lifecycle and multi-handle behavior;
-- native watch fan-out;
-- Dart -> FRB -> Rust -> redb persistence;
-- encrypted close/reopen and migration;
-- process-kill crash/reopen durability;
-- query AST validation and facade behavior;
-- native scan/index equivalence for planner-eligible equality predicates;
-- persisted-index maintenance after indexed-field mutation;
-- encrypted native scan + persisted-index rejection;
-- generated FRB binding drift detection;
-- minimal/encryption/full Rust profile tests on Ubuntu/macOS/Windows;
-- Linux native-size reproducibility;
-- Android/iOS/macOS/Linux/Windows example compilation.
+Coverage includes minimum-SDK and current Flutter checks, native lifecycle/watch semantics, FRB round trips, encryption/migration, process-kill durability, query AST behavior, scan/index equivalence, range/index equivalence, multi-index AND intersection, persisted-index mutation maintenance, encrypted index rejection, FRB drift detection, all three Rust profiles on Ubuntu/macOS/Windows, native-size reproducibility, and Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Roadmap
 
@@ -264,14 +232,16 @@ Implemented foundation:
 - persisted scalar secondary-index definitions/entries;
 - transactional index maintenance;
 - encrypted-index safety restrictions;
-- conservative equality-index planner with scan/index equivalence coverage.
+- equality and range index planner with scan/index equivalence coverage;
+- multi-index candidate intersection for AND groups.
 
 Next:
 
-- expand planner eligibility only with matching equivalence tests;
+- improve persisted-index lookup efficiency without assuming raw MessagePack numeric byte ordering;
+- consider one-redb-read-transaction query execution;
 - explicit sort contract / `sortBy`;
-- Hive CE migration design/implementation;
-- internal native scan/index lookup performance improvements where justified.
+- query/index benchmark scenarios after semantics stabilize;
+- Hive CE migration design/implementation.
 
 ### 0.4.x — Production hardening
 
