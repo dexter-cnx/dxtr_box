@@ -15,6 +15,7 @@ void main() {
         Platform.environment['DXTR_BOX_COMPARISON_OPS'] ?? '',
       ) ??
       _defaultOperations;
+  final outputPath = Platform.environment['DXTR_BOX_COMPARISON_OUTPUT'];
 
   test(
     'broader Flutter local database diagnostic matrix executes',
@@ -73,11 +74,20 @@ void main() {
           }
         }
 
+        final jsonLines = <String>[];
         for (final result in results) {
+          final encoded = jsonEncode(result);
+          jsonLines.add(encoded);
           // Machine-readable diagnostic evidence. There are intentionally no
           // faster/slower assertions: correctness is enforced separately.
           // ignore: avoid_print
-          print('DXTR_BOX_COMPARISON ${jsonEncode(result)}');
+          print('DXTR_BOX_COMPARISON $encoded');
+        }
+
+        if (outputPath != null && outputPath.isNotEmpty) {
+          final output = File(outputPath);
+          await output.parent.create(recursive: true);
+          await output.writeAsString('${jsonLines.join('\n')}\n');
         }
 
         expect(results, hasLength(24));
