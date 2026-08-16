@@ -50,7 +50,7 @@ pub fn index_candidates(filter: &Filter) -> Result<Vec<IndexCandidate>, String> 
                 .map(|upper| {
                     let mut encoded = Vec::new();
                     rmpv::encode::write_value(&mut encoded, upper).map_err(|e| e.to_string())?;
-                    Ok(encoded)
+                    Ok::<Vec<u8>, String>(encoded)
                 })
                 .transpose()?;
             Ok(vec![IndexCandidate {
