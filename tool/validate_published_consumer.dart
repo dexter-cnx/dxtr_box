@@ -12,7 +12,8 @@ Future<void> main(List<String> args) async {
   final platform = _readPlatform(args);
   final root = Directory.current.absolute;
   final buildRoot = Directory('${root.path}/build');
-  final stagedPackage = Directory('${buildRoot.path}/published-payload/dxtr_box');
+  final stagedPackage =
+      Directory('${buildRoot.path}/published-payload/dxtr_box');
   final consumer = Directory('${buildRoot.path}/published-consumer-$platform');
 
   await _resetDirectory(stagedPackage);
@@ -36,7 +37,8 @@ Future<void> main(List<String> args) async {
   _wireConsumerDependency(consumer);
   _wireConsumerApiReference(consumer);
 
-  await _run('flutter', <String>['pub', 'get'], workingDirectory: consumer.path);
+  await _run('flutter', <String>['pub', 'get'],
+      workingDirectory: consumer.path);
 
   switch (platform) {
     case 'android':
@@ -92,7 +94,8 @@ Future<void> main(List<String> args) async {
 }
 
 String _readPlatform(List<String> args) {
-  final argument = args.where((value) => value.startsWith('--platform=')).firstOrNull;
+  final argument =
+      args.where((value) => value.startsWith('--platform=')).firstOrNull;
   if (argument == null) {
     stderr.writeln(
       'usage: dart run tool/validate_published_consumer.dart --platform=<platform>',
@@ -126,7 +129,8 @@ List<_IgnoreRule> _readSimplePubIgnore(File file) {
       );
     }
     final directoryRule = line.endsWith('/');
-    final normalized = directoryRule ? line.substring(0, line.length - 1) : line;
+    final normalized =
+        directoryRule ? line.substring(0, line.length - 1) : line;
     rules.add(_IgnoreRule(normalized, directoryRule));
   }
   return rules;
@@ -153,7 +157,8 @@ Future<void> _copyPublishedPayload(
         await File(targetPath).parent.create(recursive: true);
         await entity.copy(targetPath);
       } else if (entity is Link) {
-        throw StateError('published payload may not contain symlinks: $relative');
+        throw StateError(
+            'published payload may not contain symlinks: $relative');
       }
     }
   }
@@ -179,7 +184,8 @@ void _validateStagedPayload(Directory stagedPackage) {
   for (final path in required) {
     final entityPath =
         '${stagedPackage.path}${Platform.pathSeparator}${_nativePath(path)}';
-    if (FileSystemEntity.typeSync(entityPath) == FileSystemEntityType.notFound) {
+    if (FileSystemEntity.typeSync(entityPath) ==
+        FileSystemEntityType.notFound) {
       throw StateError(
         'published payload is missing required consumer input: $path',
       );
@@ -200,14 +206,17 @@ void _validateStagedPayload(Directory stagedPackage) {
   for (final path in forbidden) {
     final entityPath =
         '${stagedPackage.path}${Platform.pathSeparator}${_nativePath(path)}';
-    if (FileSystemEntity.typeSync(entityPath) != FileSystemEntityType.notFound) {
-      throw StateError('repository-only path leaked into published payload: $path');
+    if (FileSystemEntity.typeSync(entityPath) !=
+        FileSystemEntityType.notFound) {
+      throw StateError(
+          'repository-only path leaked into published payload: $path');
     }
   }
 
   final pubspec = File('${stagedPackage.path}/pubspec.yaml').readAsStringSync();
   if (RegExp(r'^    path:\s+', multiLine: true).hasMatch(pubspec)) {
-    throw StateError('published root pubspec may not contain path-source dependencies');
+    throw StateError(
+        'published root pubspec may not contain path-source dependencies');
   }
 }
 
@@ -273,7 +282,8 @@ bool _isHidden(String relative) {
 }
 
 String _relativePath(String root, String child) {
-  final normalizedRoot = root.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+  final normalizedRoot =
+      root.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
   final normalizedChild = child.replaceAll('\\', '/');
   if (!normalizedChild.startsWith('$normalizedRoot/')) {
     throw StateError('path escaped repository root: $child');
