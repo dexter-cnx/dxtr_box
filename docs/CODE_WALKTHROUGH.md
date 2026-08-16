@@ -1,10 +1,10 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, the completed 0.4 hardening gates, and the active 0.5 read-path performance work.
+This walkthrough describes the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed 0.4 hardening gates, and current 0.5 read-path optimization work.
 
-## 1. Self-contained package boundary
+## 1. Package boundary
 
-`dxtr_box` is the single Flutter package and FFI plugin:
+`dxtr_box` is one self-contained Flutter FFI plugin:
 
 ```text
 dxtr_box/
@@ -19,26 +19,39 @@ dxtr_box/
   example/
 ```
 
-The Flutter package/plugin identity is `dxtr_box`. The native Rust crate/library remains `rust_lib_dxtr_box` so FRB/native loading identity does not change.
+The Flutter package/plugin identity is `dxtr_box`. The native crate/library remains `rust_lib_dxtr_box`.
 
-No consumer build step reaches outside the package root and the root `pubspec.yaml` has no path-dependent native builder.
-
-Platform mapping:
+Platform build mapping:
 
 ```text
 Android
   android/build.gradle -> ../cargokit -> ../rust
 
 iOS/macOS
-  {ios,macos}/dxtr_box.podspec
-    -> ../cargokit/build_pod.sh
-    -> ../rust
+  podspec -> ../cargokit/build_pod.sh -> ../rust
 
 Linux/Windows
-  {linux,windows}/CMakeLists.txt
-    -> ../cargokit/cmake/cargokit.cmake
-    -> ../rust
+  CMakeLists.txt -> ../cargokit/cmake/cargokit.cmake -> ../rust
 ```
+
+Stable compatibility:
+
+```text
+Dart >= 3.4
+Flutter >= 3.22
+flutter_rust_bridge = 2.8.0
+redb = 2.1.0
+```
+
+Exactly three native profiles remain:
+
+```text
+minimal
+encryption
+full
+```
+
+Dart 3.13 recorded-use/native tree shaking remains outside current 0.5 work.
 
 ## 2. Runtime boundary
 
@@ -51,28 +64,11 @@ Flutter app
   -> redb
 ```
 
-Dart owns public ergonomics, MessagePack encoding/decoding, lightweight key metadata, lifecycle guards, query objects, and Hive CE migration preflight. Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted-index state, maintenance, and plaintext-to-encrypted migration.
+Dart owns public ergonomics, MessagePack encoding/decoding, lightweight metadata, lifecycle guards, query objects, and Hive CE migration preflight.
 
-Stable compatibility remains:
+Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted indexes, maintenance, and plaintext-to-encrypted migration.
 
-```text
-Dart >= 3.4
-Flutter >= 3.22
-flutter_rust_bridge = 2.8.0
-redb = 2.1.0
-```
-
-Exactly three native capability profiles remain:
-
-```text
-minimal
-encryption
-full
-```
-
-Dart 3.13 recorded-use/native tree shaking is outside the 0.5 milestone.
-
-## 3. Storage and lifecycle
+## 3. Storage identity
 
 Each box maps to:
 
@@ -80,25 +76,13 @@ Each box maps to:
 {base_path}/{box_name}.dxtr
 ```
 
-Core redb tables are `data` and `meta`. The full profile also maintains `index_definitions` and `index_entries`.
+Core redb tables are `data` and `meta`; `full` additionally maintains index definitions/entries.
 
-The durable metadata identity includes:
+Durable identity:
 
 ```text
 meta[format_version] = dxtr_box/1
 ```
-
-This remains guarded by the 0.4 public API/storage contract gate.
-
-```dart
-await DxtrBox.init();
-final box = await DxtrBox.open('settings');
-await box.put('theme', 'dark');
-final theme = await box.get('theme');
-await box.close();
-```
-
-Encrypted boxes use the same lifecycle with `encryptionKey`. Plaintext-to-encrypted conversion is explicit.
 
 ## 4. Mutation atomicity
 
@@ -108,58 +92,60 @@ Box.put / putAll / delete / deleteAll / clear
   -> FRB
   -> Rust validation
   -> optional encryption
-  -> redb write transaction
-  -> primary + persisted-index changes
+  -> one redb write transaction
+  -> primary + index changes
   -> one commit
   -> watch event after commit only
 ```
 
-Primary data is authoritative. Persisted indexes are derived state and are never allowed to commit independently from the corresponding primary mutation.
+Primary data is authoritative. Persisted indexes are derived state and never commit independently from their primary mutation.
 
-## 5. Point reads — production path
+## 5. Production point-read path
 
-`Box.get` currently executes:
+`Box.get`:
 
 ```text
 Box.get
   -> NativeDxtrApi.get
   -> FrbNativeDxtrApi.get
-  -> generated FRB get_
+  -> generated FRB
   -> Rust api::get
   -> db::get
   -> DATABASES lookup / Arc clone
   -> Database::begin_read
-  -> open data table
+  -> open DATA table
   -> table.get(key)
-  -> redb guard -> Vec<u8> copy on hit
-  -> optional ChaCha20Poly1305 decrypt/authenticate with record-key AAD
+  -> redb value -> Vec<u8> copy on hit
+  -> optional ChaCha20Poly1305 decrypt/authenticate
   -> validate_message_pack
   -> Vec<u8> through FRB
   -> DxtrCodec.decode
 ```
 
-`Box.containsKey` currently executes:
+`Box.containsKey`:
 
 ```text
 Box.containsKey
   -> NativeDxtrApi.containsKey
   -> FrbNativeDxtrApi.containsKey
-  -> generated FRB containsKey
+  -> generated FRB
   -> Rust api::contains_key
   -> db::contains_key
   -> DATABASES lookup / Arc clone
   -> Database::begin_read
-  -> open data table
+  -> open DATA table
   -> table.get(key).is_some()
 ```
 
-These reads remain authoritative against native storage. The 0.5 milestone must not replace them with Dart metadata or whole-box cache lookups because doing so would weaken cross-handle/cross-process freshness semantics.
+These remain authoritative native reads. Dart metadata cannot replace them without weakening cross-handle/cross-process freshness.
 
-Encrypted reads must retain full authentication. MessagePack validation must not be removed merely because Dart decodes the value later unless evidence and a separately justified correctness argument prove a safe alternative.
+No Dart whole-box cache is allowed as a performance shortcut.
 
-## 6. 0.3 point-read diagnosis
+Encrypted reads retain full AEAD authentication.
 
-The previous diagnostic measured approximately on one shared GitHub runner:
+## 6. 0.3 diagnosis
+
+Previous shared-runner evidence measured approximately:
 
 ```text
 native plaintext get hit       225.726 us/op
@@ -168,127 +154,41 @@ native containsKey hit         193.830 us/op
 Dart metadata membership         6.532 us/op
 ```
 
-The important conclusion was structural rather than absolute: Dart decode was not dominant in that run, while the native adapter region remained composite and undecomposed.
-
-That native region still included:
-
-```text
-FRB call/response
-redb read transaction setup
-redb table open / point lookup
-optional decrypt/authenticate
-native MessagePack validation
-payload allocation/copy
-```
-
-Therefore 0.3 deliberately made no production point-read optimization.
+That showed the composite native-adapter region was material but did not isolate redb setup, lookup, copy, validation, crypto, or FRB.
 
 See `docs/POINT_READ_DIAGNOSIS_03.md`.
 
-## 7. 0.5 PR 1 — Rust in-process decomposition
+## 7. 0.5 PR 1 decomposition harness
 
-`rust/src/read_path_bench.rs` is a `#[cfg(test)]` module and its benchmark test is `#[ignore]`. Ordinary Rust test profiles compile the harness but do not execute the timing loop. `make benchmark-read-path` runs it explicitly in release mode.
+### Rust in-process harness
 
-It measures these components separately:
+`rust/src/read_path_bench.rs` is compiled under `#[cfg(test)]`; its timing test is `#[ignore]` and runs only through:
 
-### 7.1 Read transaction setup
+```bash
+make benchmark-read-path
+```
+
+Measured components:
 
 ```text
 redb_read_transaction_create
-  -> Database::begin_read
-```
-
-This isolates transaction creation/setup from table open and lookup.
-
-### 7.2 Transaction plus table open
-
-```text
 redb_read_transaction_open_table
-  -> Database::begin_read
-  -> read.open_table(DATA)
-```
-
-The difference from transaction-only timing is an inference for table-open overhead, not a separately instrumented internal redb phase.
-
-### 7.3 Raw point lookup on one stable snapshot
-
-```text
-one ReadTransaction
-  -> one readable DATA table
-  -> repeated table.get(key)
-```
-
-Cases:
-
-```text
-redb_point_lookup_borrowed / hit
-redb_point_lookup_borrowed / miss
-```
-
-Because the read transaction and table are held outside the timed per-operation closure, these cases measure lookup work without repeated transaction setup.
-
-This is diagnostic only. It is **not** a proposal to make default public reads use a long-lived snapshot.
-
-### 7.4 Lookup plus redb value copy
-
-```text
-redb_point_lookup_copy
-  -> table.get(key)
-  -> guard.value().to_vec()
-```
-
-Comparing borrowed lookup vs copied lookup helps identify the cost of the native payload copy on successful reads.
-
-### 7.5 Native MessagePack validation
-
-```text
+redb_point_lookup_borrowed hit/miss
+redb_point_lookup_copy hit
 messagepack_validate
-  -> validate_message_pack(payload)
-  -> rmp_serde::from_slice<IgnoredAny>
-```
-
-This measures the exact production validation helper on an already available plaintext payload.
-
-### 7.6 Native allocation/copy baseline
-
-```text
 vec_payload_copy
-  -> payload.to_vec()
-```
-
-This gives a standalone allocation/copy baseline independent of redb.
-
-### 7.7 Decrypt/authenticate
-
-With the encryption feature:
-
-```text
 decrypt_authenticate
-  -> ChaCha20Poly1305
-  -> record-key AAD
-  -> authenticate + decrypt prepared ciphertext
+db_get plaintext/encrypted hit/miss
+db_contains_key hit/miss
 ```
 
-The ciphertext is prepared outside the timed loop so encryption and nonce generation are not included.
+Stable-snapshot lookup cases keep the read transaction/table outside the timed closure so lookup cost is separated from transaction creation.
 
-### 7.8 Full in-process production database calls
+This is diagnostic only; it does not imply default public reads should retain long-lived snapshots.
 
-```text
-db_get
-  plaintext hit/miss
-  encrypted hit/miss
+### Dart / FRB harness
 
-db_contains_key
-  plaintext hit/miss
-```
-
-These call the real production `db::get` / `db::contains_key` implementation without FRB or Dart.
-
-## 8. 0.5 PR 1 — Dart / FRB decomposition
-
-`test/read_path_benchmark_test.dart` uses the production `FrbNativeDxtrApi` and public `Box` facade.
-
-It measures:
+`test/read_path_benchmark_test.dart` measures:
 
 ```text
 dart_dxtr_codec_decode
@@ -298,217 +198,249 @@ native_adapter_contains_key
 public_box_contains_key
 ```
 
-Matrix dimensions include:
+Matrix dimensions include small/medium payload, plaintext/encrypted where applicable, and hit/miss where applicable.
 
-```text
-payload: small, medium
-mode: plaintext, encrypted where applicable
-outcome: hit, miss where applicable
-```
+Assertions are outside timed loops.
 
-Assertions are performed after timed loops rather than inside each operation.
+## 8. Machine-readable evidence
 
-### FRB interpretation
-
-PR 1 deliberately does not add a benchmark-only `echo`/passthrough function to `rust/src/api.rs`, so there is no direct FRB-only timer.
-
-The approximate native-boundary region may be inferred by comparing:
-
-```text
-Dart native_adapter_get
-minus
-Rust db_get
-```
-
-or the equivalent contains measurements from the same workflow run.
-
-That difference is **not** a pure FRB percentage. It also contains Dart async adapter work and differences between the Dart and Rust timing harnesses. If the inferred boundary region becomes the likely bottleneck but is too ambiguous to guide PR 2, measure it more directly in a later diagnostic without leaving benchmark plumbing in the shipped API.
-
-## 9. Machine-readable benchmark evidence
-
-Root target:
-
-```text
-make benchmark-read-path
-```
-
-Default local configuration:
-
-```text
-READ_PATH_RUST_ITERATIONS = 2000
-READ_PATH_DART_ITERATIONS = 1000
-READ_PATH_SAMPLES = 7
-```
-
-Outputs:
+The root target creates:
 
 ```text
 build/read-path/rust-read-path.jsonl
 build/read-path/dart-read-path.jsonl
 ```
 
-Each contains a context row followed by measurement rows with:
+The Rust test receives an absolute repository-root output path because the Cargo unit-test process runs with the Rust crate directory as its working directory. The Makefile fails if either JSONL file is missing.
+
+The GitHub workflow additionally stores:
 
 ```text
-operation
-payload
-mode
-outcome
-iterations
-samples
-sample_ns
-median_ns_per_op
+flutter-version.txt
+rust-version.txt
+cargo-version.txt
+runner.txt
+cpu.txt
 ```
 
-The dedicated `Read-path Benchmark` workflow also captures Flutter, Rust, Cargo, kernel, and CPU metadata and uploads `build/read-path/` as a CI artifact.
+The artifact upload fails closed if evidence is absent.
 
-Shared-runner timings remain diagnostic; there is no faster/slower performance threshold in PR 1.
+## 9. 0.5 Phase A baseline — run #7
 
-## 10. 0.5 evidence classification
+Successful evidence:
 
-### Measured fact
+```text
+Read-path Benchmark #7
+run id:      31947858383
+artifact:    read-path-benchmark-linux-x64
+artifact id: 9263812713
+head:        ec0da61bdd53f70201a31f3c44fddfdfe325a3c8
+```
 
-Before the PR 1 artifact completes, the established measurements are still the 0.3 composite observations only.
+Environment:
 
-### Inference
+```text
+Ubuntu 24.04 hosted runner / Linux x86_64
+AMD EPYC 9V74 / 4 logical CPUs
+Flutter 3.47.0
+Dart 3.13.0
+rustc 1.97.1
+cargo 1.97.1
+```
 
-The composite native read region dominated the 0.3 run relative to Dart decode, but the dominant internal component is not yet known.
+### Rust measured facts
 
-### Implemented optimization
+Small payload:
 
-None in PR 1.
+```text
+transaction create             0.112 us
+transaction + table open       0.395 us
+borrowed point lookup hit      0.040 us
+lookup + copy hit              0.059 us
+MessagePack validation         0.314 us
+standalone Vec copy            0.017 us
+full plaintext db_get hit      0.875 us
+full plaintext db_get miss     0.494 us
+full contains hit              0.498 us
+decrypt/authenticate           2.273 us
+full encrypted db_get hit      3.176 us
+```
 
-### Deferred idea
+Medium payload (~4 KiB body):
 
-Do not implement yet:
+```text
+transaction create             0.113 us
+transaction + table open       0.387 us
+borrowed point lookup hit      0.106 us
+lookup + copy hit              1.650 us
+MessagePack validation        17.369 us
+standalone Vec copy            0.108 us
+full plaintext db_get hit     19.633 us
+full plaintext db_get miss     0.545 us
+full contains hit              0.554 us
+decrypt/authenticate           5.878 us
+full encrypted db_get hit     24.204 us
+```
 
-- Dart whole-box caching;
-- Dart metadata-backed authoritative `containsKey`;
-- skipped AEAD authentication;
-- skipped native validation without evidence/correctness proof;
-- long-lived default read snapshots;
-- speculative FRB buffer tricks;
-- storage-format changes;
-- public multi-key API solely to make a benchmark look better.
+For this workload, successful medium native reads are dominated by native MessagePack validation. Copying is secondary. Redb transaction creation/table open is not the dominant cost.
 
-See `docs/PERFORMANCE_READ_PATH_05.md`.
+### Dart/public measured facts
 
-## 11. Query execution
+Representative run #7 medians:
 
-`Box.query(BoxQuery)` sends one structured MessagePack query through one FRB call.
+```text
+DxtrCodec.decode
+  small                         8.868 us
+  medium                        5.908 us
 
-Execution:
+native adapter plaintext get hit
+  small                       133.990 us
+  medium                       90.866 us
+
+public Box.get plaintext hit
+  small                        98.852 us
+  medium                      107.654 us
+
+native adapter contains hit
+  small                        76.946 us
+  medium                       74.524 us
+
+public Box.containsKey hit
+  small                        75.272 us
+  medium                       81.616 us
+```
+
+Some adjacent Dart-layer medians are non-monotonic on the shared runner. They therefore provide end-to-end diagnostic baselines but cannot be added/subtracted as exact component timings.
+
+## 10. FRB interpretation
+
+PR 1 deliberately adds no benchmark-only echo/passthrough endpoint to the production FRB API.
+
+The difference between Dart native-adapter/public timing and in-process Rust timing is **not** a pure FRB timer. It includes:
+
+```text
+FRB transport/generated bindings
+Dart async scheduling
+allocation/conversion
+runtime/harness differences
+shared-runner noise
+```
+
+The cross-runtime region is clearly material as an inference, but do not publish an exact FRB percentage by subtracting unrelated harness medians.
+
+If Phase B targets this region, first add a controlled boundary diagnostic that does not leave benchmark plumbing in the shipped API.
+
+## 11. Phase A decision
+
+Classification:
+
+**Measured fact**
+- medium successful native `db_get`: ~19.63 us.
+- medium native MessagePack validation: ~17.37 us.
+- medium lookup+copy: ~1.65 us.
+- transaction+table open: ~0.39 us.
+- encrypted authentication is measurable and mandatory.
+
+**Inference**
+- FRB/native-adapter/async work is material in public end-to-end reads, but not yet directly isolated.
+
+**Implemented optimization**
+- none in PR 1 by design.
+
+**Deferred shortcut**
+- no Dart whole cache.
+- no metadata-backed authoritative `containsKey`.
+- no skipped AEAD authentication.
+- no implicit stale long-lived snapshot.
+- no speculative bridge rewrite.
+
+## 12. PR 2 implementation order
+
+PR 2 should investigate in this order:
+
+1. Why successful reads perform `validate_message_pack` every time.
+2. Whether validation can be made cheaper, deduplicated safely, or restructured without weakening corruption/storage/codec guarantees.
+3. Avoidable successful-hit payload copies/allocations.
+4. Bridge-boundary measurement only if a production bridge optimization is being considered.
+5. Transaction/session reuse only if new evidence justifies it; current evidence does not make it the first target.
+
+A high validation cost is not permission to remove validation. Any change requires a correctness argument plus before/after evidence.
+
+## 13. Query execution
+
+`Box.query(BoxQuery)` sends one structured MessagePack query through one FRB call:
 
 ```text
 Box.query
   -> serialize query AST
   -> one FRB call
-  -> decode once
   -> one redb ReadTransaction snapshot
-  -> optional persisted-index candidate narrowing
-  -> primary reads from same snapshot
+  -> optional index candidate narrowing
+  -> authoritative primary reads
   -> optional decrypt
   -> full predicate re-evaluation
-  -> semantic sort when requested
+  -> deterministic semantic sort
   -> offset / limit
   -> one response
 ```
 
-Persisted indexes only narrow candidates. Every candidate is re-read from authoritative primary data and re-evaluated against the complete predicate.
+This one-snapshot query shape is relevant to future batch reads without implying ordinary point reads should use stale long-lived transactions.
 
-This existing one-snapshot query design is relevant to 0.5 PR 3 because it demonstrates the general shape desired for efficient batch reads without implying that ordinary point reads should use stale long-lived transactions.
+## 14. Persisted-index behavior
 
-## 12. Persisted index planner
+Planner-supported comparisons include equality and ordered range predicates. Multiple usable AND predicates can intersect candidate sets.
 
-Planner-eligible comparisons:
+Persisted indexes only narrow candidates; authoritative records are still re-read and predicates re-evaluated.
 
-```text
-equal
-greaterThan
-greaterThanOrEqual
-lessThan
-lessThanOrEqual
-between
-```
+Raw MessagePack scalar byte order is not treated as numeric order.
 
-Eligibility applies at the top level or beneath `AND` when an index matches the exact dotted field path. The planner does not narrow through `OR`; `notEqual`, `isNull`, and `isNotNull` remain scan-backed.
+Indexes do not currently satisfy ORDER BY.
 
-For multiple usable predicates under AND, candidate sets are intersected from smallest to largest.
+## 15. Encryption/profile safety
 
-Persisted scalar components use MessagePack bytes. Their raw byte order is not treated as numeric order. Range matching decodes scalar components and applies the semantic comparator.
+Encrypted boxes can query via native scans but cannot create persisted plaintext-derived secondary indexes.
 
-## 13. Deterministic sorting
-
-`BoxQuery.sortBy` is carried inside the existing query payload. Sorting occurs before pagination and supports nested fields, explicit null/missing placement, numeric/string ordered domains, and record-key ascending as the final deterministic tie-break.
-
-Indexes narrow `where`; they do not currently satisfy ORDER BY.
-
-## 14. Encryption and profile safety
-
-Encrypted boxes can use native scan queries but cannot create persisted secondary indexes yet because plaintext-derived index keys would leak protected values. Plaintext-to-encrypted migration is rejected while persisted indexes exist.
-
-Exactly three Rust capability profiles remain:
+Exactly three capability profiles remain:
 
 ```text
 minimal     CRUD + lifecycle + native watch
 encryption  minimal + encrypted create/open/read/write
-full        encryption + maintenance + query/index implementation
+full        encryption + maintenance + query/index
 ```
 
-`full` is the default production build. Reduced profiles reject boxes containing persisted indexes because they cannot safely maintain derived state.
+Reduced profiles reject indexed boxes they cannot safely maintain.
 
-## 15. Hive CE migration
+## 16. Hive CE migration
 
-Core `dxtr_box` does not depend on Hive CE at runtime. Applications open the Hive CE source themselves and provide callbacks through `HiveCeMigrationSource`.
+Core `dxtr_box` has no runtime Hive CE dependency.
 
-Migration flow:
+Migration flow preserves source data, preflights key/value conversion and MessagePack encoding, acquires an exclusive destination reservation, creates the destination once, writes through one `putAll`, and performs failure cleanup.
 
-```text
-migrateFromHiveCe
-  -> validate source
-  -> enumerate keys
-  -> key/value conversion
-  -> collision detection
-  -> DxtrCodec preflight
-  -> acquire exclusive reservation marker
-  -> re-check destination absence
-  -> exclusively create destination
-  -> migration-only internal open
-  -> one Box.putAll
-  -> close destination
-  -> release reservation
-```
+## 17. FRB drift gate
 
-Ordinary `DxtrBox.open(destinationName)` checks reservation both before and immediately after native open. Initialization/write failure cleanup removes migration-owned destination state and releases its marker.
+Checked-in FRB 2.8 bindings are regenerated in CI. Any generated Dart/Rust diff fails the binding-current gate.
 
-## 16. FRB drift gate
+PR 1 adds no new production FRB method.
 
-Checked-in Flutter Rust Bridge 2.8 bindings are regenerated in CI. Any diff under generated Dart/Rust binding output fails the binding-current job.
+## 18. Native-size policy
 
-PR 1 does not add a new FRB method, so generated bindings should remain unchanged.
-
-## 17. Native-size policy
-
-Minimal, encryption, and full are compared independently under the 0.4 gate:
+Profiles are measured independently under:
 
 ```text
 allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
-fail when head_bytes - base_bytes > allowed_growth
 ```
 
-The Rust read-path benchmark module is `#[cfg(test)]`, so it is not intended to become part of release library code. The normal native-size regression gate remains authoritative evidence that PR 1 does not create unacceptable shipped binary growth.
+The benchmark Rust module is test-only and should not inflate the shipped release library. Native-size CI remains the authoritative gate.
 
-## 18. Package publication readiness
+## 19. Package publication readiness
 
-The root package remains self-contained and publishable. `make package-readiness` runs public docs plus `dart pub publish --dry-run --ignore-warnings`.
+The root plugin remains self-contained and publishable. `make package-readiness` performs Dart docs and pub dry-run validation.
 
-Benchmark/test files remain development tooling, not public runtime dependencies.
+Benchmark tooling remains development-only.
 
-## 19. Local database comparison framework
+## 20. Comparison framework
 
-Comparison-only dependencies and adapters live under `benchmark/`; they are not part of the published runtime package.
-
-The matrix remains:
+The comparison harness remains:
 
 ```text
 dxtr_box
@@ -517,77 +449,49 @@ Sembast
 SQLite via sqflite_common_ffi
 ```
 
-Correctness is a hard gate. Timing remains diagnostic.
+Correctness is a hard gate; timing is diagnostic.
 
-0.5 PR 5 will extend the matrix with batch/multi-key get and mixed read-heavy workloads after the Dxtr_Box multi-key design is complete.
+0.5 PR 5 will extend this matrix with batch/multi-key and mixed read-heavy workloads.
 
-## 20. Published-payload consumer flow
+## 21. Published-payload consumer flow
 
-`tool/validate_published_consumer.dart` stages a consumer-visible package tree and builds fresh Android/iOS/macOS/Linux/Windows consumers using only that staged package boundary.
+`tool/validate_published_consumer.dart` stages the package-visible payload and builds fresh Android/iOS/macOS/Linux/Windows consumers using only the staged package boundary.
 
-Performance work must not bypass this gate or introduce repository-relative native assumptions.
+Performance work must not bypass this gate.
 
-## 21. Public API + storage compatibility guard
+## 22. Public API / durable-storage compatibility
+
+The current compatibility boundary remains:
 
 ```text
-flutter test
-  -> test/public_api_contract_test.dart
-     -> compile representative public API
-     -> verify public export set
-     -> verify format_version / dxtr_box/1
+package:dxtr_box/dxtr_box.dart
+meta key:       format_version
+format value:   dxtr_box/1
 ```
 
-PR 1 changes no public Box API and no storage identity. A future PR 3 batch-read API, if adopted, will be a deliberate public API addition and must update public API documentation/tests in the same PR.
+A future public batch-read API is a deliberate public API addition and must update API tests/docs in the same PR.
 
-## 22. Current milestone and next implementation order
+## 23. Current implementation order
 
 ```text
-PR 1 — read-path benchmark decomposition
-PR 2 — single-key read optimization using PR 1 evidence
+PR 1 — read-path benchmark decomposition                         complete evidence baseline
+PR 2 — single-key read optimization                              next
 PR 3 — batch/multi-key read path
 PR 4 — read-session investigation / explicit implementation only if safe
-PR 5 — comparison matrix + 0.5 closure audit
+PR 5 — expanded comparison + 0.5 closure audit
 ```
 
-Preserve these invariants throughout:
+Preserve throughout:
 
 - Dart >=3.4 / Flutter >=3.22;
-- exact FRB 2.8 alignment;
-- native identity `rust_lib_dxtr_box`;
-- exactly three native profiles;
-- `format_version = dxtr_box/1` unless an explicit compatibility/migration design is reviewed;
-- primary data authoritative over indexes;
-- authoritative native `get` and `containsKey` semantics;
-- cross-process visibility not weakened by Dart cache shortcuts;
+- FRB exactly 2.8.0;
+- `rust_lib_dxtr_box` identity;
+- exactly three profiles;
+- `dxtr_box/1` readability;
+- authoritative native reads;
 - full encrypted authentication;
-- query/index/migration behavior remains green;
-- comparison timing remains diagnostic rather than a release threshold;
-- native-size and five-platform staged-consumer gates remain green;
-- performance changes require before/after evidence plus correctness validation.
+- query/index/migration correctness;
+- native-size policy;
+- five-platform staged consumer builds.
 
-Important targets:
-
-```text
-make preflight
-make package-readiness
-dart run tool/verify_public_storage_contract.dart
-make frb-generate
-make native-test
-make hive-ce-migration-test
-make query-index-test
-make query-sort-test
-make benchmark-comparison-correctness
-make benchmark-comparison
-make benchmark-query-index
-make diagnose-point-read
-make benchmark-read-path
-make rust-check
-make native-size-baseline
-make native-size-stability
-make native-size-regression
-make published-consumer-android
-make published-consumer-ios
-make published-consumer-macos
-make published-consumer-linux
-make published-consumer-windows
-```
+See `docs/PERFORMANCE_READ_PATH_05.md` for the normative 0.5 evidence and decision record.
