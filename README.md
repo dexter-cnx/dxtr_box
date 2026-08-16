@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.4 Production Hardening active**. PH-01 native-size policy, PH-02 package hardening, PH-03 broader local-database comparison, and PH-04 staged published-payload consumer validation are complete. PH-05 public API + durable storage contract guarding is active. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are still pre-1.0 and not declared stable.
+> Status: **0.4 Production Hardening complete**. PH-01 native-size policy, PH-02 package hardening, PH-03 broader local-database comparison, PH-04 staged published-payload consumer validation, and PH-05 public API + durable storage contract guarding are complete. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are still pre-1.0 and not declared stable. Next work returns to the Hive/Hive CE functional-parity release gate.
 
 ## Compatibility
 
@@ -226,14 +226,14 @@ PH-05 adds fail-fast compatibility change control without claiming pre-1.0 stabi
 dart run tool/verify_public_storage_contract.dart
 ```
 
-The normal Flutter test suite also runs this contract. It verifies the package entrypoint export set, compiles representative public constructors/enums/typedefs and typed `Box` method/getter signatures, and guards the current durable metadata identity:
+The normal Flutter test suite also runs this contract. It verifies the package entrypoint export set, compiles representative public constructors/enums/typedefs and typed `Box`/`DxtrBox`/migration signatures, and guards the current durable metadata identity:
 
 ```text
 meta key: format_version
 value:    dxtr_box/1
 ```
 
-A deliberate 0.x API change is allowed only with an intentional contract/doc update. A future storage-format change must include backward-read or migration behavior plus compatibility evidence rather than merely updating the marker. See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
+A deliberate 0.x API change is allowed only with an intentional contract/doc update. A future storage-format change must include backward-read or migration behavior plus compatibility evidence rather than merely updating the marker. PH-05 completed in PR #31. See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
 
 ## Local database comparison
 
@@ -303,4 +303,4 @@ make example-windows
 
 ## 1.0 direction
 
-A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. The current 0.4 work is production/package hardening, not a stable-API claim.
+A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. The completed 0.4 work is production/package hardening, not a stable-API claim.

@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, and the 0.4 production-hardening gates.
+This walkthrough describes the current publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, and the completed 0.4 production-hardening gates.
 
 ## 1. Self-contained package boundary
 
@@ -69,7 +69,7 @@ The durable metadata identity currently includes:
 meta[format_version] = dxtr_box/1
 ```
 
-This is now guarded by PH-05 so a format change requires an explicit compatibility/migration decision rather than a silent constant edit.
+This is guarded by PH-05 so a format change requires an explicit compatibility/migration decision rather than a silent constant edit.
 
 ```dart
 await DxtrBox.init();
@@ -301,7 +301,7 @@ PH-05 protects compatibility boundaries without hashing implementation files.
 flutter test
   -> test/public_api_contract_test.dart
      -> compile public constructors/enums/typedefs
-     -> compile typed Box method/getter tear-offs
+     -> compile typed Box/DxtrBox/migration signatures
      -> verifyPublicStorageContract()
         -> exact package entrypoint export set
         -> rust/src/db.rs format_version key
@@ -318,13 +318,13 @@ dart run tool/verify_public_storage_contract.dart
 
 A deliberate 0.x public API change may update the contract in the same reviewed PR. A storage-format change has a higher bar: old-format readability or an explicit migration path, failure/rollback semantics, encryption/index compatibility, previous-format fixtures, and release documentation must accompany the change.
 
-PH-05 is a review/change-control gate; it does not claim that the pre-1.0 API or storage format is already stable.
+PH-05 is a review/change-control gate; it does not claim that the pre-1.0 API or storage format is already stable. PH-05 completed in PR #31 after the contract passed the minimum Flutter 3.22.0 / Dart 3.4.0 CI job and the normal five-platform staged-consumer matrix.
 
 See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
 
 ## 17. Current milestone
 
-0.3 query/index + Hive CE migration is closed. PH-01 native-size policy, PH-02 package hardening, PH-03 comparison evidence, and PH-04 staged published-consumer validation are complete. PH-05 public API + durable storage contract guard is active.
+0.3 query/index + Hive CE migration is closed. PH-01 native-size policy, PH-02 package hardening, PH-03 comparison evidence, PH-04 staged published-consumer validation, and PH-05 public API + durable storage contract guarding are complete. The next implementation work returns to `docs/HIVE_FUNCTIONAL_PARITY.md` rather than inventing a new hardening milestone without a product gap.
 
 Preserve these invariants:
 
