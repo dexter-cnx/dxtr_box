@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test test-fast ci-fast contract-check dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-profile-check rust-test-fast rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test test-fast ci-fast contract-check dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-profile-check rust-test-fast rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read benchmark-read-path preflight published-consumer-android published-consumer-linux published-consumer-windows published-consumer-macos published-consumer-ios example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -10,6 +10,10 @@ QUERY_BENCHMARK_SIZES ?= 100,1000,5000
 QUERY_BENCHMARK_SAMPLES ?= 3
 POINT_READ_ITERATIONS ?= 500
 POINT_READ_SAMPLES ?= 5
+READ_PATH_RUST_ITERATIONS ?= 2000
+READ_PATH_DART_ITERATIONS ?= 1000
+READ_PATH_SAMPLES ?= 7
+READ_PATH_OUTPUT_DIR ?= $(abspath build/read-path)
 SIZE_STABILITY_RUNS ?= 3
 SIZE_BASE_REF ?= HEAD^
 SIZE_MAX_GROWTH_BYTES ?= 65536
@@ -44,6 +48,7 @@ help:
 	@echo "  make benchmark-comparison Four-engine diagnostic timing matrix"
 	@echo "  make benchmark-query-index Query scan/index diagnostic benchmark matrix"
 	@echo "  make diagnose-point-read  Point get/containsKey diagnostic matrix"
+	@echo "  make benchmark-read-path  0.5 decomposed Rust + Dart/FRB read-path diagnostics"
 	@echo "  make published-consumer-linux Stage the publish payload and build an isolated Linux consumer"
 
 pub-get:
@@ -162,6 +167,14 @@ benchmark-query-index: native-build
 
 diagnose-point-read: native-build pub-get
 	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_POINT_READ_DIAGNOSIS=1 DXTR_BOX_POINT_READ_ITERATIONS=$(POINT_READ_ITERATIONS) DXTR_BOX_POINT_READ_SAMPLES=$(POINT_READ_SAMPLES) $(FLUTTER) test test/point_read_diagnosis_test.dart --reporter expanded
+
+benchmark-read-path: native-build pub-get
+	rm -rf "$(READ_PATH_OUTPUT_DIR)"
+	mkdir -p "$(READ_PATH_OUTPUT_DIR)"
+	DXTR_BOX_READ_PATH_RUST_ITERATIONS=$(READ_PATH_RUST_ITERATIONS) DXTR_BOX_READ_PATH_RUST_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_RUST_OUTPUT="$(READ_PATH_OUTPUT_DIR)/rust-read-path.jsonl" $(CARGO) test --manifest-path rust/Cargo.toml --release read_path_bench::read_path_microbench -- --ignored --nocapture
+	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_READ_PATH_BENCHMARK=1 DXTR_BOX_READ_PATH_DART_ITERATIONS=$(READ_PATH_DART_ITERATIONS) DXTR_BOX_READ_PATH_DART_SAMPLES=$(READ_PATH_SAMPLES) DXTR_BOX_READ_PATH_DART_OUTPUT="$(READ_PATH_OUTPUT_DIR)/dart-read-path.jsonl" $(FLUTTER) test test/read_path_benchmark_test.dart --reporter expanded
+	test -s "$(READ_PATH_OUTPUT_DIR)/rust-read-path.jsonl"
+	test -s "$(READ_PATH_OUTPUT_DIR)/dart-read-path.jsonl"
 
 preflight: ci-fast
 
