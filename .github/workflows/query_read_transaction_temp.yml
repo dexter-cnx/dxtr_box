@@ -1,0 +1,55 @@
+name: Temporary Query Read Transaction Finalize
+
+on:
+  push:
+    branches:
+      - feature/0.3-query-read-transaction
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-query-read-transaction
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Apply query read transaction refactor
+        run: python3 tool/apply_query_read_transaction.py
+
+      - name: Format Rust
+        working-directory: rust
+        run: cargo fmt --all -- --check
+
+      - name: Validate Rust profiles
+        working-directory: rust
+        run: |
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --no-default-features
+          cargo test --no-default-features --features encryption
+          cargo test --all-features
+
+      - name: Remove temporary tooling
+        run: |
+          rm tool/apply_query_read_transaction.py
+          rm .github/workflows/query_read_transaction_temp.yml
+
+      - name: Commit finalized refactor
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/src/api.rs rust/src/db.rs rust/src/index.rs tool/apply_query_read_transaction.py .github/workflows/query_read_transaction_temp.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "perf: execute queries in one redb read transaction"
+          git push origin HEAD:feature/0.3-query-read-transaction
