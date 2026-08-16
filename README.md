@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.3 query/index foundation / active development**. Public API and storage format are not stable yet.
+> Status: **0.3 query/index planner / active development**. Public API and storage format are not stable yet.
 
 ## Compatibility
 
@@ -33,7 +33,7 @@ The minimum is verified in CI using Flutter 3.22.0 / Dart 3.4.0. Minimum SDK inc
 - Explicit transactional plaintext -> encrypted migration.
 - Native cross-handle `watch()` fan-out.
 - Declarative native query execution with one FRB call per query.
-- Persisted secondary-index foundation with transactional maintenance.
+- Persisted secondary indexes with transactional maintenance and conservative index-backed planning.
 - Android, iOS, macOS, Linux, Windows first; Web fallback later.
 - No `build_runner` for normal usage.
 - Avoid loading an entire box into Dart RAM.
@@ -88,7 +88,7 @@ Migration rewrites values and encryption metadata in one redb write transaction.
 
 ## Declarative query API
 
-The 0.3 foundation introduces a structured query AST rather than executing one Dart predicate callback per stored value.
+The 0.3 query engine uses a structured AST rather than executing one Dart predicate callback per stored value.
 
 ```dart
 final rows = await box.query(
@@ -116,8 +116,10 @@ Current native query behavior:
 - dotted field paths such as `profile.age`;
 - equality/inequality, ordering, `between`, null checks;
 - AND/OR groups;
+- exact integer comparisons without collapsing large MessagePack integers through `f64`;
 - deterministic record-key ordering before offset/limit;
-- plaintext and encrypted native scans.
+- plaintext and encrypted native scans;
+- full-profile planner can narrow candidates through a matching persisted scalar equality index.
 
 Legacy `Box.where(predicate)` remains available as a Dart-side linear scan, but it is not the native declarative engine.
 
@@ -139,9 +141,11 @@ final removed = await box.dropIndex('by-status');
 
 Persisted index definitions and entries live in redb and are maintained in the same write transaction as primary record mutations.
 
-Important current limitation: **the query planner does not use persisted indexes yet**. Native scan is still the authoritative execution path. The next 0.3 slice is planner/index-backed execution with exhaustive scan/index equivalence tests.
+The planner is deliberately conservative in this slice. It may use a persisted index for an `equal` predicate at the top level or underneath an `AND` group when an index exists for that exact field. The index only narrows candidate record keys: the normal predicate engine still re-evaluates every candidate, then applies deterministic key ordering and pagination. Queries that are not currently planner-eligible, including `OR`-driven narrowing and range operators, fall back to native scan without changing public semantics.
 
-Encrypted boxes can use native scan queries, but persisted index creation is intentionally rejected until a non-leaking encrypted-index representation is designed. Plaintext -> encrypted migration is also rejected while persisted index definitions exist.
+Integration coverage runs the same logical query before index creation and after index creation, then verifies identical rows and mutation behavior. This keeps scan/index equivalence a correctness gate rather than a performance assumption.
+
+Encrypted boxes can use native scan queries, but persisted index creation is intentionally rejected until a non-leaking encrypted-index representation is designed. Plaintext -> encrypted migration is also rejected while persisted index definitions exist. Reduced native profiles reject opening boxes that already contain persisted index definitions so they cannot mutate primary data without maintaining derived index state.
 
 See [`docs/QUERY_INDEX_03.md`](docs/QUERY_INDEX_03.md).
 
@@ -170,7 +174,7 @@ There are exactly three public native product profiles:
 
 `full` remains the default production build. Do not add a fourth public query profile.
 
-Reduced profiles retain the stable FRB surface and fail explicitly when a requested operation requires a capability that is not compiled into that profile.
+Reduced profiles retain the stable FRB surface and fail explicitly when a requested operation requires a capability that is not compiled into that profile. Boxes containing persisted indexes require the full profile for safe mutation.
 
 PR #12 established the first Linux x86_64 native profile baseline. PR #13 then verified zero-byte spread across repeated same-commit builds for each profile. This is a same-commit reproducibility gate, not a cross-commit size budget.
 
@@ -187,7 +191,7 @@ data
 meta
 ```
 
-Full-profile index foundation adds:
+Full-profile query/index adds:
 
 ```text
 index_definitions
@@ -218,8 +222,8 @@ Additional targets cover FRB regeneration, larger local benchmarks, Rust-only ch
 
 ## Engineering docs
 
-- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB -> Rust -> redb, including query/index paths.
-- [Query / Index 0.3 contract](docs/QUERY_INDEX_03.md) — current query/index semantics, persisted index security, and planner next step.
+- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB -> Rust -> redb, including planner/index paths.
+- [Query / Index 0.3 contract](docs/QUERY_INDEX_03.md) — query semantics, planner eligibility, equivalence rules, and persisted-index security.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation status and sequencing.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmarks, profiles, and CI gates.
 - [Native feature profiles](docs/NATIVE_FEATURE_PROFILES.md) — minimal/encryption/full contracts.
@@ -241,7 +245,8 @@ Coverage includes:
 - encrypted close/reopen and migration;
 - process-kill crash/reopen durability;
 - query AST validation and facade behavior;
-- native query/index integration lifecycle;
+- native scan/index equivalence for planner-eligible equality predicates;
+- persisted-index maintenance after indexed-field mutation;
 - encrypted native scan + persisted-index rejection;
 - generated FRB binding drift detection;
 - minimal/encryption/full Rust profile tests on Ubuntu/macOS/Windows;
@@ -258,15 +263,15 @@ Implemented foundation:
 - one-call native scan executor;
 - persisted scalar secondary-index definitions/entries;
 - transactional index maintenance;
-- encrypted-index safety restrictions.
+- encrypted-index safety restrictions;
+- conservative equality-index planner with scan/index equivalence coverage.
 
 Next:
 
-- planner choosing eligible persisted index vs scan;
-- exhaustive scan/index equivalence tests;
+- expand planner eligibility only with matching equivalence tests;
 - explicit sort contract / `sortBy`;
 - Hive CE migration design/implementation;
-- internal native scan transaction/performance improvement where justified.
+- internal native scan/index lookup performance improvements where justified.
 
 ### 0.4.x — Production hardening
 

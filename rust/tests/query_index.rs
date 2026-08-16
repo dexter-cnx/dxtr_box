@@ -113,6 +113,40 @@ fn native_scan_and_persisted_index_lifecycle() {
     assert_eq!(definitions[0].name, "by-status");
     assert_eq!(definitions[0].field, "status");
 
+    let indexed_results = scan_query("people".to_string(), query_payload()).unwrap();
+    assert_eq!(
+        indexed_results
+            .iter()
+            .map(|record| record.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alice", "charlie"]
+    );
+    assert_eq!(
+        indexed_results
+            .iter()
+            .map(|record| record.value.as_slice())
+            .collect::<Vec<_>>(),
+        results
+            .iter()
+            .map(|record| record.value.as_slice())
+            .collect::<Vec<_>>()
+    );
+
+    put(
+        "people".to_string(),
+        "alice".to_string(),
+        person("inactive", 22),
+    )
+    .unwrap();
+    let after_indexed_mutation = scan_query("people".to_string(), query_payload()).unwrap();
+    assert_eq!(
+        after_indexed_mutation
+            .iter()
+            .map(|record| record.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["charlie"]
+    );
+
     close_box("people".to_string()).unwrap();
     open_box("people".to_string(), None).unwrap();
     assert_eq!(list_indexes("people".to_string()).unwrap().len(), 1);
