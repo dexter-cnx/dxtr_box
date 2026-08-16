@@ -13,6 +13,10 @@ dependencies:
   hive_ce: 2.19.3
   sembast: 3.7.3
   sqflite_common_ffi: 2.3.4+4
+  # sqflite_common_ffi 2.3.4+4 still uses package:sqlite3/open.dart,
+  # which was removed in sqlite3 3.x. Keep the comparison harness on the
+  # latest 2.x line that still matches this benchmark package's Dart 3.5 floor.
+  sqlite3: 2.9.4
 
 dev_dependencies:
   flutter_test:
