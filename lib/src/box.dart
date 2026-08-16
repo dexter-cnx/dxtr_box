@@ -17,10 +17,10 @@ final class Box {
     required NativeDxtrApi api,
     required BoxMetadata metadata,
     required void Function() onClose,
-  }) : _watcherId = watcherId,
-       _api = api,
-       _metadata = metadata,
-       _onClose = onClose;
+  })  : _watcherId = watcherId,
+        _api = api,
+        _metadata = metadata,
+        _onClose = onClose;
 
   final String name;
   final String _watcherId;
@@ -345,31 +345,31 @@ final class Box {
 }
 
 Map<String, dynamic> _queryWire(BoxQuery query) => <String, dynamic>{
-  'where': _filterWire(query.where),
-  'sortBy': query.sortBy.map(_sortWire).toList(growable: false),
-  'limit': query.limit,
-  'offset': query.offset,
-};
+      'where': _filterWire(query.where),
+      'sortBy': query.sortBy.map(_sortWire).toList(growable: false),
+      'limit': query.limit,
+      'offset': query.offset,
+    };
 
 Map<String, dynamic> _sortWire(QuerySort sort) => <String, dynamic>{
-  'field': sort.field,
-  'direction': sort.direction.name,
-  'nulls': sort.nulls.name,
-};
+      'field': sort.field,
+      'direction': sort.direction.name,
+      'nulls': sort.nulls.name,
+    };
 
 Map<String, dynamic> _filterWire(QueryFilter filter) {
   return switch (filter) {
     QueryComparison comparison => <String, dynamic>{
-      'type': 'comparison',
-      'field': comparison.field,
-      'operator': comparison.operator.name,
-      'value': comparison.value,
-      'upperValue': comparison.upperValue,
-    },
+        'type': 'comparison',
+        'field': comparison.field,
+        'operator': comparison.operator.name,
+        'value': comparison.value,
+        'upperValue': comparison.upperValue,
+      },
     QueryGroup group => <String, dynamic>{
-      'type': 'group',
-      'operator': group.operator.name,
-      'filters': group.filters.map(_filterWire).toList(growable: false),
-    },
+        'type': 'group',
+        'operator': group.operator.name,
+        'filters': group.filters.map(_filterWire).toList(growable: false),
+      },
   };
 }
