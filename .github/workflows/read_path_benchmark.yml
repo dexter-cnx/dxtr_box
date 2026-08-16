@@ -31,14 +31,6 @@ jobs:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Toolchain metadata
-        run: |
-          mkdir -p build/read-path
-          flutter --version | tee build/read-path/flutter-version.txt
-          rustc --version | tee build/read-path/rust-version.txt
-          cargo --version | tee build/read-path/cargo-version.txt
-          uname -a | tee build/read-path/runner.txt
-          lscpu > build/read-path/cpu.txt || true
       - name: Install dependencies
         run: flutter pub get
       - name: Run decomposed read-path diagnostics
@@ -47,11 +39,24 @@ jobs:
           READ_PATH_DART_ITERATIONS: '500'
           READ_PATH_SAMPLES: '5'
         run: make benchmark-read-path
+      - name: Verify read-path evidence
+        run: |
+          test -s build/read-path/rust-read-path.jsonl
+          test -s build/read-path/dart-read-path.jsonl
+      - name: Toolchain metadata
+        if: always()
+        run: |
+          mkdir -p build/read-path
+          flutter --version | tee build/read-path/flutter-version.txt
+          rustc --version | tee build/read-path/rust-version.txt
+          cargo --version | tee build/read-path/cargo-version.txt
+          uname -a | tee build/read-path/runner.txt
+          lscpu > build/read-path/cpu.txt || true
       - name: Upload read-path evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: read-path-benchmark-linux-x64
           path: build/read-path
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
