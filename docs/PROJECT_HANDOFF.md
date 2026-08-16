@@ -332,3 +332,12 @@ Refresh Hive Functional Parity Audit against the then-current Hive CE release an
 - Never use an index as final truth; primary committed data remains authoritative.
 - Never assume raw MessagePack numeric byte order equals query numeric order.
 - Keep README, this handoff, `CODE_WALKTHROUGH.md`, and `QUERY_INDEX_03.md` aligned with actual implementation state.
+
+## Latest 0.3 optimization — bounded index-name iteration
+
+`feature/0.3-index-prefix-range` replaces whole-`index_entries` iteration for candidate lookup and index-drop cleanup with redb ranges bounded to one encoded index-name prefix. Public Dart/FRB APIs and planner eligibility do not change.
+
+Important constraint: this is **not** scalar-order range seeking. MessagePack scalar components are still decoded and compared using the query engine comparator. Any future scalar-level seek requires an order-preserving encoding proven equivalent to query numeric/string semantics.
+
+After this slice, the next architecture candidate remains one-redb-read-transaction query execution, followed by explicit sort semantics and benchmark scenarios only after correctness remains stable.
+
