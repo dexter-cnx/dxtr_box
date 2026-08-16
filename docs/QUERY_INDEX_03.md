@@ -16,8 +16,9 @@ Implemented:
 - Planner eligibility now includes scalar `equal`, `greaterThan`, `greaterThanOrEqual`, `lessThan`, `lessThanOrEqual`, and `between` predicates at the top level or underneath `AND` groups.
 - Matching indexes may be combined by intersecting candidate key sets for `AND` groups.
 - Nested indexed fields such as `profile.age` are planner-eligible when the persisted definition exactly matches the dotted field path.
-- The complete original predicate is always re-evaluated against current primary data before ordering/pagination.
-- Queries without a safe usable index fall back to native scan.
+- The complete original predicate is always re-evaluated against primary data before ordering/pagination.
+- One `Box.query(...)` now uses one redb `ReadTransaction` snapshot for index definitions, candidate entry ranges, fallback key enumeration, and primary-record reads.
+- Queries without a safe usable index fall back to native scan within that same read snapshot.
 - Scan/index equivalence coverage exists for equality, nested range operators, inclusive `between`, and multi-index AND intersection.
 - Encrypted boxes reject persisted index creation until a non-leaking representation exists; native scan remains supported.
 - Reduced profiles reject boxes that already contain persisted index definitions.
@@ -166,12 +167,14 @@ A future redb range-seek optimization requires an order-preserving scalar encodi
 Box.query(BoxQuery)
   -> one FRB call
   -> query::decode_query once
-  -> index::candidate_keys(filter)
-       -> usable index candidate sets
+  -> open one redb ReadTransaction snapshot
+  -> index::candidate_keys(read, filter)
+       -> index definitions + usable candidate sets from the same snapshot
        -> optional AND intersection
        -> None when scan is required
+  -> fallback key enumeration from the same snapshot when needed
   -> sort + deduplicate candidate keys
-  -> read current primary record
+  -> read primary record from the same snapshot
   -> decrypt if needed
   -> evaluate the complete original predicate
   -> deterministic record-key ordering
@@ -229,14 +232,15 @@ Cross-commit binary-size regression policy remains separate from query/index wor
 10. Nested range planner for `>`, `>=`, `<`, `<=`, and `between`.
 11. Multi-index candidate intersection for AND groups.
 12. Range and intersection scan/index equivalence coverage.
+13. Bounded index-name redb range iteration for lookup and drop cleanup.
+14. Single-redb-read-transaction query execution across planner/fallback/primary reads.
 
 ## Next
 
-1. Improve persisted-index lookup efficiency without relying on raw MessagePack numeric byte ordering.
-2. Consider one-redb-read-transaction query execution.
-3. Add planner diagnostics/selection tests only if they improve maintainability without expanding public API prematurely.
-4. Define `sortBy` as a separate public API contract.
-5. Add query/index benchmark scenarios only after semantic paths remain stable.
+1. Add planner diagnostics/selection tests only if they improve maintainability without expanding public API prematurely.
+2. Define `sortBy` as a separate public API contract.
+3. Add query/index benchmark scenarios now that bounded index iteration and single-snapshot query execution are stable.
+4. Design an order-preserving scalar encoding only if benchmark evidence justifies scalar-level redb range seek.
 
 ## Correctness rules
 

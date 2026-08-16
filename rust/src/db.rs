@@ -1,5 +1,7 @@
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
+#[cfg(feature = "full")]
+use redb::ReadTransaction;
 use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::{
     collections::{HashMap, HashSet},
@@ -649,6 +651,42 @@ pub fn get(name: &str, key: &str) -> Result<Option<Vec<u8>>, String> {
     }
 }
 
+#[cfg(feature = "full")]
+pub(crate) fn query_all_keys(read: &ReadTransaction) -> Result<Vec<String>, String> {
+    let table = read.open_table(DATA).map_err(|e| e.to_string())?;
+    table
+        .iter()
+        .map_err(|e| e.to_string())?
+        .map(|item| {
+            item.map(|(key, _)| key.value().to_string())
+                .map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
+#[cfg(feature = "full")]
+pub(crate) fn query_get(
+    read: &ReadTransaction,
+    encryption: &EncryptionState,
+    key: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let table = read.open_table(DATA).map_err(|e| e.to_string())?;
+    let stored = table
+        .get(key)
+        .map_err(|e| e.to_string())?
+        .map(|guard| guard.value().to_vec());
+    drop(table);
+
+    match stored {
+        None => Ok(None),
+        Some(payload) => {
+            let plaintext = encryption.decode_value(key, &payload)?;
+            validate_message_pack(&plaintext)?;
+            Ok(Some(plaintext))
+        }
+    }
+}
+
 pub fn contains_key(name: &str, key: &str) -> Result<bool, String> {
     let (db, _) = database(name)?;
     let read = db.begin_read().map_err(|e| e.to_string())?;
@@ -832,6 +870,36 @@ mod tests {
         assert!(!contains_key("people", "alice").unwrap());
         assert_eq!(len("people").unwrap(), 0);
         close("people");
+    }
+
+    #[cfg(feature = "full")]
+    #[test]
+    fn query_helpers_read_one_stable_snapshot() {
+        let _guard = TEST_LOCK.lock();
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path().to_str().unwrap()).unwrap();
+        open("query-snapshot", None).unwrap();
+        put("query-snapshot", "before", &pack(&1_i64)).unwrap();
+
+        let (database, encryption) = database("query-snapshot").unwrap();
+        let read = database.begin_read().unwrap();
+        assert_eq!(query_all_keys(&read).unwrap(), vec!["before".to_string()]);
+
+        put("query-snapshot", "after", &pack(&2_i64)).unwrap();
+
+        assert_eq!(query_all_keys(&read).unwrap(), vec!["before".to_string()]);
+        assert_eq!(
+            query_get(&read, &encryption, "before").unwrap(),
+            Some(pack(&1_i64))
+        );
+        assert_eq!(query_get(&read, &encryption, "after").unwrap(), None);
+
+        drop(read);
+        assert_eq!(
+            all_keys("query-snapshot").unwrap(),
+            vec!["after".to_string(), "before".to_string()]
+        );
+        close("query-snapshot");
     }
 
     #[test]
