@@ -1,6 +1,6 @@
 # PH-05 Public API and Storage Contract Guard
 
-Status: active 0.4 Production Hardening milestone.
+Status: complete in PR #31.
 
 ## Goal
 
@@ -72,6 +72,10 @@ No separate hosted-service dependency or code generator is introduced.
 - keep minimum Dart/Flutter compatibility unless a separately reviewed milestone changes it.
 
 When the storage contract changes, backward-compatibility evidence is mandatory rather than advisory.
+
+## Completion evidence
+
+PH-05 closed in PR #31 after the public API compile contract, export-set verifier, and durable `format_version = dxtr_box/1` guard passed the normal CI matrix, including the minimum Flutter 3.22.0 / Dart 3.4.0 job and all five staged published-consumer platform builds.
 
 ## Non-goals
 
