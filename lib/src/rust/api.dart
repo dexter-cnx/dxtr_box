@@ -49,10 +49,10 @@ Future<void> putAll(
         required List<(String, Uint8List)> entries}) =>
     RustLib.instance.api.crateApiPutAll(boxName: boxName, entries: entries);
 
-Future<Uint8List?> get_({required String boxName, required String key}) =>
+Uint8List? get_({required String boxName, required String key}) =>
     RustLib.instance.api.crateApiGet(boxName: boxName, key: key);
 
-Future<bool> containsKey({required String boxName, required String key}) =>
+bool containsKey({required String boxName, required String key}) =>
     RustLib.instance.api.crateApiContainsKey(boxName: boxName, key: key);
 
 Future<void> delete({required String boxName, required String key}) =>

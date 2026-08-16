@@ -85,8 +85,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<bool> crateApiCompact({required String boxName});
 
-  Future<bool> crateApiContainsKey(
-      {required String boxName, required String key});
+  bool crateApiContainsKey({required String boxName, required String key});
 
   Future<void> crateApiCreateIndex(
       {required String boxName, required String name, required String field});
@@ -104,8 +103,7 @@ abstract class RustLibApi extends BaseApi {
   void crateApiEncryptBox(
       {required String name, required String encryptionKey});
 
-  Future<Uint8List?> crateApiGet(
-      {required String boxName, required String key});
+  Uint8List? crateApiGet({required String boxName, required String key});
 
   Future<List<String>> crateApiGetAllKeys({required String boxName});
 
@@ -236,15 +234,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<bool> crateApiContainsKey(
-      {required String boxName, required String key}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
+  bool crateApiContainsKey({required String boxName, required String key}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(boxName, serializer);
         sse_encode_String(key, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 5, port: port_);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -414,15 +410,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Uint8List?> crateApiGet(
-      {required String boxName, required String key}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
+  Uint8List? crateApiGet({required String boxName, required String key}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(boxName, serializer);
         sse_encode_String(key, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 12, port: port_);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_list_prim_u_8_strict,

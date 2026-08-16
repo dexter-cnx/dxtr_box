@@ -205,10 +205,12 @@ pub fn put_all(box_name: String, entries: Vec<(String, Vec<u8>)>) -> Result<(), 
     Ok(())
 }
 
+#[frb(sync)]
 pub fn get(box_name: String, key: String) -> Result<Option<Vec<u8>>, String> {
     db::get(&box_name, &key)
 }
 
+#[frb(sync)]
 pub fn contains_key(box_name: String, key: String) -> Result<bool, String> {
     db::contains_key(&box_name, &key)
 }
