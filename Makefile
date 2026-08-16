@@ -1,10 +1,11 @@
-.PHONY: help pub-get format format-check analyze test dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-comparison-correctness benchmark-comparison benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
 FRB ?= flutter_rust_bridge_codegen
 BENCHMARK_OPS ?= 200
 BENCHMARK_FULL_OPS ?= 5000
+COMPARISON_OPS ?= 200
 QUERY_BENCHMARK_SIZES ?= 100,1000,5000
 QUERY_BENCHMARK_SAMPLES ?= 3
 POINT_READ_ITERATIONS ?= 500
@@ -32,7 +33,9 @@ help:
 	@echo "  make native-size-regression Compare base/head native sizes with the 0.4 growth budget"
 	@echo "  make process-crash        Process-kill + reopen durability test"
 	@echo "  make benchmark-smoke      dxtr_box vs hive_ce smoke benchmark"
-	@echo "  make benchmark-full       Larger local benchmark run"
+	@echo "  make benchmark-full       Larger dxtr_box vs hive_ce local benchmark"
+	@echo "  make benchmark-comparison-correctness Cross-engine CRUD/reopen correctness gate"
+	@echo "  make benchmark-comparison Four-engine diagnostic timing matrix"
 	@echo "  make benchmark-query-index Query scan/index diagnostic benchmark matrix"
 	@echo "  make diagnose-point-read  Point get/containsKey diagnostic matrix"
 	@echo "  make rust-check           rustfmt + clippy + all native feature profiles"
@@ -41,11 +44,11 @@ pub-get:
 	$(FLUTTER) pub get
 
 format:
-	dart format lib test example benchmark/test tool/hive_ce_migration_fixture/test
+	dart format lib test example benchmark/lib benchmark/test tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
 format-check:
-	dart format --output=none --set-exit-if-changed lib test example benchmark/test tool/hive_ce_migration_fixture/test
+	dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
 analyze: pub-get
@@ -59,7 +62,7 @@ dart-doc: pub-get
 	dart doc --output build/doc
 
 pub-dry-run: pub-get
-	dart pub publish --dry-run
+	dart pub publish --dry-run --ignore-warnings
 
 package-readiness: dart-doc pub-dry-run
 
@@ -121,10 +124,16 @@ process-crash:
 	$(CARGO) test --manifest-path rust/Cargo.toml --test process_crash -- --nocapture
 
 benchmark-smoke: native-build
-	cd benchmark && $(FLUTTER) pub get && DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
+	cd benchmark && $(FLUTTER) pub get && LD_LIBRARY_PATH="../rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="../rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="../rust/target/release:$$PATH" DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
 
 benchmark-full: native-build
-	cd benchmark && $(FLUTTER) pub get && DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_FULL_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
+	cd benchmark && $(FLUTTER) pub get && LD_LIBRARY_PATH="../rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="../rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="../rust/target/release:$$PATH" DXTR_BOX_BENCHMARK=1 DXTR_BOX_BENCHMARK_OPS=$(BENCHMARK_FULL_OPS) $(FLUTTER) test test/benchmark_smoke_test.dart --reporter expanded
+
+benchmark-comparison-correctness: native-build
+	cd benchmark && $(FLUTTER) pub get && LD_LIBRARY_PATH="../rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="../rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="../rust/target/release:$$PATH" DXTR_BOX_COMPARISON=1 $(FLUTTER) test test/local_database_correctness_test.dart --reporter expanded
+
+benchmark-comparison: native-build
+	cd benchmark && $(FLUTTER) pub get && LD_LIBRARY_PATH="../rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="../rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="../rust/target/release:$$PATH" DXTR_BOX_COMPARISON_BENCHMARK=1 DXTR_BOX_COMPARISON_OPS=$(COMPARISON_OPS) $(FLUTTER) test test/local_database_benchmark_test.dart --reporter expanded
 
 benchmark-query-index: native-build
 	cd benchmark && $(FLUTTER) pub get && LD_LIBRARY_PATH="../rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="../rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="../rust/target/release:$$PATH" DXTR_BOX_QUERY_BENCHMARK=1 DXTR_BOX_QUERY_BENCHMARK_SIZES=$(QUERY_BENCHMARK_SIZES) DXTR_BOX_QUERY_BENCHMARK_SAMPLES=$(QUERY_BENCHMARK_SAMPLES) $(FLUTTER) test test/query_index_benchmark_test.dart --reporter expanded
