@@ -12,7 +12,8 @@ void main() {
   final sizes = _parseSizes(
     Platform.environment['DXTR_BOX_QUERY_BENCHMARK_SIZES'],
   );
-  final samples = int.tryParse(
+  final samples =
+      int.tryParse(
         Platform.environment['DXTR_BOX_QUERY_BENCHMARK_SAMPLES'] ?? '',
       ) ??
       _defaultSamples;
@@ -71,12 +72,7 @@ void main() {
   );
 }
 
-enum _Scenario {
-  equality,
-  range,
-  andIntersection,
-  sortedRange,
-}
+enum _Scenario { equality, range, andIntersection, sortedRange }
 
 List<int> _parseSizes(String? raw) {
   if (raw == null || raw.trim().isEmpty) return _defaultSizes;
@@ -130,10 +126,7 @@ Future<int> _runSample({
     for (var i = 0; i < size; i++)
       'k${i.toString().padLeft(8, '0')}': <String, dynamic>{
         'status': i % 3 == 0 ? 'active' : 'inactive',
-        'profile': <String, dynamic>{
-          'age': i % 101,
-          'score': i,
-        },
+        'profile': <String, dynamic>{'age': i % 101, 'score': i},
       },
   });
 
@@ -160,49 +153,49 @@ Future<int> _runSample({
 
   final query = switch (scenario) {
     _Scenario.equality => BoxQuery(
-        where: QueryComparison(
+      where: QueryComparison(
+        field: 'status',
+        operator: QueryOperator.equal,
+        value: 'active',
+      ),
+    ),
+    _Scenario.range => BoxQuery(
+      where: QueryComparison(
+        field: 'profile.age',
+        operator: QueryOperator.between,
+        value: 18,
+        upperValue: 45,
+      ),
+    ),
+    _Scenario.andIntersection => BoxQuery(
+      where: QueryGroup.and(<QueryFilter>[
+        QueryComparison(
           field: 'status',
           operator: QueryOperator.equal,
           value: 'active',
         ),
-      ),
-    _Scenario.range => BoxQuery(
-        where: QueryComparison(
+        QueryComparison(
           field: 'profile.age',
-          operator: QueryOperator.between,
+          operator: QueryOperator.greaterThanOrEqual,
           value: 18,
-          upperValue: 45,
         ),
-      ),
-    _Scenario.andIntersection => BoxQuery(
-        where: QueryGroup.and(<QueryFilter>[
-          QueryComparison(
-            field: 'status',
-            operator: QueryOperator.equal,
-            value: 'active',
-          ),
-          QueryComparison(
-            field: 'profile.age',
-            operator: QueryOperator.greaterThanOrEqual,
-            value: 18,
-          ),
-        ]),
-      ),
+      ]),
+    ),
     _Scenario.sortedRange => BoxQuery(
-        where: QueryComparison(
-          field: 'profile.age',
-          operator: QueryOperator.between,
-          value: 18,
-          upperValue: 45,
-        ),
-        sortBy: <QuerySort>[
-          QuerySort(
-            field: 'profile.score',
-            direction: QuerySortDirection.descending,
-          ),
-        ],
-        limit: 50,
+      where: QueryComparison(
+        field: 'profile.age',
+        operator: QueryOperator.between,
+        value: 18,
+        upperValue: 45,
       ),
+      sortBy: <QuerySort>[
+        QuerySort(
+          field: 'profile.score',
+          direction: QuerySortDirection.descending,
+        ),
+      ],
+      limit: 50,
+    ),
   };
 
   final watch = Stopwatch()..start();
