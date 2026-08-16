@@ -44,15 +44,20 @@ already-open Hive CE box
   -> convert unsupported values when required
   -> DxtrCodec preflight every converted value
   -> detect converted-key collisions
-  -> atomically reserve {destination}.dxtr with exclusive file creation
-  -> open the reserved dxtr destination
+  -> create exclusive migration reservation marker
+  -> re-check destination does not exist
+  -> atomically create {destination}.dxtr exclusively
+  -> open the reserved destination through the migration-only internal path
   -> one Box.putAll call
   -> one native redb write transaction for migrated entries
   -> close destination
+  -> release reservation marker
   -> return HiveCeMigrationResult
 ```
 
-The exclusive reservation is the create-if-absent boundary for migration. Concurrent migrations targeting the same destination cannot both proceed: exactly one obtains the filesystem reservation and the other fails without opening or mutating that destination.
+The reservation marker protects more than migration-vs-migration races. Ordinary `DxtrBox.open(destinationName)` checks for an active migration reservation before native open and again immediately after native open. The second check closes the race where a normal open started just before migration acquired the reservation; such a handle is closed before it can escape to application code.
+
+Concurrent migrations targeting the same destination cannot both proceed. An ordinary open that creates the destination first causes migration's post-reservation existence check / exclusive create to fail. A migration that wins reservation + destination creation causes ordinary open to reject before returning a usable `Box`.
 
 No source entry is deleted or modified.
 
@@ -93,9 +98,9 @@ All converted values are encoded during preflight before destination reservation
 
 0.3 guarantees **no partially populated committed migration transaction**: all prepared entries are submitted in one native `putAll` write transaction after full Dart-side preflight.
 
-If destination handle initialization fails after the exclusive reservation is created, the reservation owned by that migration is closed/deleted before the original error is rethrown. If `putAll` throws after the destination was successfully opened, migration closes and deletes the newly-created destination before rethrowing.
+If destination handle initialization fails after reservation/destination creation, the destination owned by that migration is closed/deleted and the reservation marker is released before the original error is rethrown. If `putAll` throws after the destination was successfully opened, migration closes and deletes the newly-created destination before releasing the reservation and rethrowing.
 
-A process termination after exclusive reservation but before the single `putAll` commit may still leave an empty destination file. That is not a completed migration and callers must handle it explicitly before retrying. A future stronger crash-atomic design could use native staging + promotion if product evidence justifies the extra storage machinery.
+A hard process termination while a migration owns the reservation can leave an incomplete destination and reservation marker. 0.3 does not claim file-level crash-atomic staging/promotion or automatic stale-reservation recovery. A future stronger design can move reservation/staging ownership into a native transactional/promotion layer if required by product evidence.
 
 ## Result
 
@@ -109,7 +114,7 @@ No key-type counters are currently part of the public result.
 
 ## Validation gate
 
-The Hive CE 2.19.3 fixture suite covers:
+The Hive CE 2.19.3 fixture / root regression suites cover:
 
 - primitives, lists/maps, `Uint8List`, and `DateTime`;
 - String and int keys;
@@ -119,11 +124,13 @@ The Hive CE 2.19.3 fixture suite covers:
 - custom value conversion using `BigInt` as a real unsupported Hive CE value;
 - destination-already-exists rejection without mutation;
 - concurrent migration attempts to one destination with exactly one winner;
+- ordinary `DxtrBox.open()` rejection while migration owns the destination;
+- normal open succeeds again after migration reservation release;
 - encrypted Hive CE source opened with caller-supplied Hive CE credentials;
 - encrypted dxtr_box destination;
 - source preservation;
 - failed preflight leaving no destination;
-- destination reservation cleanup when handle initialization fails;
+- destination + reservation cleanup when handle initialization fails;
 - root package minimum Flutter/Dart compatibility independently from the Hive CE fixture package.
 
 Run:
@@ -143,4 +150,5 @@ CI runs the fixture package separately so Hive CE 2.19.3 cannot accidentally rai
 - source schema evolution automation;
 - TypeAdapter introspection/code generation;
 - overwrite/merge into an existing dxtr_box destination;
+- file-level crash-atomic staging/promotion or automatic stale-reservation recovery;
 - adding Hive CE as a core dxtr_box dependency.
