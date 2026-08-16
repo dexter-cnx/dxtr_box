@@ -8,9 +8,11 @@ Target: Hive-simple Flutter ergonomics backed by redb, with durable storage outs
 
 The 1.0 claim is functional replacement for practical Hive/Hive CE local-database workloads, not source-level API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` remains a release gate.
 
-## Current snapshot — 0.3 point-read diagnosis complete
+## Current snapshot — 0.3 Hive CE migration implemented
 
-Main contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, explicit native `sortBy`, and the reproducible query/index benchmark matrix. The active 0.3 point-read diagnosis measured `get` / `containsKey` without changing public query semantics, storage format, FRB shape, or profile count.
+Main before this PR contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, single-snapshot query execution, deterministic planner selection, explicit native `sortBy`, the query/index benchmark matrix, and point-read diagnosis.
+
+PR #23 adds the explicit Hive CE migration path while preserving the core SDK/dependency contract. The next slice after merge is the 0.3 closure audit.
 
 Current capabilities include:
 
@@ -31,6 +33,47 @@ Current capabilities include:
 - Persisted named scalar indexes under `full`.
 - Planner-backed equality and ordered range candidate narrowing.
 - Multi-index candidate intersection for AND groups.
+- Deterministic native sorting before pagination.
+- Diagnostic query/index and point-read benchmark harnesses.
+- Explicit Hive CE 2.19.3 migration validation through a separate fixture package.
+
+## Hive CE migration contract
+
+Core `dxtr_box` has **no runtime dependency on Hive CE**. This is intentional so Hive CE does not raise the core package SDK floor or become a transitive dependency for applications that never used it.
+
+Applications wrap an already-open Hive CE box with:
+
+```text
+HiveCeMigrationSource
+  name
+  isOpen callback
+  keys callback
+  get callback
+```
+
+Then call:
+
+```text
+migrateFromHiveCe(source, destinationName: ...)
+```
+
+Migration invariants:
+
+- source remains open and unmodified;
+- caller opens/decrypts encrypted Hive CE sources using Hive CE itself;
+- destination must not already exist;
+- String keys are preserved;
+- int keys default to `@hive-int:<decimal>`;
+- custom key/value conversion is explicit;
+- converted-key collisions fail before destination creation;
+- every converted value is `DxtrCodec`-preflighted before destination creation;
+- migrated entries are committed through one `Box.putAll` / one native redb write transaction;
+- if `putAll` throws after destination open, the newly-created destination is removed;
+- process termination between destination creation and commit can still leave an empty destination and is not claimed crash-atomic.
+
+Real Hive CE 2.19.3 fixtures live under `tool/hive_ce_migration_fixture/` and are isolated from root dependency resolution. Use `make hive-ce-migration-test`.
+
+See `docs/HIVE_CE_MIGRATION_03.md`.
 
 ## Query/index public model
 
@@ -42,6 +85,9 @@ QueryGroup.and(...)
 QueryGroup.or(...)
 QueryOperator
 QueryLogicalOperator
+QuerySort
+QuerySortDirection
+QueryNullOrder
 IndexDefinition
 ```
 
@@ -84,7 +130,7 @@ Primary `data` remains authoritative; indexes are derived state.
 
 ## Current planner contract
 
-Planner-eligible candidate narrowing now includes:
+Planner-eligible candidate narrowing includes:
 
 ```text
 equal
@@ -95,46 +141,19 @@ lessThanOrEqual
 between
 ```
 
-Eligibility applies at the top level or recursively under `AND` groups when a persisted index exists for the exact dotted field path.
-
-Range bounds are currently limited to ordered numeric/string scalar values.
-
-The planner does **not** descend into `OR` groups for narrowing. `notEqual`, `isNull`, and `isNotNull` remain scan-backed.
+Eligibility applies at the top level or recursively under `AND` groups when a persisted index exists for the exact dotted field path. The planner does not descend into `OR`; `notEqual`, `isNull`, and `isNotNull` remain scan-backed.
 
 Nested fields such as `profile.age` can be indexed and planned.
 
-## Multiple-index AND intersection
-
-For an AND query, every usable indexed predicate produces a record-key candidate set. Candidate sets are sorted by cardinality and intersected from the smallest set first.
-
-Example:
-
-```text
-status == active       -> by-status set
-profile.age >= 18      -> by-age set
-intersection           -> candidate keys
-primary record recheck -> final truth
-```
-
-Missing indexes do not fail a query. Any remaining indexed predicates may still narrow candidates; all predicates are re-evaluated from primary committed data.
+For an AND query, usable indexed predicates produce candidate sets which are intersected from smallest to largest. Missing indexes do not fail a query. The full original predicate remains authoritative and is re-evaluated against committed primary data.
 
 ## Range lookup correctness constraint
 
 Persisted scalar components are ordinary MessagePack bytes. Their lexicographic byte order is not a general numeric order.
 
-Therefore current range planning does **not** assume raw MessagePack bytes can be used directly as redb numeric range bounds.
+Therefore current range planning does **not** use raw MessagePack bytes as redb numeric range bounds. It bounds iteration by index name, decodes scalar components, and applies the query engine's exact semantic comparator.
 
-Current correctness-first path:
-
-```text
-matching index definition
-  -> inspect entries for that index
-  -> decode scalar component
-  -> compare with query engine's exact comparator
-  -> collect matching record keys
-```
-
-A future efficient redb range seek requires an order-preserving scalar encoding or equivalent proven ordering contract.
+A future scalar-level redb range seek requires an order-preserving scalar encoding or equivalent proven ordering contract plus migration/rebuild semantics.
 
 ## Query execution path
 
@@ -144,34 +163,23 @@ Box.query(BoxQuery)
   -> NativeQueryApi.scanQuery
   -> one FRB call
   -> query::decode_query once
-  -> open one redb ReadTransaction snapshot
+  -> one redb ReadTransaction snapshot
   -> index::candidate_keys(read, filter)
-       -> definitions + equality/range candidate sets from the same snapshot
-       -> optional AND intersection
-       -> None when scan is required
-  -> fallback key enumeration from the same snapshot when needed
-  -> sort + deduplicate candidate keys
-  -> read primary records from the same snapshot
+  -> fallback key enumeration when needed
+  -> primary record reads from the same snapshot
   -> decrypt if required
-  -> evaluate complete original predicate
-  -> deterministic key ordering
+  -> full predicate re-evaluation
+  -> optional deterministic semantic sort
+  -> record-key tie-break
   -> offset / limit
   -> one FRB response
 ```
 
-The persisted index only narrows candidates. Full predicate evaluation against committed primary data remains mandatory.
+Persisted indexes narrow `where` candidates only; they do not claim to satisfy requested ORDER BY.
 
 ## Scan/index equivalence gate
 
-`rust/tests/query_index.rs` now covers:
-
-- equality planner equivalence;
-- nested `profile.age` range equivalence for `>`, `>=`, `<`, `<=`;
-- inclusive `between` equivalence;
-- multi-index AND intersection equivalence;
-- indexed-field mutation correctness;
-- index definitions surviving reopen;
-- encrypted boxes using scan and rejecting persisted index creation.
+`rust/tests/query_index.rs` covers equality, nested ordered ranges, inclusive `between`, multi-index AND intersection, indexed-field mutation correctness, persistence after reopen, deterministic sorting, and encrypted-box scan/index restrictions.
 
 Every future planner rule must add matching scan-vs-index equivalence coverage first.
 
@@ -190,17 +198,13 @@ full
   encryption + maintenance + query/index implementation
 ```
 
-Do not add a fourth public query profile.
+Do not add a fourth public query or migration profile.
 
 Reduced profiles reject opening boxes containing persisted index definitions because they cannot safely maintain derived index state.
 
 ## Encryption/index security policy
 
-Encrypted boxes may use native scan query.
-
-Encrypted boxes may not create persisted secondary indexes yet because plaintext-derived scalar keys would leak protected values.
-
-Plaintext-to-encrypted migration is rejected while persisted index definitions exist.
+Encrypted boxes may use native scan queries but may not create persisted secondary indexes yet because plaintext-derived scalar keys would leak protected values. Plaintext-to-encrypted migration is rejected while persisted index definitions exist.
 
 ## Mutation atomicity invariant
 
@@ -222,19 +226,17 @@ Dart >= 3.4.0 < 4.0.0
 Flutter >= 3.22.0
 ```
 
-FRB and Cargokit native naming must remain:
+FRB and Cargokit native naming must remain `rust_lib_dxtr_box`. `rust_builder/` remains the native build owner. Dart 3.13 recorded-use/native tree shaking stays deferred.
 
-```text
-rust_lib_dxtr_box
-```
+Hive CE 2.19.3 is intentionally isolated in the migration fixture package so it cannot raise this minimum.
 
-`rust_builder/` remains the native build owner. Dart 3.13 recorded-use/native tree shaking stays deferred.
+## Benchmark and point-read policy
 
-## Benchmark and size policy
+Shared-runner benchmark timings are diagnostic only. Do not weaken durability or add a Dart whole-box cache merely to improve benchmark numbers.
 
-Benchmark timings on shared runners are informational. Do not weaken durability or add a Dart whole-box cache for benchmark numbers.
+Query/index diagnostics support the current candidate-narrowing planner but do not justify an order-preserving scalar storage migration yet.
 
-PR #12/#13 established three-profile native-size measurement and same-commit reproducibility. Cross-commit size thresholds remain a separate hardening task.
+Point-read diagnosis showed Dart decode-only work is small relative to the measured composite native path, but that native region still includes FRB, redb transaction/lookup, native MessagePack validation, optional crypto, and payload copy. No speculative point-read optimization is part of 0.3.
 
 ## Developer workflow
 
@@ -244,10 +246,13 @@ Preferred root targets:
 make preflight
 make frb-generate
 make native-test
+make hive-ce-migration-test
 make query-index-test
+make query-sort-test
 make process-crash
 make benchmark-smoke
-make benchmark-full
+make benchmark-query-index
+make diagnose-point-read
 make rust-check
 make native-build-minimal
 make native-build-encryption
@@ -262,10 +267,10 @@ make example-ios
 
 ## Current validation expectation
 
-Every query/index PR should preserve:
+Before a 0.3 merge, preserve:
 
 ```text
-Minimum SDK / Ubuntu
+Minimum SDK / Flutter 3.22 + Dart 3.4
 Current Flutter analyze + tests
 FRB generated-binding drift gate
 Rust Ubuntu + macOS + Windows
@@ -274,12 +279,11 @@ Rust Ubuntu + macOS + Windows
   minimal tests
   encryption tests
   full tests
-Native Linux FRB round trip + benchmark smoke
+Native Linux FRB round trip
+Hive CE 2.19.3 migration fixture analyze + native tests
 Native-size same-commit reproducibility
 Platform Builds: Android/iOS/macOS/Linux/Windows
 ```
-
-The current range planner was additionally finalized through a temporary workflow that ran rustfmt, clippy, and all three profile test suites before committing the final code and removing its temporary tooling.
 
 ## Next 0.3 sequence
 
@@ -289,24 +293,31 @@ The current range planner was additionally finalized through a temporary workflo
 4. Completed: explicit public `sortBy` contract and deterministic native execution.
 5. Completed: focused query/index benchmark matrix with machine-readable diagnostic output.
 6. Completed: point-get/contains performance diagnosis; retain authoritative native semantics and avoid speculative metadata caching.
-7. Next: Hive CE migration design/implementation.
-8. Then: 0.3 closure audit.
-9. Keep encrypted-index design, cross-commit size policy, and Dart 3.13 tree shaking separate.
+7. Completed in PR #23: explicit Hive CE migration path with isolated Hive CE 2.19.3 fixture validation.
+8. Next: 0.3 closure audit.
+9. Keep encrypted-index design, scalar order-preserving storage encoding, cross-commit size policy, and Dart 3.13 tree shaking outside 0.3 closure unless a release-blocking defect requires otherwise.
+
+## 0.3 closure-audit focus
+
+The next PR should verify, not expand scope:
+
+- README / handoff / walkthrough / query-index / migration docs agree with actual main;
+- exactly three public native profiles;
+- minimum SDK still passes;
+- FRB bindings are current;
+- query scan/index/sort equivalence remains green;
+- Hive CE migration fixtures remain green;
+- no temporary workflows/tools/branches remain;
+- all 0.3 roadmap bullets are either completed or explicitly deferred;
+- encrypted indexes, true scalar-level range seeks, cross-commit binary-size thresholds, and Dart 3.13 native tree shaking are explicitly deferred.
 
 ## Later roadmap
 
-### 0.3.x
-
-- planner/index execution hardening
-- explicit sort contract
-- query/index benchmark scenarios
-- Hive CE migration design/implementation
-
 ### 0.4.x
 
-- production/package hardening
-- controlled cross-commit native-size policy
-- broader Flutter local-database comparison
+- production/package hardening;
+- controlled cross-commit native-size policy;
+- broader Flutter local-database comparison.
 
 ### 0.9.x
 
@@ -314,47 +325,7 @@ Refresh Hive Functional Parity Audit against the then-current Hive CE release an
 
 ### 1.0.0
 
-- no practical parity gaps
-- stable storage/API contract
-- Web/IndexedDB strategy complete
-- pub.dev release readiness
-
-## Non-negotiable rules
-
-- Never silently weaken storage durability for benchmark speed.
-- Never introduce a Dart whole-box cache without a coherency contract.
-- Never leak encrypted indexed fields through plaintext persisted index keys.
-- Never add another public native profile casually.
-- Never raise the minimum Flutter/Dart floor incidentally.
-- Never merge native API changes with stale FRB generated bindings.
-- Never use an index as final truth; primary committed data remains authoritative.
-- Never assume raw MessagePack numeric byte order equals query numeric order.
-- Keep README, this handoff, `CODE_WALKTHROUGH.md`, and `QUERY_INDEX_03.md` aligned with actual implementation state.
-
-## Latest 0.3 optimization — bounded index-name iteration
-
-`feature/0.3-index-prefix-range` replaces whole-`index_entries` iteration for candidate lookup and index-drop cleanup with redb ranges bounded to one encoded index-name prefix. Public Dart/FRB APIs and planner eligibility do not change.
-
-Important constraint: this is **not** scalar-order range seeking. MessagePack scalar components are still decoded and compared using the query engine comparator. Any future scalar-level seek requires an order-preserving encoding proven equivalent to query numeric/string semantics.
-
-The planner now also has a pure deterministic selection step with direct tests for exact-field matching, partial/multi-index AND behavior, duplicate-field choice, and fallback. Next candidates are an explicit sort contract and focused benchmark scenarios; scalar-level redb seeks still require a separately proven order-preserving scalar encoding.
-
-### Query sort milestone completed
-
-The public declarative query contract now includes deterministic multi-clause `sortBy` via `QuerySort`, `QuerySortDirection`, and `QueryNullOrder` without changing the FRB function signature. Native execution sorts authoritative predicate matches inside the same redb read snapshot before pagination, supports nested dotted fields, exact numeric ordering, lexical strings, explicit null placement, and record-key tie-breaking. Mixed incompatible non-null sort domains, unsupported ordered values, and NaN are rejected explicitly. Focused Dart/Rust coverage is available through `make query-sort-test`, including scan/index ordered-result equivalence.
-
-Next query/index work should benchmark the now-stable planner/sort execution before introducing a new persisted scalar representation. Scalar-level redb range seeks or index-order sort satisfaction remain deferred until an order-preserving encoding contract and migration/rebuild semantics are justified.
-
-### Query/index benchmark evidence
-
-`make benchmark-query-index` now measures equality, range, AND-intersection, and sorted-range queries in scan/index modes at 100/1,000/5,000 records. Run `31927276095` completed the full 24-case matrix. At 5,000 records the median scan/index measurements were: equality 15,887/10,649 µs, range 15,125/6,988 µs, AND intersection 15,511/8,739 µs, and sorted range 16,256/7,997 µs. Shared-runner timings are diagnostic, not hard thresholds.
-
-The evidence supports persisted-index candidate narrowing but does not by itself justify an order-preserving persisted scalar format. The immediate 0.3 sequence is point-get/contains diagnosis, Hive CE migration, then closure audit.
-
-### Point-read diagnosis evidence
-
-`make diagnose-point-read` measures public/native point reads, Dart MessagePack decode-only work, authoritative `containsKey`, Dart metadata membership, and plaintext/encrypted reads. Run `31928485185` completed successfully on Flutter 3.47 / Dart 3.13. Median plaintext native `get` hit was about 225.7 µs/op while Dart decode-only was about 6.0 µs/op; native `containsKey` hit was about 193.8 µs/op while Dart metadata membership was about 6.5 µs/op. Shared-runner timings are diagnostic only.
-
-The 6.0 µs result isolates only Dart `DxtrCodec.decode`; it does not isolate native MessagePack work. Every successful native read performs `validate_message_pack(&plaintext)` before returning, so the ~225.7 µs native region is a composite of FRB call/response, redb transaction/lookup, native MessagePack validation, optional decrypt/authentication, and payload copying. The current harness cannot attribute that composite further without a purpose-built internal benchmark.
-
-The faster metadata membership result does not justify replacing authoritative `containsKey`, because `_metadata.keys` is not durable cross-process truth. Plaintext/encrypted differences were within noisy shared-runner variation, so crypto/storage-format changes are not justified. The 0.3 decision is no speculative point-read optimization; proceed to Hive CE migration.
+- no practical parity gaps;
+- stable storage/API contract;
+- Web/IndexedDB strategy complete;
+- pub.dev release readiness.
