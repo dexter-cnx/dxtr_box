@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -7,6 +7,8 @@ BENCHMARK_OPS ?= 200
 BENCHMARK_FULL_OPS ?= 5000
 QUERY_BENCHMARK_SIZES ?= 100,1000,5000
 QUERY_BENCHMARK_SAMPLES ?= 3
+POINT_READ_ITERATIONS ?= 500
+POINT_READ_SAMPLES ?= 5
 SIZE_STABILITY_RUNS ?= 3
 
 help:
@@ -24,6 +26,7 @@ help:
 	@echo "  make benchmark-smoke      dxtr_box vs hive_ce smoke benchmark"
 	@echo "  make benchmark-full       Larger local benchmark run"
 	@echo "  make benchmark-query-index Query scan/index diagnostic benchmark matrix"
+	@echo "  make diagnose-point-read  Point get/containsKey diagnostic matrix"
 	@echo "  make rust-check           rustfmt + clippy + all native feature profiles"
 
 pub-get:
@@ -99,6 +102,9 @@ benchmark-full: native-build
 
 benchmark-query-index: native-build
 	cd benchmark && $(FLUTTER) pub get && LD_LIBRARY_PATH="../rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="../rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="../rust/target/release:$$PATH" DXTR_BOX_QUERY_BENCHMARK=1 DXTR_BOX_QUERY_BENCHMARK_SIZES=$(QUERY_BENCHMARK_SIZES) DXTR_BOX_QUERY_BENCHMARK_SAMPLES=$(QUERY_BENCHMARK_SAMPLES) $(FLUTTER) test test/query_index_benchmark_test.dart --reporter expanded
+
+diagnose-point-read: native-build pub-get
+	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_POINT_READ_DIAGNOSIS=1 DXTR_BOX_POINT_READ_ITERATIONS=$(POINT_READ_ITERATIONS) DXTR_BOX_POINT_READ_SAMPLES=$(POINT_READ_SAMPLES) $(FLUTTER) test test/point_read_diagnosis_test.dart --reporter expanded
 
 preflight: format-check analyze test rust-check
 
