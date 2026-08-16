@@ -43,7 +43,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       - name: Apply PR3 source patch
-        run: python3 tool/pr3_apply.py
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tool/pr3_apply.py')
+          text = path.read_text()
+          text = text.replace('marker = "  test(\'"', 'marker = "  test(\\n"')
+          path.write_text(text)
+          PY
+          python3 tool/pr3_apply.py
       - name: Generate pinned FRB bindings
         run: |
           cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
