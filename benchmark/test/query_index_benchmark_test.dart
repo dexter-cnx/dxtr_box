@@ -25,8 +25,7 @@ void main() {
       expect(
         sizes,
         everyElement(greaterThanOrEqualTo(_minimumDatasetSize)),
-        reason:
-            'Every query benchmark dataset must contain at least '
+        reason: 'Every query benchmark dataset must contain at least '
             '$_minimumDatasetSize records so range scenarios are non-empty.',
       );
       expect(samples, greaterThan(0));
