@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:path/path.dart' as p;
@@ -188,6 +189,51 @@ abstract final class DxtrBox {
         _windowsReservedNames.contains(windowsStem);
     if (invalid) {
       throw ArgumentError.value(name, 'name', 'Invalid box name');
+    }
+  }
+}
+
+/// Internal migration helpers. This symbol is intentionally not exported from
+/// `package:dxtr_box/dxtr_box.dart`.
+abstract final class DxtrBoxMigrationInternals {
+  static Future<Box> openNew(
+    String name, {
+    String? encryptionKey,
+  }) async {
+    DxtrBox._ensureInitialized();
+    DxtrBox._validateBoxName(name);
+
+    final path = File(p.join(DxtrBox._basePath!, '$name.dxtr'));
+    try {
+      await path.create(exclusive: true);
+    } on FileSystemException {
+      if (await path.exists()) {
+        throw StateError('Destination dxtr_box "$name" already exists.');
+      }
+      rethrow;
+    }
+
+    try {
+      return await DxtrBox.open(name, encryptionKey: encryptionKey);
+    } catch (_) {
+      try {
+        await DxtrBox._api.closeBox(name);
+      } catch (_) {
+        // Best-effort close before deleting the reservation we own.
+      }
+      try {
+        await DxtrBox._api.deleteBox(name);
+      } catch (_) {
+        try {
+          if (await path.exists()) {
+            await path.delete();
+          }
+        } catch (_) {
+          // Preserve the original open failure.
+        }
+      }
+      DxtrBox._metadataByName.remove(name);
+      rethrow;
     }
   }
 }
