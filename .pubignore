@@ -1,0 +1,20 @@
+.github/
+benchmark/
+docs/
+test/
+tool/
+build/
+coverage/
+.dart_tool/
+
+# Developer-only repository files.
+Makefile
+flutter_rust_bridge.yaml
+
+# Rust test/benchmark sources are not needed by package consumers.
+rust/tests/
+rust/target/
+
+# Example build products stay excluded while the source example is published.
+example/build/
+example/.dart_tool/

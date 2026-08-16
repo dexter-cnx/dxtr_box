@@ -1,3 +1,10 @@
+/// Rust-backed ACID box storage for Flutter.
+///
+/// The public API exposes Hive-like asynchronous box ergonomics, native
+/// encryption, watch streams, declarative queries, persisted secondary
+/// indexes, and Hive CE migration helpers without model code generation.
+library;
+
 export 'src/box.dart';
 export 'src/box_event.dart';
 export 'src/dxtr_box.dart' show DxtrBox;

@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test dart-doc pub-dry-run package-readiness rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-size-regression native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -17,6 +17,9 @@ SIZE_MAX_GROWTH_PERCENT ?= 3
 help:
 	@echo "dxtr_box developer targets"
 	@echo "  make preflight            Format check + analyze + Dart/Rust tests"
+	@echo "  make package-readiness    Dart docs + pub.dev dry-run on the publishable root plugin"
+	@echo "  make dart-doc             Generate public API documentation"
+	@echo "  make pub-dry-run          Validate the package archive with dart pub publish --dry-run"
 	@echo "  make frb-generate         Refresh flutter_rust_bridge bindings"
 	@echo "  make native-test          Native FRB round-trip test"
 	@echo "  make hive-ce-migration-test Real Hive CE 2.19.3 migration fixtures"
@@ -50,6 +53,15 @@ analyze: pub-get
 
 test: pub-get
 	$(FLUTTER) test
+
+dart-doc: pub-get
+	rm -rf build/doc
+	dart doc --output build/doc
+
+pub-dry-run: pub-get
+	dart pub publish --dry-run
+
+package-readiness: dart-doc pub-dry-run
 
 rust-fmt:
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check

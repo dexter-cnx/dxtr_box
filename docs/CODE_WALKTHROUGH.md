@@ -1,31 +1,67 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current dxtr_box architecture from the Flutter facade through flutter_rust_bridge into Rust/redb, plus the production-hardening gates around native profile size.
+This walkthrough describes the current publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, and the 0.4 production-hardening gates.
 
-## 1. Package boundary
+## 1. Self-contained package boundary
+
+PH-02 makes `dxtr_box` the single Flutter package and FFI plugin:
+
+```text
+dxtr_box/
+  lib/                 Dart API + generated FRB bindings
+  rust/                Rust crate/library: rust_lib_dxtr_box
+  cargokit/            native build integration
+  android/
+  ios/
+  macos/
+  linux/
+  windows/
+  example/
+```
+
+The Flutter package/plugin identity is `dxtr_box`. The native Rust crate/library remains `rust_lib_dxtr_box` so FRB/native loading identity does not change.
+
+The previous nested `rust_builder/` package is removed. No consumer build step reaches outside the package root and the root `pubspec.yaml` has no path-dependent native builder.
+
+Platform mapping:
+
+```text
+Android
+  android/build.gradle -> ../cargokit -> ../rust
+
+iOS/macOS
+  {ios,macos}/dxtr_box.podspec
+    -> ../cargokit/build_pod.sh
+    -> ../rust
+
+Linux/Windows
+  {linux,windows}/CMakeLists.txt
+    -> ../cargokit/cmake/cargokit.cmake
+    -> ../rust
+```
+
+## 2. Runtime boundary
 
 ```text
 Flutter app
-  -> Dart public API (DxtrBox / Box / query + migration types)
+  -> DxtrBox / Box / query + migration types
   -> NativeDxtrApi capability seams
   -> generated flutter_rust_bridge bindings
-  -> Rust API functions
-  -> redb storage engine
+  -> Rust API
+  -> redb
 ```
 
-Dart owns public ergonomics, dynamic-value encoding/decoding, lightweight key metadata, lifecycle guards, query objects, and Hive CE migration preflight. Rust owns durable storage, transactions, encryption, native watchers, query evaluation, planner/index state, plaintext-to-encrypted migration, and maintenance. Values are not retained wholesale in the Dart heap.
+Dart owns public ergonomics, MessagePack encoding/decoding, lightweight key metadata, lifecycle guards, query objects, and Hive CE migration preflight. Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted-index state, maintenance, and plaintext-to-encrypted migration.
 
-## 2. Public lifecycle and storage
+## 3. Storage and lifecycle
 
-Each box maps to one native file:
+Each box maps to:
 
 ```text
 {base_path}/{box_name}.dxtr
 ```
 
-Core redb tables are `data` and `meta`. The `full` profile additionally maintains `index_definitions` and `index_entries`.
-
-Typical lifecycle:
+Core redb tables are `data` and `meta`. The full profile also maintains `index_definitions` and `index_entries`.
 
 ```dart
 await DxtrBox.init();
@@ -35,79 +71,68 @@ final theme = await box.get('theme');
 await box.close();
 ```
 
-Encrypted boxes use the same open API with `encryptionKey`. Plaintext-to-encrypted conversion is explicit through `DxtrBox.encryptBox(...)`.
+Encrypted boxes use the same lifecycle with `encryptionKey`. Plaintext-to-encrypted conversion is explicit.
 
-## 3. Mutation path and index atomicity
+## 4. Mutation atomicity
 
 ```text
-Box.put
-  -> DxtrCodec.encode
+Box.put / putAll / delete / deleteAll / clear
+  -> DxtrCodec
   -> FRB
-  -> api::put
-  -> db::put
-  -> validate MessagePack
+  -> Rust validation
   -> optional encryption
   -> redb write transaction
-  -> persisted-index maintenance
+  -> primary + persisted-index changes
   -> one commit
-  -> NativeBoxEvent after commit
+  -> watch event after commit only
 ```
 
-`putAll`, `delete`, `deleteAll`, and `clear` preserve the same invariant: primary data and derived index state change in the same redb write transaction. Failed writes do not emit successful watch events.
+Primary data is authoritative. Persisted indexes are derived state and are never allowed to commit independently from the corresponding primary mutation.
 
-## 4. Read path
+## 5. Point reads
 
 ```text
 Box.get
   -> NativeDxtrApi.get
   -> FRB
-  -> api::get
-  -> db::get
   -> redb read transaction
-  -> optional AEAD decrypt/authenticate
+  -> optional decrypt/authenticate
   -> native MessagePack validation
   -> bytes through FRB
   -> DxtrCodec.decode
 ```
 
-Point reads remain authoritative and native-backed. 0.3 diagnosis did not justify a Dart whole-box cache.
+Point reads remain authoritative and native-backed. The 0.3 diagnosis did not justify a Dart whole-box cache.
 
-## 5. Dynamic codec and FRB
+## 6. Query execution
 
-`lib/src/codec.dart` uses MessagePack for null, bool, int, double, String, List, `Map<String, dynamic>`, `Uint8List`, and `DateTime`. Tagged forms preserve Dart types that raw MessagePack does not model directly.
+`Box.query(BoxQuery)` sends one structured MessagePack query through one FRB call.
 
-`lib/src/native_api.dart` exposes capability seams such as `NativeDxtrApi`, `NativeEncryptionMigrationApi`, `NativeQueryApi`, and `NativeIndexApi`. `FrbNativeDxtrApi` is the production adapter. Checked-in FRB 2.8 bindings are regenerated in CI and drift is rejected.
+Supported predicate semantics include equality/inequality, ordered comparisons, inclusive `between`, null checks, AND/OR groups, dotted nested fields, exact signed/unsigned integer comparison, and deterministic sorting.
 
-## 6. Declarative query API
-
-Public query types live in `lib/src/query.dart`:
+Execution:
 
 ```text
-BoxQuery
-QueryFilter
-QueryComparison
-QueryGroup
-QueryOperator
-QueryLogicalOperator
-QuerySort
-QuerySortDirection
-QueryNullOrder
-IndexDefinition
+Box.query
+  -> serialize query AST
+  -> one FRB call
+  -> decode once
+  -> one redb ReadTransaction snapshot
+  -> optional persisted-index candidate narrowing
+  -> primary reads from same snapshot
+  -> optional decrypt
+  -> full predicate re-evaluation
+  -> semantic sort when requested
+  -> record-key ascending final tie-break
+  -> offset / limit
+  -> one response
 ```
 
-The public query invariant is one FRB call per `Box.query(...)`. Legacy `Box.where(predicate)` remains a Dart-side linear scan.
+Persisted indexes only narrow candidates. Every candidate is re-read from authoritative primary data and re-evaluated against the complete predicate.
 
-## 7. Query decode and predicate engine
+## 7. Persisted index planner
 
-`rust/src/query.rs` decodes the tagged MessagePack AST once into the native query representation.
-
-Supported semantics include dotted nested-field lookup, equality/inequality, ordered comparisons, inclusive `between`, null checks, AND/OR groups, and deterministic ordering. Numeric comparison preserves signed/unsigned integer precision instead of collapsing all integers through `f64`.
-
-## 8. Planner candidate extraction
-
-Planner-eligible comparisons are extracted from the top level and recursively beneath `AND`. The planner does not descend into `OR` because narrowing only some OR branches could drop valid rows.
-
-Eligible operators are:
+Planner-eligible comparisons:
 
 ```text
 equal
@@ -118,335 +143,125 @@ lessThanOrEqual
 between
 ```
 
-`notEqual`, `isNull`, and `isNotNull` remain scan-backed. Exact dotted-field matching is required for a persisted index to participate.
+Eligibility applies at the top level or beneath `AND` when an index matches the exact dotted field path. The planner does not narrow through `OR`; `notEqual`, `isNull`, and `isNotNull` remain scan-backed.
 
-Planner selection is deterministic. Missing definitions simply reduce narrowing opportunities; the full predicate remains authoritative.
+For multiple usable predicates under AND, candidate sets are intersected from smallest to largest.
 
-## 9. Persisted index representation
+Persisted scalar components use MessagePack bytes. Their raw byte order is not treated as numeric order. Range matching decodes scalar components and applies the semantic comparator.
 
-`rust/src/index.rs` stores:
+## 8. Deterministic sorting
 
-```text
-index_definitions: index name -> dotted field path
-index_entries: encoded composite entry -> empty payload
-```
+`BoxQuery.sortBy` is carried inside the existing query payload. Sorting occurs before pagination and supports nested fields, explicit null/missing placement, numeric/string ordered domains, and record-key ascending as the final deterministic tie-break.
 
-Entry key layout is length-prefixed:
+Indexes narrow `where`; they do not currently satisfy ORDER BY.
 
-```text
-[index-name length][index-name]
-[scalar length][MessagePack scalar]
-[record-key length][record-key]
-```
+## 9. Encryption and profile safety
 
-Primary `data` remains authoritative. Indexes are derived state only.
+Encrypted boxes can use native scan queries but cannot create persisted secondary indexes yet because plaintext-derived index keys would leak protected values. Plaintext-to-encrypted migration is rejected while persisted indexes exist.
 
-## 10. Equality and range candidate matching
-
-Persisted scalar bytes are ordinary MessagePack encodings. Their lexicographic byte order is not a general numeric order, so current range execution does not use raw scalar bytes as redb numeric range bounds.
-
-Instead:
+Exactly three Rust capability profiles remain:
 
 ```text
-matching index definition
-  -> redb half-open range for that index name only
-  -> decode stored scalar component
-  -> semantic query comparator
-  -> collect matching record keys
+minimal     CRUD + lifecycle + native watch
+encryption  minimal + encrypted create/open/read/write
+full        encryption + maintenance + query/index implementation
 ```
 
-A future scalar-level redb range seek requires a versioned order-preserving scalar encoding plus rebuild/migration semantics.
+`full` is the default production build. Reduced profiles reject boxes containing persisted indexes because they cannot safely maintain derived state.
 
-## 11. Multiple indexed predicates under AND
+## 10. Hive CE migration
 
-For an AND query, every usable indexed predicate produces a candidate key set. Sets are intersected from smallest to largest before primary-record recheck.
+Core `dxtr_box` does not depend on Hive CE at runtime. Applications open the Hive CE source themselves and provide callbacks through `HiveCeMigrationSource`.
 
-Missing indexes do not fail the query; usable indexes may still narrow candidates.
-
-## 12. Single-snapshot query execution
-
-`rust/src/api.rs::scan_query` is the single native query entry point:
-
-```text
-Box.query
-  -> DxtrCodec query payload
-  -> NativeQueryApi.scanQuery
-  -> one FRB call
-  -> decode query once
-  -> one redb ReadTransaction snapshot
-  -> index candidate narrowing or fallback enumeration
-  -> primary reads from the same snapshot
-  -> optional decrypt
-  -> full predicate re-evaluation
-  -> optional semantic sort
-  -> record-key tie-break
-  -> offset / limit
-  -> one FRB response
-```
-
-Persisted index membership is never final truth. Every candidate is re-read from primary data and evaluated against the complete filter.
-
-## 13. Scan/index equivalence gate
-
-`rust/tests/query_index.rs` compares the same query before and after index creation and requires exact result equivalence. Coverage includes equality, nested ordered ranges, `between`, multi-index AND intersection, indexed-field mutation, index persistence, encrypted scan/index restrictions, and deterministic sorting.
-
-Every future planner rule must add matching scan-vs-index equivalence coverage first.
-
-## 14. Index lifecycle and maintenance
-
-```dart
-await box.createIndex(
-  const IndexDefinition(name: 'by-age', field: 'profile.age'),
-);
-final indexes = await box.listIndexes();
-final removed = await box.dropIndex('by-age');
-```
-
-Creation validates, rejects encrypted boxes, backfills, and commits the definition plus derived entries atomically. Primary mutations maintain old/new index entries in the same write transaction as primary data.
-
-## 15. Encryption and reduced-profile safety
-
-Encrypted boxes may use native scan queries but may not create persisted indexes yet because plaintext-derived scalar keys would leak protected values. Plaintext-to-encrypted migration is rejected while indexes exist.
-
-`minimal` and `encryption` builds reject opening boxes containing persisted indexes because those profiles cannot safely maintain derived state.
-
-## 16. Native watch ordering
-
-```text
-Dart mutation
-  -> FRB
-  -> redb write transaction
-  -> primary + index changes
-  -> commit
-  -> Rust NativeBoxEvent
-  -> FRB stream
-  -> Box handles
-```
-
-## 17. Public native profiles
-
-Exactly three public native profiles remain:
-
-```text
-minimal     = CRUD + lifecycle + native watch
-encryption  = minimal + encrypted create/open/read/write
-full        = encryption + maintenance + query/index implementation
-```
-
-`full` is the default production build. Production hardening must not add a fourth public profile merely to influence binary size.
-
-## 18. Bounded persisted-index iteration
-
-Candidate lookup and `dropIndex` cleanup bound redb iteration to the selected encoded index-name prefix using a half-open range. This optimization is intentionally limited to the index-name component; scalar MessagePack values are still decoded and compared semantically.
-
-## 19. Deterministic native query sorting
-
-`BoxQuery.sortBy` carries ordered `QuerySort` clauses inside the existing MessagePack query payload, so FRB shape does not change.
-
-Sorted execution collects predicate matches from the same redb snapshot, validates each sort field's ordered domain, applies clauses in order, uses explicit null/missing placement, and finally uses record key ascending as a deterministic tie-break. Pagination happens after sorting.
-
-Persisted indexes narrow `where`; they do not satisfy ORDER BY.
-
-## 20. Query/index diagnostic benchmark
-
-`benchmark/test/query_index_benchmark_test.dart` compares scan and indexed execution for equality, range, AND-intersection, and sorted-range workloads. Setup/backfill are excluded from timed regions.
-
-Shared-runner timings are diagnostic only. Correctness/equivalence remains the hard gate.
-
-## 21. Point-read diagnosis
-
-The point-read harness measures production paths without adding a benchmark-only public API:
-
-```text
-Box.get
-  -> Dart wrapper
-  -> NativeDxtrApi.get
-  -> FRB
-  -> redb point read transaction
-  -> optional decrypt/authenticate
-  -> native MessagePack validation
-  -> FRB payload copy
-  -> DxtrCodec.decode
-```
-
-The native region is composite. 0.3 retained authoritative native `get` / `containsKey` semantics and rejected speculative Dart caching.
-
-## 22. Hive CE migration path
-
-`lib/src/hive_ce_migration.dart` adds migration without taking a runtime Hive CE dependency.
-
-Execution path after the final PR #25 correctness closure:
+Migration flow:
 
 ```text
 migrateFromHiveCe
-  -> require DxtrBox.init
-  -> require source still open
-  -> enumerate source keys
-  -> key/value conversion + collision checks
-  -> DxtrCodec preflight for every entry
-  -> acquire exclusive migration reservation marker
-  -> re-check destination does not already exist
-  -> atomically create {destination}.dxtr exclusively
-  -> open destination through migration-only internal path
-  -> one Box.putAll(prepared)
-       -> one native putAll write transaction
+  -> validate source
+  -> enumerate keys
+  -> key/value conversion
+  -> collision detection
+  -> DxtrCodec preflight
+  -> acquire exclusive reservation marker
+  -> re-check destination absence
+  -> exclusively create destination
+  -> migration-only internal open
+  -> one Box.putAll
   -> close destination
-  -> release reservation marker
-  -> HiveCeMigrationResult
+  -> release reservation
 ```
 
-Ordinary open exclusion is part of the correctness contract:
+Ordinary `DxtrBox.open(destinationName)` checks reservation both before and immediately after native open. If migration acquires ownership while an ordinary open is in flight, that handle is closed and the ordinary open is rejected.
+
+Initialization/write failure cleanup removes migration-owned destination state and releases its marker. A hard process kill may still leave incomplete destination/reservation state; file-level staging/promotion and stale-reservation recovery remain deferred.
+
+Real Hive CE 2.19.3 fixtures are isolated under `tool/hive_ce_migration_fixture/` so they cannot raise the core Dart/Flutter SDK floor.
+
+## 11. FRB drift gate
+
+Checked-in Flutter Rust Bridge 2.8 bindings are regenerated in CI. Any diff under generated Dart/Rust binding output fails the binding-current job.
+
+The package refactor does not rename the native Rust library; generated native loading remains based on `rust_lib_dxtr_box`.
+
+## 12. Native-size policy
+
+0.3 established exact native-size measurement and same-commit reproducibility. PR #27 added the cross-commit gate.
+
+Both base and head are built from committed detached worktrees under the same OS/architecture/rustc/cargo environment. Each of `minimal`, `encryption`, and `full` is compared independently.
 
 ```text
-DxtrBox.open(destinationName)
-  -> reject if reservation is already active
-  -> native open / handle initialization
-  -> re-check reservation
-  -> if migration acquired ownership while open was in flight:
-       close handle
-       reject ordinary open
-```
-
-The second check closes the race where an ordinary open starts immediately before migration acquires the reservation.
-
-Initialization/write failures remove migration-owned destination state and release the marker. Successful migration also releases the marker after close.
-
-A hard process kill may still leave an incomplete destination and reservation marker; file-level staging/promotion and automatic stale-reservation recovery are deferred.
-
-## 23. Hive CE fixture isolation
-
-Real Hive CE 2.19.3 fixtures live in `tool/hive_ce_migration_fixture/` so Hive CE cannot raise the root package's Dart 3.4 / Flutter 3.22 minimum.
-
-Coverage includes primitive/list/map/binary/DateTime values, String/int keys, custom conversion, collision rejection, encrypted source/destination, source preservation, concurrent migration exclusion, ordinary-open exclusion, and initialization-failure cleanup.
-
-Run:
-
-```text
-make hive-ce-migration-test
-```
-
-## 24. Native size measurement foundation from 0.3
-
-Three tools establish the measurement chain:
-
-```text
-tool/native_size_baseline.sh
-  -> one release build per profile
-  -> exact artifact bytes + git/toolchain/platform metadata
-
-tool/native_size_stability.sh
-  -> repeated isolated builds of the same commit/profile
-  -> min/max/spread
-  -> fail if spread != 0
-```
-
-PR #12 established profile baselines. PR #13 verified same-commit reproducibility before any cross-commit budget was introduced.
-
-The same-commit check remains a prerequisite in 0.4.
-
-## 25. 0.4 cross-commit native-size regression gate
-
-`tool/native_size_regression.sh` adds the first Production Hardening gate.
-
-Inputs:
-
-```text
-DXTR_BOX_SIZE_BASE_REF
-DXTR_BOX_SIZE_MAX_GROWTH_BYTES   default 65536
-DXTR_BOX_SIZE_MAX_GROWTH_PERCENT default 3
-```
-
-The default base is `HEAD^` for local use. CI passes the pull-request base SHA (or prior push SHA) explicitly.
-
-Comparison flow:
-
-```text
-current checkout
-  -> resolve base SHA + head SHA
-  -> create detached Git worktree for base SHA
-
-base SHA
-  -> isolated Cargo target dirs
-  -> build minimal
-  -> build encryption
-  -> build full
-
-head SHA
-  -> separate isolated Cargo target dirs
-  -> build minimal
-  -> build encryption
-  -> build full
-
-same runner + same OS/arch + same rustc/cargo
-  -> exact byte comparison per profile
-```
-
-For each profile:
-
-```text
-delta = head_bytes - base_bytes
 allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
-
-if delta > allowed_growth:
-  fail
-else:
-  pass
+fail when head_bytes - base_bytes > allowed_growth
 ```
 
-Shrinks pass. Growth exactly at the allowance passes.
-
-The script writes:
-
-```text
-build/native-size-regression/native-size-regression.tsv
-```
-
-including base/head SHAs, toolchain/platform metadata, profile bytes, deltas, effective allowance, growth percentage, and status.
-
-Why base/head are built in one job instead of comparing historical artifacts: a historical measurement may have been produced by another runner image or Rust toolchain. Rebuilding both commits in one environment keeps source revision as the controlled comparison variable.
-
-CI's `native-size` job therefore now performs three distinct checks:
-
-```text
-absolute current profile measurement
-same-commit reproducibility
-cross-commit growth budget
-```
-
-and uploads all three TSV files.
-
-Local commands:
-
-```text
-make native-size-regression
-make native-size-regression SIZE_BASE_REF=origin/main
-```
-
-The size budget is an alarm, not a target. Intentional growth must be documented with measured deltas and reviewed explicitly rather than bypassed.
+Evidence is emitted to `build/native-size-regression/native-size-regression.tsv`. Intentional growth must be documented rather than bypassing the gate.
 
 See `docs/NATIVE_SIZE_POLICY_04.md`.
 
-## 26. Current milestone state
+## 13. Package publication readiness
 
-0.3 query/index + Hive CE migration is closed. 0.4 Production Hardening is active.
+PH-02 adds a separate package gate:
 
-Preserve:
+```text
+make package-readiness
+  -> flutter pub get
+  -> dart doc --output build/doc
+  -> dart pub publish --dry-run
+```
 
-- exactly three public native profiles;
-- primary data authoritative over derived indexes;
-- one read snapshot per native query;
+CI first verifies the self-contained layout: no `rust_builder/`, Rust/Cargokit present, five platform integration files present, and no dependency using a nested YAML `path:` source.
+
+`.pubignore` removes repository-only CI, benchmark, tests, and development tooling from the publication archive while preserving all native build inputs required by consumers.
+
+A green pub dry-run is not enough by itself. Normal CI still validates minimum SDK, Flutter tests, FRB drift, Rust host matrix, native integration, migration fixtures, and native-size policy. Platform Builds remain the final proof for Android/iOS/macOS/Linux/Windows consumption.
+
+The active preview version is `0.4.0-dev.1`. PH-02 does not publish anything automatically.
+
+See `docs/PACKAGE_RELEASE_04.md`.
+
+## 14. Current milestone
+
+0.3 query/index + Hive CE migration is closed. PH-01 native-size regression policy is complete in PR #27. PH-02 package/publication hardening is active in PR #28.
+
+Preserve these invariants:
+
+- Dart >=3.4 / Flutter >=3.22;
+- stable native identity `rust_lib_dxtr_box`;
+- exactly three Rust capability profiles;
+- primary data authoritative over indexes;
+- one redb read snapshot per declarative query;
 - full predicate re-evaluation after index narrowing;
-- exact numeric semantics and deterministic sorting;
-- no plaintext-derived persisted indexes for encrypted boxes;
+- deterministic sorting semantics;
+- encrypted-index leakage prevention;
 - migration reservation ownership and ordinary-open exclusion;
-- Dart >= 3.4 / Flutter >= 3.22 minimum;
-- FRB 2.8 generated-binding drift gate;
-- size policy must not trade away correctness, durability, encryption, or SDK compatibility.
+- self-contained publishable package topology;
+- hardening must not trade away correctness, durability, encryption, or compatibility.
 
-Important developer targets:
+Important targets:
 
 ```text
 make preflight
+make package-readiness
 make frb-generate
 make native-test
 make hive-ce-migration-test
@@ -465,15 +280,4 @@ make example-linux
 make example-windows
 ```
 
-Next 0.4 slice after the size policy is package-quality / publish-readiness hardening.
-
-Still deferred:
-
-- encrypted persisted indexes;
-- order-preserving scalar encoding / scalar-level redb range seeks;
-- index-backed ORDER BY;
-- Dart 3.13 recorded-use/native tree shaking;
-- LazyBox migration and direct `.hive` parsing;
-- file-level crash-atomic migration staging/promotion and automatic stale-reservation recovery;
-- application bundle/APK/IPA size budgets;
-- Web/IndexedDB and remaining 1.0 functional-parity gaps.
+Next after PH-02: broader Flutter local-database comparison.
