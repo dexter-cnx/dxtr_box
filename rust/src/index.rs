@@ -100,6 +100,22 @@ fn list_in_read(read: &ReadTransaction) -> Result<Vec<(String, String)>, String>
         .collect()
 }
 
+fn select_index_candidates(
+    definitions: &[(String, String)],
+    candidates: Vec<query::IndexCandidate>,
+) -> Vec<(String, query::IndexCandidate)> {
+    candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            definitions
+                .iter()
+                .filter(|(_, indexed_field)| *indexed_field == candidate.field)
+                .min_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name))
+                .map(|(index_name, _)| (index_name.clone(), candidate))
+        })
+        .collect()
+}
+
 pub(crate) fn candidate_keys(
     read: &ReadTransaction,
     filter: &query::Filter,
@@ -110,23 +126,18 @@ pub(crate) fn candidate_keys(
     }
 
     let definitions = list_in_read(read)?;
-    let mut candidate_sets = Vec::<HashSet<String>>::new();
-    for candidate in candidates {
-        let Some((index_name, _)) = definitions
-            .iter()
-            .find(|(_, indexed_field)| *indexed_field == candidate.field)
-        else {
-            continue;
-        };
+    let selections = select_index_candidates(&definitions, candidates);
+    if selections.is_empty() {
+        return Ok(None);
+    }
+
+    let mut candidate_sets = Vec::<HashSet<String>>::with_capacity(selections.len());
+    for (index_name, candidate) in selections {
         candidate_sets.push(
-            lookup_candidate(read, index_name, &candidate)?
+            lookup_candidate(read, &index_name, &candidate)?
                 .into_iter()
                 .collect(),
         );
-    }
-
-    if candidate_sets.is_empty() {
-        return Ok(None);
     }
 
     candidate_sets.sort_by_key(HashSet::len);
@@ -386,7 +397,78 @@ fn push_component(output: &mut Vec<u8>, value: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{index_prefix, prefix_successor};
+    use super::{index_prefix, prefix_successor, select_index_candidates};
+    use crate::query::{CompareOp, IndexCandidate};
+
+    fn candidate(field: &str) -> IndexCandidate {
+        IndexCandidate {
+            field: field.to_string(),
+            op: CompareOp::Equal,
+            value: vec![0],
+            upper_value: None,
+        }
+    }
+
+    fn selected_names(
+        definitions: &[(&str, &str)],
+        candidates: Vec<IndexCandidate>,
+    ) -> Vec<String> {
+        let definitions = definitions
+            .iter()
+            .map(|(name, field)| (name.to_string(), field.to_string()))
+            .collect::<Vec<_>>();
+        select_index_candidates(&definitions, candidates)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    #[test]
+    fn planner_selection_requires_exact_field_match() {
+        assert_eq!(
+            selected_names(&[("by-age", "profile.age")], vec![candidate("profile.age")]),
+            vec!["by-age"]
+        );
+        assert!(selected_names(&[("by-age", "profile.age")], vec![candidate("age")]).is_empty());
+    }
+
+    #[test]
+    fn planner_selection_keeps_usable_subset_of_and_candidates() {
+        assert_eq!(
+            selected_names(
+                &[("by-status", "status")],
+                vec![candidate("status"), candidate("profile.age")],
+            ),
+            vec!["by-status"]
+        );
+    }
+
+    #[test]
+    fn planner_selection_keeps_multiple_usable_and_indexes() {
+        assert_eq!(
+            selected_names(
+                &[("by-age", "profile.age"), ("by-status", "status")],
+                vec![candidate("status"), candidate("profile.age")],
+            ),
+            vec!["by-status", "by-age"]
+        );
+    }
+
+    #[test]
+    fn planner_selection_is_deterministic_for_duplicate_field_indexes() {
+        assert_eq!(
+            selected_names(
+                &[("z-status", "status"), ("a-status", "status")],
+                vec![candidate("status")],
+            ),
+            vec!["a-status"]
+        );
+    }
+
+    #[test]
+    fn planner_selection_with_no_candidates_requires_scan_fallback() {
+        assert!(selected_names(&[("by-status", "status")], Vec::new()).is_empty());
+    }
 
     #[test]
     fn prefix_successor_bounds_exact_index_name_region() {

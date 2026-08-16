@@ -116,6 +116,12 @@ Planner extraction is allowed at the top level and recursively through `AND` gro
 
 `notEqual`, `isNull`, and `isNotNull` remain scan-backed.
 
+## Planner selection policy
+
+Candidate extraction and persisted-index selection are intentionally separate internal steps. Selection matches candidate fields to persisted definitions by exact dotted field path. Missing definitions are ignored, allowing a usable subset of an `AND` group to narrow the query. Multiple usable candidates remain eligible for intersection. If duplicate persisted index definitions target the same field, selection deterministically chooses the lexicographically smallest index name. If no candidate has a matching persisted definition, execution falls back to native scan.
+
+Unit tests cover exact-field selection, partial-index AND selection, multi-index AND selection, deterministic duplicate-field choice, empty-selection fallback, OR extraction fallback, and filtering of non-indexable AND members. This is internal hardening only; no Dart or FRB API is added.
+
 ## Multi-index AND planning
 
 For an AND query with multiple usable persisted indexes, each indexed predicate produces a candidate record-key set. Sets are sorted by cardinality and intersected starting from the smallest.
@@ -234,13 +240,13 @@ Cross-commit binary-size regression policy remains separate from query/index wor
 12. Range and intersection scan/index equivalence coverage.
 13. Bounded index-name redb range iteration for lookup and drop cleanup.
 14. Single-redb-read-transaction query execution across planner/fallback/primary reads.
+15. Pure deterministic planner-selection step with direct selection/fallback unit coverage.
 
 ## Next
 
-1. Add planner diagnostics/selection tests only if they improve maintainability without expanding public API prematurely.
-2. Define `sortBy` as a separate public API contract.
-3. Add query/index benchmark scenarios now that bounded index iteration and single-snapshot query execution are stable.
-4. Design an order-preserving scalar encoding only if benchmark evidence justifies scalar-level redb range seek.
+1. Define `sortBy` as a separate public API contract.
+2. Add focused query/index benchmark scenarios now that bounded iteration, deterministic planner selection, and single-snapshot execution are stable.
+3. Design an order-preserving scalar encoding only if benchmark evidence justifies scalar-level redb range seek.
 
 ## Correctness rules
 
