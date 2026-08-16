@@ -12,17 +12,35 @@ The 1.0 claim is functional replacement for practical Hive/Hive CE local-databas
 
 0.3 query/index + Hive CE migration is closed and closure-verified. PR #25 is the final 0.3 correctness closure for migration destination ownership; PR #26 synced README, handoff, and code walkthrough to that final contract.
 
-0.4 Production Hardening is now active. The first slice is **controlled cross-commit native-size regression policy**:
+PR #27 completed **PH-01 controlled cross-commit native-size regression policy**. The gate builds base/head commits on the same runner/toolchain and independently enforces growth budgets for `minimal`, `encryption`, and `full`.
 
-- preserve the three public native profiles: `minimal`, `encryption`, `full`;
-- retain exact current-size measurement and same-commit reproducibility gates from 0.3;
-- build the PR base SHA and candidate head SHA on the same Linux x64 runner/toolchain;
-- compare each profile independently;
-- fail when positive growth exceeds `max(65,536 bytes, 3% of the base artifact)`;
-- emit machine-readable base/head/delta/budget evidence;
-- do not use historical workflow artifacts as the comparison source because runner/toolchain drift would contaminate the signal.
+**PH-02 package / publication hardening is active in PR #28.** The package topology is being changed from a root Dart package + nested path-dependent `rust_builder` helper into one self-contained Flutter FFI plugin. The public package now owns:
 
-Normative contract: `docs/NATIVE_SIZE_POLICY_04.md`.
+```text
+lib/
+rust/
+cargokit/
+android/
+ios/
+macos/
+linux/
+windows/
+example/
+```
+
+The Flutter package/plugin name is `dxtr_box`. The Rust crate and native library name remains `rust_lib_dxtr_box` to preserve FRB/native identity. The nested `rust_builder/` package and root `path:` dependency are removed.
+
+PH-02 also adds:
+
+- package version preview `0.4.0-dev.1`;
+- pub.dev metadata/topics/documentation URL;
+- `dart doc` generation gate;
+- `dart pub publish --dry-run` CI gate;
+- `.pubignore` consumer payload policy;
+- CHANGELOG/library-doc/example cleanup;
+- platform builds as the final proof that the self-contained root-plugin topology works on all five native targets.
+
+Normative package contract: `docs/PACKAGE_RELEASE_04.md`.
 
 ## Current capabilities
 
@@ -46,7 +64,7 @@ Normative contract: `docs/NATIVE_SIZE_POLICY_04.md`.
 - Query/index and point-read diagnostic harnesses.
 - Explicit Hive CE 2.19.3 migration fixtures in an isolated package.
 - Migration reservation marker that excludes ordinary opens for the lifetime of a migration-owned destination.
-- Native-size absolute measurement, same-commit reproducibility, and active 0.4 cross-commit regression gating.
+- Native-size absolute measurement, same-commit reproducibility, and cross-commit regression gating.
 
 ## Core correctness invariants
 
@@ -135,8 +153,6 @@ full
 
 ## 0.4 native-size policy
 
-0.3 established deterministic measurement first. 0.4 now permits a real cross-commit gate because base/head can be measured under one controlled environment.
-
 Current policy per profile:
 
 ```text
@@ -144,28 +160,50 @@ allowed_growth = max(65,536 bytes, 3% of base artifact)
 fail when head_bytes - base_bytes > allowed_growth
 ```
 
-Comparison flow:
-
-```text
-PR base SHA
-  -> detached git worktree
-  -> isolated Cargo target directories
-  -> minimal/encryption/full release builds
-
-candidate head SHA
-  -> current checkout
-  -> isolated Cargo target directories
-  -> minimal/encryption/full release builds
-
-same OS + arch + rustc + cargo
-  -> exact byte deltas
-  -> policy evaluation
-  -> native-size-regression.tsv
-```
+Base and candidate commits are built from detached commit snapshots with isolated Cargo target directories under one OS/arch/rustc/cargo environment. Machine-readable evidence is written to `native-size-regression.tsv`.
 
 The budget is a regression alarm, not a target and not a routine allowance. Intentional growth must be explained with measured profile deltas and reviewed explicitly rather than hidden by bypassing the gate.
 
-Dart 3.13 recorded-use/native tree shaking remains future-only and must not become required for correctness or raise the current SDK floor.
+See `docs/NATIVE_SIZE_POLICY_04.md`.
+
+## 0.4 package/publication policy
+
+The package distributed to consumers must be self-contained. No published dependency may rely on a repository-relative `path:` source.
+
+Platform mapping:
+
+```text
+Android  android/build.gradle
+  -> ../cargokit
+  -> ../rust
+
+iOS/macOS  {ios,macos}/dxtr_box.podspec
+  -> ../cargokit/build_pod.sh
+  -> ../rust
+
+Linux/Windows  {linux,windows}/CMakeLists.txt
+  -> ../cargokit/cmake/cargokit.cmake
+  -> ../rust
+```
+
+Package readiness requires both publication validation and runtime/native validation:
+
+```text
+make package-readiness
+  -> flutter pub get
+  -> dart doc
+  -> dart pub publish --dry-run
+
+normal CI
+  -> Flutter / minimum SDK / FRB / Rust / native integration / size policy
+
+Platform Builds
+  -> Android / iOS / macOS / Linux / Windows examples
+```
+
+A green pub dry-run alone is not sufficient evidence that the native plugin builds correctly.
+
+Merging PH-02 does **not** publish to pub.dev. Publication remains a separate explicit release action from a reviewed clean commit/tag.
 
 ## Developer workflow
 
@@ -173,6 +211,9 @@ Preferred root targets:
 
 ```text
 make preflight
+make package-readiness
+make dart-doc
+make pub-dry-run
 make frb-generate
 make native-test
 make hive-ce-migration-test
@@ -195,13 +236,6 @@ make example-macos
 make example-ios
 ```
 
-Local cross-commit examples:
-
-```text
-make native-size-regression
-make native-size-regression SIZE_BASE_REF=origin/main
-```
-
 ## Closed 0.3 sequence
 
 1. Native query/index foundation.
@@ -222,30 +256,26 @@ Do not reopen 0.3 query/index/migration work for speculative optimization. Chang
 
 ## 0.4 Production Hardening sequence
 
-### PH-01 — Cross-commit native-size regression policy — active
+### PH-01 — Cross-commit native-size regression policy — complete (PR #27)
+
+- controlled base/head same-environment comparison;
+- exactly three profiles measured;
+- same-commit reproducibility retained;
+- hybrid byte/percentage budget enforced;
+- machine-readable evidence uploaded.
+
+### PH-02 — Package-quality / publication hardening — active (PR #28)
 
 Acceptance:
 
-- base/head built in one CI environment;
-- exactly three profiles compared;
-- same-commit reproducibility remains a prerequisite;
-- default hybrid budget enforced;
-- machine-readable evidence uploaded;
-- Makefile, CI, handoff, code walkthrough, and size docs agree;
-- no runtime/API/storage/SDK change.
-
-### PH-02 — Package-quality hardening — next
-
-Audit and close package-release quality gaps, including at minimum:
-
-- pub.dev package metadata and publish dry-run cleanliness;
-- LICENSE/CHANGELOG/example/API-documentation completeness;
-- exported public surface audit;
-- stale/development-only files and dependency hygiene;
-- repository/package versioning policy;
-- CI gate for package publication readiness where practical.
-
-Do not bump the public package to a stable 1.0 claim during this work.
+- root `dxtr_box` is a self-contained Flutter FFI plugin;
+- no nested `rust_builder` path dependency;
+- native crate and Cargokit required by consumers are inside the published package;
+- `dart doc` succeeds;
+- `dart pub publish --dry-run` succeeds and archive contents are reviewed;
+- CHANGELOG/example/public library docs are current;
+- CI and all five Platform Builds are green;
+- README, handoff, code walkthrough, and `PACKAGE_RELEASE_04.md` agree.
 
 ### PH-03 — Broader Flutter local-database comparison — after PH-02
 
