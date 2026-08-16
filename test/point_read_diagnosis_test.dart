@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dxtr_box/dxtr_box.dart';
 import 'package:dxtr_box/src/codec.dart';
@@ -83,7 +82,10 @@ void main() {
         _DiagnosticCase(
           name: 'decode_only_plain_hit',
           action: () async {
-            expect(DxtrCodec.decode(encodedValue), isA<Map<dynamic, dynamic>>());
+            expect(
+              DxtrCodec.decode(encodedValue),
+              isA<Map<dynamic, dynamic>>(),
+            );
           },
         ),
         _DiagnosticCase(
