@@ -3,10 +3,20 @@ name: Read-path Benchmark
 on:
   pull_request:
     branches: [main]
+    paths:
+      - '.github/workflows/read_path_benchmark.yml'
+      - 'Makefile'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'flutter_rust_bridge.yaml'
+      - 'lib/**'
+      - 'rust/**'
+      - 'test/read_path_benchmark_test.dart'
+      - 'test/read_path_boundary_benchmark_test.dart'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: read-path-benchmark-${{ github.workflow }}-${{ github.ref }}
@@ -20,8 +30,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -35,36 +43,13 @@ jobs:
           cache-workspaces: rust
       - name: Install dependencies
         run: flutter pub get
-      - name: Generate PR2 sync point-read candidate
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('rust/src/api.rs')
-          text = path.read_text()
-          replacements = {
-              'pub fn get(box_name: String, key: String) -> Result<Option<Vec<u8>>, String> {':
-                  '#[frb(sync)]\npub fn get(box_name: String, key: String) -> Result<Option<Vec<u8>>, String> {',
-              'pub fn contains_key(box_name: String, key: String) -> Result<bool, String> {':
-                  '#[frb(sync)]\npub fn contains_key(box_name: String, key: String) -> Result<bool, String> {',
-          }
-          for old, new in replacements.items():
-              if new in text:
-                  continue
-              if old not in text:
-                  raise SystemExit(f'expected declaration not found: {old}')
-              text = text.replace(old, new, 1)
-          path.write_text(text)
-          PY
-          cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
-          make frb-generate
       - name: Run decomposed read-path diagnostics
         env:
           READ_PATH_RUST_ITERATIONS: '1000'
           READ_PATH_DART_ITERATIONS: '500'
           READ_PATH_SAMPLES: '5'
         run: make benchmark-read-path
-      - name: Run PR2 cross-runtime boundary diagnostic
+      - name: Run cross-runtime boundary diagnostic
         env:
           DXTR_BOX_READ_PATH_BOUNDARY_BENCHMARK: '1'
           DXTR_BOX_READ_PATH_DART_ITERATIONS: '500'
@@ -80,12 +65,6 @@ jobs:
           test -s build/read-path/rust-read-path.jsonl
           test -s build/read-path/dart-read-path.jsonl
           test -s build/read-path/dart-boundary.jsonl
-      - name: Capture generated sync candidate
-        if: always()
-        run: |
-          mkdir -p build/read-path/sync-candidate
-          git diff -- rust/src/api.rs lib/src/rust rust/src/frb_generated.rs > build/read-path/sync-candidate.patch || true
-          git diff --name-only -- rust/src/api.rs lib/src/rust rust/src/frb_generated.rs > build/read-path/sync-candidate-files.txt || true
       - name: Toolchain metadata
         if: always()
         run: |
@@ -95,18 +74,6 @@ jobs:
           cargo --version | tee build/read-path/cargo-version.txt
           uname -a | tee build/read-path/runner.txt
           lscpu > build/read-path/cpu.txt || true
-      - name: Commit generated sync candidate
-        if: success() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add rust/src/api.rs lib/src/rust rust/src/frb_generated.rs
-          if git diff --cached --quiet; then
-            echo 'Generated bindings are already current.'
-            exit 0
-          fi
-          git commit -m 'perf: use sync FRB boundary for point reads'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
       - name: Upload read-path evidence
         if: always()
         uses: actions/upload-artifact@v4
