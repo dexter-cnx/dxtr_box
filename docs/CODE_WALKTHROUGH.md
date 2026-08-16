@@ -362,3 +362,11 @@ A sort field rejects unsupported non-null values, NaN, and mixtures of numeric a
 The unsorted path keeps its existing deterministic record-key order and early pagination behavior. The sorted path must collect all predicate matches visible in the same redb snapshot before applying ordering and pagination.
 
 `rust/tests/query_index.rs` verifies order-before-pagination, nested sort fields, null/missing placement, mixed-type rejection, large-integer precision, deterministic key tie-breaking, and exact scan/index result equivalence. `make query-sort-test` runs the focused Dart contract and Rust integration coverage.
+
+## 20. Query/index diagnostic benchmark
+
+`benchmark/test/query_index_benchmark_test.dart` exercises the public `Box.query(...)` and `createIndex(...)` APIs against equality, range, AND-intersection, and sorted-range workloads. Each scenario is timed once through primary scan and once after the matching persisted indexes exist. Setup and backfill are outside the timed region.
+
+The 2026-08-16 baseline (`31927276095`) shows lower median query time for indexed execution in every measured 100/1,000/5,000-record case. At 5,000 records, range measured 15,125 µs scan vs 6,988 µs indexed, while sorted range measured 16,256 µs vs 7,997 µs. These numbers are diagnostic only.
+
+The result supports keeping candidate narrowing and measuring further before changing the persisted scalar representation. Current index-name-bounded iteration still decodes scalar MessagePack components; a true scalar seek remains a separate storage-format decision with ordering and migration requirements.

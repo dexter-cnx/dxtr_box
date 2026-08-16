@@ -296,3 +296,7 @@ final rows = await box.query(
 ```
 
 Sort fields support nested dotted paths. Ordered non-null values must be consistently numeric or consistently strings per field; null/missing placement is explicit, and record key ordering is the deterministic final tie-break. Persisted indexes currently narrow query candidates but do not claim to satisfy requested sort order.
+
+### Query/index diagnostic benchmark
+
+Use `make benchmark-query-index` to compare scan and persisted-index execution for equality, range, multi-index AND, and sorted-range queries across configurable dataset sizes. The harness reports JSON diagnostics and deliberately excludes setup/index-backfill time from the query stopwatch. Shared-runner timings are informational rather than release thresholds; see [`docs/QUERY_BENCHMARK_03.md`](docs/QUERY_BENCHMARK_03.md).

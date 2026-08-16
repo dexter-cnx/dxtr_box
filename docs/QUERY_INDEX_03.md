@@ -273,3 +273,9 @@ The optimization does **not** use MessagePack scalar bytes as numeric range boun
 Ordering domains are intentionally strict: non-null values for one sort field must be all numeric or all strings. Numeric comparison uses the same exact signed/unsigned/float semantics as query predicates and does not coerce integers through `f64`. NaN and unsupported structured/bool values are rejected for ordered sorting. Missing and explicit null are one nullish category. The primary record key is the final deterministic tie-break after all user clauses compare equal.
 
 Index use does not change sort semantics: the same sorted query before and after matching index creation must return the exact same ordered records. Current persisted indexes narrow candidates only; they are not claimed to satisfy sort order and no raw MessagePack scalar byte ordering is used as an ordering shortcut.
+
+## Query/index benchmark gate
+
+The 0.3 benchmark harness covers equality, ordered range, multi-index AND intersection, and sorted range in scan/index modes at 100, 1,000, and 5,000 records. It times `Box.query(...)` only; data population and index backfill are excluded. Results are emitted as JSON diagnostics through `make benchmark-query-index`.
+
+Run `31927276095` completed all 24 combinations. Indexed execution had a lower median in every case. The evidence is recorded in `docs/QUERY_BENCHMARK_03.md`. Timing remains informational on shared runners; semantic equivalence, deterministic ordering, and primary-data re-evaluation remain the hard gates.
