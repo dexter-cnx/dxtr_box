@@ -285,7 +285,7 @@ final source = HiveCeMigrationSource(
 );
 ```
 
-Execution path:
+Execution path after the final PR #25 correctness closure:
 
 ```text
 migrateFromHiveCe
@@ -297,24 +297,40 @@ migrateFromHiveCe
   -> normalize supported values recursively
   -> valueConverter for unsupported/custom values
   -> DxtrCodec.encode preflight for every entry
-  -> exclusive filesystem reservation for {destination}.dxtr
-       -> only one concurrent migration can own the destination
-  -> DxtrBox.open(reserved destination)
+  -> acquire exclusive migration reservation marker
+  -> re-check destination does not already exist
+  -> atomically create {destination}.dxtr exclusively
+  -> open destination through migration-only internal path
   -> one Box.putAll(prepared)
        -> one native putAll write transaction
   -> close destination
+  -> release reservation marker
   -> HiveCeMigrationResult
 ```
+
+Ordinary open exclusion is part of the correctness contract:
+
+```text
+DxtrBox.open(destinationName)
+  -> reject if migration reservation is already active
+  -> native open / handle initialization
+  -> re-check migration reservation
+  -> if reservation became active while open was in flight:
+       close the handle
+       reject the ordinary open
+```
+
+The second check closes the race where an ordinary open started immediately before migration acquired the reservation. A migration that wins reservation + destination creation prevents ordinary open from returning a usable handle. An ordinary open that creates the destination first causes migration's post-reservation existence check / exclusive create to fail instead of joining or overwriting that box.
 
 Default int keys become `@hive-int:<decimal>`. Source String keys are preserved, so a String key equal to a converted int key is detected as a collision.
 
 The source is read-only from dxtr_box's perspective. Encrypted Hive CE sources are decrypted by Hive CE before callbacks return values. `destinationEncryptionKey` uses the normal dxtr_box encrypted-open path.
 
-The migration-specific reservation/open helper is internal to `src` and is not exported as public API. If preflight fails, destination creation never begins. If reservation succeeds but `DxtrBox.open` later fails during native watch or metadata initialization, cleanup removes the reservation owned by that migration before the original error is rethrown. If `putAll` fails, the opened destination is closed and deleted. This prevents silent merge/overwrite races and retry-blocking empty files from ordinary initialization failures.
+The migration-specific reservation/open helper is internal to `src` and is not exported as public API. If preflight fails, destination creation never begins. If destination handle initialization fails after reservation/destination creation, cleanup removes the migration-owned destination and releases the marker before rethrowing the original error. If `putAll` fails, the opened destination is closed/deleted and the marker is released. Successful migration also releases the marker after close.
 
-A hard process kill during destination creation/commit can still leave an incomplete destination; 0.3 does not claim file-level crash-atomic staging/promotion.
+A hard process kill while migration owns the reservation can leave an incomplete destination and reservation marker. 0.3 does not claim file-level crash-atomic staging/promotion or automatic stale-reservation recovery.
 
-## 23. Hive CE fixture isolation
+## 23. Hive CE fixture isolation and regression coverage
 
 Hive CE 2.19.3 requires dependencies that would raise the root package's effective minimum on Flutter 3.22. To preserve the public SDK contract, real Hive CE fixtures live in a separate package:
 
@@ -326,7 +342,7 @@ tool/hive_ce_migration_fixture/
 
 Root analyzer excludes that fixture package; CI performs a separate `flutter pub get`, `flutter analyze`, and native test run inside it.
 
-Fixture coverage includes primitives, lists/maps, bytes, DateTime, String/int keys, BigInt conversion, collision rejection, unsupported-value preflight failure, existing-destination rejection, encrypted Hive CE source, encrypted dxtr_box destination, source preservation, and concurrent destination reservation. A focused root regression injects handle-initialization failure and verifies owned reservation cleanup.
+Fixture/root regression coverage includes primitives, lists/maps, bytes, DateTime, String/int keys, BigInt conversion, collision rejection, unsupported-value preflight failure, existing-destination rejection, encrypted Hive CE source, encrypted dxtr_box destination, source preservation, concurrent migration exclusion, ordinary `DxtrBox.open()` rejection while migration owns the destination, normal open succeeding again after reservation release, and destination + reservation cleanup when handle initialization fails.
 
 Run:
 
@@ -336,7 +352,7 @@ make hive-ce-migration-test
 
 ## 24. 0.3 closure invariants and deferred work
 
-The 0.3 query/index + Hive CE migration milestone is in closure verification. Do not reopen completed implementation slices unless a release-blocking defect is found.
+The 0.3 query/index + Hive CE migration milestone is **closed and closure-verified**. PR #24 performed the closure audit; PR #25 is the final correctness closure for migration reservation ownership. Final `main` CI after #25 is green. Do not reopen completed 0.3 implementation slices unless a demonstrated correctness or product-performance issue requires it.
 
 Preserve these invariants:
 
@@ -347,6 +363,8 @@ Preserve these invariants:
 - index candidate narrowing never substitutes for full predicate evaluation;
 - raw MessagePack scalar bytes are never treated as numeric order;
 - Hive CE migration destination creation remains exclusive and source data remains untouched;
+- ordinary opens cannot return a usable handle while migration owns the destination reservation;
+- migration reservation state is released on normal completion and handled failures;
 - core package retains Dart >=3.4 / Flutter >=3.22 without a Hive CE runtime dependency;
 - checked-in FRB 2.8 bindings remain drift-clean.
 
@@ -358,7 +376,7 @@ Explicitly deferred beyond 0.3:
 - cross-commit native-size regression thresholds;
 - Dart 3.13 recorded-use/native tree shaking;
 - LazyBox migration and direct `.hive` file parsing;
-- file-level crash-atomic migration staging/promotion;
+- file-level crash-atomic migration staging/promotion and automatic stale-reservation recovery;
 - Web/IndexedDB and remaining 1.0 Hive functional-parity gaps.
 
 Important developer targets include:
