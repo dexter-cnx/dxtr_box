@@ -291,14 +291,15 @@ Execution path:
 migrateFromHiveCe
   -> require DxtrBox.init
   -> require source still open
-  -> reject existing destination
   -> enumerate source keys
   -> keyConverter or default String/int mapping
   -> detect converted-key collisions
   -> normalize supported values recursively
   -> valueConverter for unsupported/custom values
   -> DxtrCodec.encode preflight for every entry
-  -> DxtrBox.open(new destination)
+  -> exclusive filesystem reservation for {destination}.dxtr
+       -> only one concurrent migration can own the destination
+  -> DxtrBox.open(reserved destination)
   -> one Box.putAll(prepared)
        -> one native putAll write transaction
   -> close destination
@@ -309,7 +310,9 @@ Default int keys become `@hive-int:<decimal>`. Source String keys are preserved,
 
 The source is read-only from dxtr_box's perspective. Encrypted Hive CE sources are decrypted by Hive CE before callbacks return values. `destinationEncryptionKey` uses the normal dxtr_box encrypted-open path.
 
-If preflight fails, destination creation never begins. If `putAll` throws after a successful destination open, migration closes and deletes the newly-created destination. A hard process kill between destination creation and commit can still leave an empty destination; 0.3 does not claim file-level crash-atomic promotion.
+The migration-specific reservation/open helper is internal to `src` and is not exported as public API. If preflight fails, destination creation never begins. If reservation succeeds but `DxtrBox.open` later fails during native watch or metadata initialization, cleanup removes the reservation owned by that migration before the original error is rethrown. If `putAll` fails, the opened destination is closed and deleted. This prevents silent merge/overwrite races and retry-blocking empty files from ordinary initialization failures.
+
+A hard process kill during destination creation/commit can still leave an incomplete destination; 0.3 does not claim file-level crash-atomic staging/promotion.
 
 ## 23. Hive CE fixture isolation
 
@@ -323,7 +326,7 @@ tool/hive_ce_migration_fixture/
 
 Root analyzer excludes that fixture package; CI performs a separate `flutter pub get`, `flutter analyze`, and native test run inside it.
 
-Fixture coverage includes primitives, lists/maps, bytes, DateTime, String/int keys, BigInt conversion, collision rejection, unsupported-value preflight failure, existing-destination rejection, encrypted Hive CE source, encrypted dxtr_box destination, and source preservation.
+Fixture coverage includes primitives, lists/maps, bytes, DateTime, String/int keys, BigInt conversion, collision rejection, unsupported-value preflight failure, existing-destination rejection, encrypted Hive CE source, encrypted dxtr_box destination, source preservation, and concurrent destination reservation. A focused root regression injects handle-initialization failure and verifies owned reservation cleanup.
 
 Run:
 
@@ -331,16 +334,34 @@ Run:
 make hive-ce-migration-test
 ```
 
-## 24. Current 0.3 boundary
+## 24. 0.3 closure invariants and deferred work
 
-The next work is a **closure audit**, not another feature slice. Keep these outside 0.3 closure unless needed to fix a release blocker:
+The 0.3 query/index + Hive CE migration milestone is in closure verification. Do not reopen completed implementation slices unless a release-blocking defect is found.
+
+Preserve these invariants:
+
+- exactly three public native profiles;
+- primary data remains authoritative over derived indexes;
+- one redb read snapshot per native query;
+- exact numeric semantics, explicit null ordering, and record-key ascending tie-break for sorting;
+- index candidate narrowing never substitutes for full predicate evaluation;
+- raw MessagePack scalar bytes are never treated as numeric order;
+- Hive CE migration destination creation remains exclusive and source data remains untouched;
+- core package retains Dart >=3.4 / Flutter >=3.22 without a Hive CE runtime dependency;
+- checked-in FRB 2.8 bindings remain drift-clean.
+
+Explicitly deferred beyond 0.3:
 
 - encrypted persisted indexes;
 - order-preserving persisted scalar encoding / true scalar-level redb range seeks;
+- index-backed ORDER BY;
 - cross-commit native-size regression thresholds;
-- Dart 3.13 recorded-use/native tree shaking.
+- Dart 3.13 recorded-use/native tree shaking;
+- LazyBox migration and direct `.hive` file parsing;
+- file-level crash-atomic migration staging/promotion;
+- Web/IndexedDB and remaining 1.0 Hive functional-parity gaps.
 
-Important developer targets now include:
+Important developer targets include:
 
 ```text
 make preflight
