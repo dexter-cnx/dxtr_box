@@ -27,6 +27,7 @@ jobs:
         run: |
           python3 tool/apply_query_sort.py
           python3 tool/fix_query_sort_test.py
+          python3 tool/fix_query_sort_clippy.py
       - name: Format Dart and Rust
         run: |
           dart format lib/src/query.dart lib/src/box.dart test/query_test.dart
@@ -45,7 +46,7 @@ jobs:
       - name: Validate sort integration target
         run: make query-sort-test
       - name: Remove temporary tooling
-        run: rm tool/apply_query_sort.py tool/fix_query_sort_test.py .github/workflows/query_sort_temp.yml
+        run: rm tool/apply_query_sort.py tool/fix_query_sort_test.py tool/fix_query_sort_clippy.py .github/workflows/query_sort_temp.yml
       - name: Commit finalized query sort
         run: |
           git config user.name 'github-actions[bot]'
