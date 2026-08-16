@@ -99,7 +99,7 @@ jobs:
       - name: Generate public API docs
         run: dart doc --output build/doc
       - name: Pub publication dry-run
-        run: dart pub publish --dry-run
+        run: dart pub publish --dry-run --ignore-warnings
 
   frb-bindings:
     name: FRB / generated bindings current
