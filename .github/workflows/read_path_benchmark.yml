@@ -56,8 +56,7 @@ jobs:
               text = text.replace(old, new, 1)
           path.write_text(text)
           PY
-          dart pub global activate flutter_rust_bridge_codegen 2.8.0
-          export PATH="$PATH:$HOME/.pub-cache/bin"
+          cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
           make frb-generate
       - name: Run decomposed read-path diagnostics
         env:
