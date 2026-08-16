@@ -12,12 +12,16 @@ const _storageFormatMarker = 'dxtr_box/1';
 const _storageFormatMetaKey = 'format_version';
 
 void main() {
-  _verifyPublicExports();
-  _verifyStorageFormatIdentity();
+  verifyPublicStorageContract();
   stdout.writeln(
     'DXTR_BOX_CONTRACT PASS exports=${_expectedExports.length} '
     'storage=$_storageFormatMarker',
   );
+}
+
+void verifyPublicStorageContract() {
+  _verifyPublicExports();
+  _verifyStorageFormatIdentity();
 }
 
 void _verifyPublicExports() {
