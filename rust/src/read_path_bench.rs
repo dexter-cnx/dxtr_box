@@ -9,9 +9,9 @@ use std::{
 
 use serde::Serialize;
 
-use crate::{codec::validate_message_pack, db};
 #[cfg(feature = "encryption")]
 use crate::crypto;
+use crate::{codec::validate_message_pack, db};
 
 const DEFAULT_ITERATIONS: usize = 2_000;
 const DEFAULT_SAMPLES: usize = 7;
@@ -79,7 +79,9 @@ fn read_path_microbench() {
             samples,
             || {
                 let read = plain_db.begin_read().map_err(|error| error.to_string())?;
-                let table = read.open_table(db::DATA).map_err(|error| error.to_string())?;
+                let table = read
+                    .open_table(db::DATA)
+                    .map_err(|error| error.to_string())?;
                 black_box(table);
                 Ok(())
             },
