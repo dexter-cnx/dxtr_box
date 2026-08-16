@@ -97,11 +97,6 @@ jobs:
               - 'cargokit/**'
               - 'cargokit_options.yaml'
               - 'tool/validate_published_consumer.dart'
-              - 'android/**'
-              - 'ios/**'
-              - 'macos/**'
-              - 'linux/**'
-              - 'windows/**'
             platform:
               - 'android/**'
               - 'ios/**'
@@ -117,11 +112,12 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'cargokit/**'
-              - 'android/**'
-              - 'ios/**'
-              - 'macos/**'
-              - 'linux/**'
-              - 'windows/**'
+              - 'android/**/CMakeLists.txt'
+              - 'android/**/build.gradle'
+              - 'ios/**/*.podspec'
+              - 'macos/**/*.podspec'
+              - 'linux/**/CMakeLists.txt'
+              - 'windows/**/CMakeLists.txt'
               - 'tool/native_size_*.sh'
             benchmark:
               - 'benchmark/**'
@@ -235,7 +231,7 @@ jobs:
   rust-cross-platform:
     name: Rust platform / ${{ matrix.os }}
     needs: [change-detection, fast-ci, rust-profiles]
-    if: ${{ always() && needs.fast-ci.result == 'success' && (needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.encryption == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.durable_storage == 'true' || needs.change-detection.outputs.platform == 'true') }}
+    if: ${{ always() && needs.fast-ci.result == 'success' && (needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.encryption == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.durable_storage == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -249,12 +245,9 @@ jobs:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Compile minimal profile
-        run: cargo check --manifest-path rust/Cargo.toml --all-targets --no-default-features
-      - name: Compile encryption profile
-        run: cargo check --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
-      - name: Compile full profile
-        run: cargo check --manifest-path rust/Cargo.toml --all-targets
+      - run: cargo check --manifest-path rust/Cargo.toml --all-targets --no-default-features
+      - run: cargo check --manifest-path rust/Cargo.toml --all-targets --no-default-features --features encryption
+      - run: cargo check --manifest-path rust/Cargo.toml --all-targets
 
   native-integration:
     name: Native / integration
@@ -393,31 +386,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  platform-builds:
-    name: Platform consumer / ${{ matrix.platform }}
+  platform-android:
+    name: Platform consumer / Android
     needs: [change-detection, fast-ci]
-    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.platform == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: android
-            os: ubuntu-latest
-          - platform: linux
-            os: ubuntu-latest
-          - platform: windows
-            os: windows-2022
-          - platform: macos
-            os: macos-latest
-          - platform: ios
-            os: macos-latest
-    runs-on: ${{ matrix.os }}
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.android == 'true' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
-      - name: Install Linux build dependencies
-        if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgtk-3-dev
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -427,8 +403,84 @@ jobs:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-      - name: Stage payload and build consumer
-        run: dart run tool/validate_published_consumer.dart --platform=${{ matrix.platform }}
+      - run: dart run tool/validate_published_consumer.dart --platform=android
+
+  platform-linux:
+    name: Platform consumer / Linux
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.linux == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build libgtk-3-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: dart run tool/validate_published_consumer.dart --platform=linux
+
+  platform-windows:
+    name: Platform consumer / Windows
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.windows == 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: dart run tool/validate_published_consumer.dart --platform=windows
+
+  platform-macos:
+    name: Platform consumer / macOS
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.macos == 'true' }}
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: dart run tool/validate_published_consumer.dart --platform=macos
+
+  platform-ios:
+    name: Platform consumer / iOS
+    needs: [change-detection, fast-ci]
+    if: ${{ needs.change-detection.outputs.full_validation == 'true' || needs.change-detection.outputs.packaging == 'true' || needs.change-detection.outputs.rust_core == 'true' || needs.change-detection.outputs.ffi == 'true' || needs.change-detection.outputs.ios == 'true' }}
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: dart run tool/validate_published_consumer.dart --platform=ios
 
   benchmark-diagnostics:
     name: Benchmark / correctness + diagnostic smoke
@@ -474,7 +526,11 @@ jobs:
       - frb-bindings
       - package-readiness
       - native-size
-      - platform-builds
+      - platform-android
+      - platform-linux
+      - platform-windows
+      - platform-macos
+      - platform-ios
       - benchmark-diagnostics
     runs-on: ubuntu-latest
     steps:
@@ -492,7 +548,11 @@ jobs:
           FRB_BINDINGS: ${{ needs.frb-bindings.result }}
           PACKAGE_READINESS: ${{ needs.package-readiness.result }}
           NATIVE_SIZE: ${{ needs.native-size.result }}
-          PLATFORM_BUILDS: ${{ needs.platform-builds.result }}
+          PLATFORM_ANDROID: ${{ needs.platform-android.result }}
+          PLATFORM_LINUX: ${{ needs.platform-linux.result }}
+          PLATFORM_WINDOWS: ${{ needs.platform-windows.result }}
+          PLATFORM_MACOS: ${{ needs.platform-macos.result }}
+          PLATFORM_IOS: ${{ needs.platform-ios.result }}
           BENCHMARK_DIAGNOSTICS: ${{ needs.benchmark-diagnostics.result }}
         shell: bash
         run: |
@@ -503,8 +563,9 @@ jobs:
           results=(
             "$MINIMUM_SDK" "$DART_TESTS" "$RUST_PROFILES" "$RUST_CROSS_PLATFORM"
             "$NATIVE_INTEGRATION" "$STORAGE_MIGRATION" "$FRB_BINDINGS"
-            "$PACKAGE_READINESS" "$NATIVE_SIZE" "$PLATFORM_BUILDS"
-            "$BENCHMARK_DIAGNOSTICS"
+            "$PACKAGE_READINESS" "$NATIVE_SIZE" "$PLATFORM_ANDROID"
+            "$PLATFORM_LINUX" "$PLATFORM_WINDOWS" "$PLATFORM_MACOS"
+            "$PLATFORM_IOS" "$BENCHMARK_DIAGNOSTICS"
           )
           for result in "${results[@]}"; do
             if [[ "$result" == failure || "$result" == cancelled ]]; then
