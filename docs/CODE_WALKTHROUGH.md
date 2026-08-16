@@ -139,9 +139,7 @@ Box.containsKey
 
 These remain authoritative native reads. Dart metadata cannot replace them without weakening cross-handle/cross-process freshness.
 
-No Dart whole-box cache is allowed as a performance shortcut.
-
-Encrypted reads retain full AEAD authentication.
+No Dart whole-box cache is allowed as a performance shortcut. Encrypted reads retain full AEAD authentication.
 
 ## 6. 0.3 diagnosis
 
@@ -186,6 +184,14 @@ Stable-snapshot lookup cases keep the read transaction/table outside the timed c
 
 This is diagnostic only; it does not imply default public reads should retain long-lived snapshots.
 
+### Public-wire payload construction
+
+The Rust benchmark must model the public `DxtrCodec.encode` wire representation, not merely an arbitrary valid MessagePack payload.
+
+For the benchmark map workload, Rust now emits the `@dxtr:map` tagged representation with string keys and a string body, matching the logical shape used by the Dart benchmark. This correction was required because the original Rust `Vec<u8>` body serialized as thousands of MessagePack sequence elements and artificially inflated validation cost.
+
+Run #7 is therefore superseded for bottleneck selection. Run #11 is the corrected baseline.
+
 ### Dart / FRB harness
 
 `test/read_path_benchmark_test.dart` measures:
@@ -198,9 +204,7 @@ native_adapter_contains_key
 public_box_contains_key
 ```
 
-Matrix dimensions include small/medium payload, plaintext/encrypted where applicable, and hit/miss where applicable.
-
-Assertions are outside timed loops.
+Matrix dimensions include small/medium payload, plaintext/encrypted where applicable, and hit/miss where applicable. Assertions are outside timed loops.
 
 ## 8. Machine-readable evidence
 
@@ -225,23 +229,23 @@ cpu.txt
 
 The artifact upload fails closed if evidence is absent.
 
-## 9. 0.5 Phase A baseline — run #7
+## 9. Corrected 0.5 Phase A baseline — run #11
 
 Successful evidence:
 
 ```text
-Read-path Benchmark #7
-run id:      31947858383
+Read-path Benchmark #11
+run id:      31949461503
 artifact:    read-path-benchmark-linux-x64
-artifact id: 9263812713
-head:        ec0da61bdd53f70201a31f3c44fddfdfe325a3c8
+artifact id: 9264234449
+head:        09c407139b824c3cbb6ce12f3bd8dacf84d03285
 ```
 
 Environment:
 
 ```text
-Ubuntu 24.04 hosted runner / Linux x86_64
-AMD EPYC 9V74 / 4 logical CPUs
+Ubuntu hosted runner / Linux x86_64 / kernel 6.17.0-1022-azure
+Intel Xeon Platinum 8370C @ 2.80GHz / 4 logical CPUs
 Flutter 3.47.0
 Dart 3.13.0
 rustc 1.97.1
@@ -253,70 +257,85 @@ cargo 1.97.1
 Small payload:
 
 ```text
-transaction create             0.112 us
-transaction + table open       0.395 us
-borrowed point lookup hit      0.040 us
-lookup + copy hit              0.059 us
-MessagePack validation         0.314 us
-standalone Vec copy            0.017 us
-full plaintext db_get hit      0.875 us
-full plaintext db_get miss     0.494 us
-full contains hit              0.498 us
-decrypt/authenticate           2.273 us
-full encrypted db_get hit      3.176 us
+transaction create             0.199 us
+transaction + table open       0.492 us
+borrowed point lookup hit      0.100 us
+lookup + copy hit              0.107 us
+MessagePack validation         0.084 us
+standalone Vec copy            0.035 us
+full plaintext db_get hit      0.742 us
+full plaintext db_get miss     0.599 us
+full contains hit              0.591 us
+decrypt/authenticate           1.700 us
+full encrypted db_get hit      2.454 us
 ```
 
-Medium payload (~4 KiB body):
+Medium public-wire payload (~4 KiB string body):
 
 ```text
-transaction create             0.113 us
-transaction + table open       0.387 us
-borrowed point lookup hit      0.106 us
-lookup + copy hit              1.650 us
-MessagePack validation        17.369 us
-standalone Vec copy            0.108 us
-full plaintext db_get hit     19.633 us
-full plaintext db_get miss     0.545 us
-full contains hit              0.554 us
-decrypt/authenticate           5.878 us
-full encrypted db_get hit     24.204 us
+transaction create             0.200 us
+transaction + table open       0.567 us
+borrowed point lookup hit      0.116 us
+lookup + copy hit              0.191 us
+MessagePack validation         0.211 us
+standalone Vec copy            0.112 us
+full plaintext db_get hit      1.055 us
+full plaintext db_get miss     0.664 us
+full contains hit              0.655 us
+decrypt/authenticate           4.952 us
+full encrypted db_get hit      6.056 us
 ```
 
-For this workload, successful medium native reads are dominated by native MessagePack validation. Copying is secondary. Redb transaction creation/table open is not the dominant cost.
+Corrected native validation is sub-microsecond and no longer dominates the medium plaintext read. Transaction/table-open is the largest directly isolated plaintext-native subcomponent in this harness, but the whole native read is still only ~1 us.
 
 ### Dart/public measured facts
 
-Representative run #7 medians:
+Representative run #11 medians:
 
 ```text
 DxtrCodec.decode
-  small                         8.868 us
-  medium                        5.908 us
+  small                        10.368 us
+  medium                        5.972 us
 
 native adapter plaintext get hit
-  small                       133.990 us
-  medium                       90.866 us
+  small                       132.822 us
+  medium                       90.470 us
 
 public Box.get plaintext hit
-  small                        98.852 us
-  medium                      107.654 us
+  small                       102.628 us
+  medium                      102.118 us
 
 native adapter contains hit
-  small                        76.946 us
-  medium                       74.524 us
+  small                        78.396 us
+  medium                       74.310 us
 
 public Box.containsKey hit
-  small                        75.272 us
-  medium                       81.616 us
+  small                        76.318 us
+  medium                       74.672 us
 ```
 
 Some adjacent Dart-layer medians are non-monotonic on the shared runner. They therefore provide end-to-end diagnostic baselines but cannot be added/subtracted as exact component timings.
 
-## 10. FRB interpretation
+## 10. Cross-runtime / FRB interpretation
 
 PR 1 deliberately adds no benchmark-only echo/passthrough endpoint to the production FRB API.
 
-The difference between Dart native-adapter/public timing and in-process Rust timing is **not** a pure FRB timer. It includes:
+The corrected baseline shows a large structural gap:
+
+```text
+medium in-process Rust db_get       ~1.055 us
+medium Dart native-adapter get     ~90.470 us
+medium public Box.get             ~102.118 us
+medium Dart DxtrCodec.decode        ~5.972 us
+
+medium in-process containsKey       ~0.655 us
+medium Dart native containsKey     ~74.310 us
+medium public containsKey          ~74.672 us
+```
+
+This makes the cross-runtime/generated-binding/Dart-async region the dominant end-to-end investigation area.
+
+The difference is **not** a pure FRB timer. It includes:
 
 ```text
 FRB transport/generated bindings
@@ -326,23 +345,21 @@ runtime/harness differences
 shared-runner noise
 ```
 
-The cross-runtime region is clearly material as an inference, but do not publish an exact FRB percentage by subtracting unrelated harness medians.
-
-If Phase B targets this region, first add a controlled boundary diagnostic that does not leave benchmark plumbing in the shipped API.
+Do not publish an exact FRB percentage by subtracting these medians.
 
 ## 11. Phase A decision
 
 Classification:
 
 **Measured fact**
-- medium successful native `db_get`: ~19.63 us.
-- medium native MessagePack validation: ~17.37 us.
-- medium lookup+copy: ~1.65 us.
-- transaction+table open: ~0.39 us.
-- encrypted authentication is measurable and mandatory.
+- corrected medium successful native `db_get`: ~1.055 us.
+- medium MessagePack validation: ~0.211 us.
+- medium lookup+copy: ~0.191 us.
+- transaction+table open: ~0.567 us.
+- medium authenticated decrypt: ~4.952 us and remains mandatory.
 
 **Inference**
-- FRB/native-adapter/async work is material in public end-to-end reads, but not yet directly isolated.
+- cross-runtime/generated-FRB/Dart-async work dominates public end-to-end reads, but is not yet directly isolated into individual bridge/scheduling/conversion components.
 
 **Implemented optimization**
 - none in PR 1 by design.
@@ -352,19 +369,19 @@ Classification:
 - no metadata-backed authoritative `containsKey`.
 - no skipped AEAD authentication.
 - no implicit stale long-lived snapshot.
-- no speculative bridge rewrite.
+- no speculative bridge rewrite without boundary evidence.
 
 ## 12. PR 2 implementation order
 
 PR 2 should investigate in this order:
 
-1. Why successful reads perform `validate_message_pack` every time.
-2. Whether validation can be made cheaper, deduplicated safely, or restructured without weakening corruption/storage/codec guarantees.
-3. Avoidable successful-hit payload copies/allocations.
-4. Bridge-boundary measurement only if a production bridge optimization is being considered.
-5. Transaction/session reuse only if new evidence justifies it; current evidence does not make it the first target.
-
-A high validation cost is not permission to remove validation. Any change requires a correctness argument plus before/after evidence.
+1. Preserve the corrected public-wire benchmark shape.
+2. Add a controlled diagnostic that separates generated-FRB transport/call behavior from Dart async adapter/conversion overhead without leaving benchmark-only production API surface behind.
+3. Inspect generated FRB call mode and request/response allocation/conversion behavior.
+4. Choose a production single-key optimization only after that boundary diagnostic identifies an actionable cost.
+5. Treat native validation/copy/transaction cleanup as secondary unless end-to-end evidence elevates it.
+6. Preserve authoritative native reads, cross-process freshness, and full encryption authentication.
+7. Leave read-session/stale-snapshot work for its dedicated later phase unless new evidence changes priority.
 
 ## 13. Query execution
 
@@ -474,7 +491,7 @@ A future public batch-read API is a deliberate public API addition and must upda
 ## 23. Current implementation order
 
 ```text
-PR 1 — read-path benchmark decomposition                         complete evidence baseline
+PR 1 — read-path benchmark decomposition                         corrected evidence baseline
 PR 2 — single-key read optimization                              next
 PR 3 — batch/multi-key read path
 PR 4 — read-session investigation / explicit implementation only if safe
