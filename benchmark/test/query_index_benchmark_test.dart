@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 const _defaultSizes = <int>[100, 1000, 5000];
 const _defaultSamples = 3;
+const _minimumDatasetSize = 19;
 
 void main() {
   final enabled = Platform.environment['DXTR_BOX_QUERY_BENCHMARK'] == '1';
@@ -21,6 +22,13 @@ void main() {
     'query/index benchmark scenarios execute',
     () async {
       expect(sizes, isNotEmpty);
+      expect(
+        sizes,
+        everyElement(greaterThanOrEqualTo(_minimumDatasetSize)),
+        reason:
+            'Every query benchmark dataset must contain at least '
+            '$_minimumDatasetSize records so range scenarios are non-empty.',
+      );
       expect(samples, greaterThan(0));
 
       final root = await Directory.systemTemp.createTemp(
@@ -219,8 +227,14 @@ Map<String, Object> _result(
     'scenario': scenario.name,
     'execution': execution,
     'samples_us': samples,
-    'median_us': ordered[ordered.length ~/ 2],
+    'median_us': _medianMicros(ordered),
     'min_us': ordered.first,
     'max_us': ordered.last,
   };
+}
+
+num _medianMicros(List<int> ordered) {
+  final middle = ordered.length ~/ 2;
+  if (ordered.length.isOdd) return ordered[middle];
+  return (ordered[middle - 1] + ordered[middle]) / 2;
 }
