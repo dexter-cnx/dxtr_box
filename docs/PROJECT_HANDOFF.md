@@ -14,7 +14,7 @@ The 1.0 claim is functional replacement for practical Hive/Hive CE local-databas
 
 PR #27 completed **PH-01 controlled cross-commit native-size regression policy**. The gate builds base/head commits on the same runner/toolchain and independently enforces growth budgets for `minimal`, `encryption`, and `full`.
 
-**PH-02 package / publication hardening is active in PR #28.** The package topology is being changed from a root Dart package + nested path-dependent `rust_builder` helper into one self-contained Flutter FFI plugin. The public package now owns:
+PR #28 completed **PH-02 package / publication hardening**. `dxtr_box` is now one self-contained Flutter FFI plugin that owns:
 
 ```text
 lib/
@@ -28,19 +28,26 @@ windows/
 example/
 ```
 
-The Flutter package/plugin name is `dxtr_box`. The Rust crate and native library name remains `rust_lib_dxtr_box` to preserve FRB/native identity. The nested `rust_builder/` package and root `path:` dependency are removed.
+The Flutter package/plugin name is `dxtr_box`. The Rust crate and native library name remains `rust_lib_dxtr_box` to preserve FRB/native identity. The nested `rust_builder/` package and root path dependency are removed. Package docs, pub dry-run validation, `.pubignore`, CHANGELOG/example cleanup, and all five platform builds are part of the hardened package contract.
 
-PH-02 also adds:
+`flutter_rust_bridge` remains pinned to 2.8.0 because checked-in generated bindings and the runtime/codegen/macros must stay version-aligned. The pub dry-run uses `--ignore-warnings` for pub's broad-constraint advisory rather than allowing a newer incompatible FRB runtime to resolve.
 
-- package version preview `0.4.0-dev.1`;
-- pub.dev metadata/topics/documentation URL;
-- `dart doc` generation gate;
-- `dart pub publish --dry-run` CI gate;
-- `.pubignore` consumer payload policy;
-- CHANGELOG/library-doc/example cleanup;
-- platform builds as the final proof that the self-contained root-plugin topology works on all five native targets.
+**PH-03 broader Flutter local-database comparison is active in PR #29.** The initial engineering matrix compares:
 
-Normative package contract: `docs/PACKAGE_RELEASE_04.md`.
+```text
+dxtr_box
+Hive CE
+Sembast
+SQLite via sqflite_common_ffi
+```
+
+PH-03 separates a cross-engine correctness hard gate from timing diagnostics. CRUD/delete/close/reopen state equivalence is a CI requirement; sequential/batch/read/contains/delete/reopen timing is evidence only and has no faster/slower release threshold. CI emits a machine-readable JSONL artifact named `local-database-comparison`.
+
+Normative 0.4 docs:
+
+- `docs/PACKAGE_RELEASE_04.md`
+- `docs/NATIVE_SIZE_POLICY_04.md`
+- `docs/LOCAL_DATABASE_COMPARISON_04.md`
 
 ## Current capabilities
 
@@ -65,6 +72,8 @@ Normative package contract: `docs/PACKAGE_RELEASE_04.md`.
 - Explicit Hive CE 2.19.3 migration fixtures in an isolated package.
 - Migration reservation marker that excludes ordinary opens for the lifetime of a migration-owned destination.
 - Native-size absolute measurement, same-commit reproducibility, and cross-commit regression gating.
+- Self-contained publishable Flutter FFI plugin topology with pub/docs validation.
+- Four-engine local-database correctness + diagnostic comparison harness under `benchmark/`.
 
 ## Core correctness invariants
 
@@ -192,7 +201,7 @@ Package readiness requires both publication validation and runtime/native valida
 make package-readiness
   -> flutter pub get
   -> dart doc
-  -> dart pub publish --dry-run
+  -> dart pub publish --dry-run --ignore-warnings
 
 normal CI
   -> Flutter / minimum SDK / FRB / Rust / native integration / size policy
@@ -203,7 +212,47 @@ Platform Builds
 
 A green pub dry-run alone is not sufficient evidence that the native plugin builds correctly.
 
-Merging PH-02 does **not** publish to pub.dev. Publication remains a separate explicit release action from a reviewed clean commit/tag.
+Publication remains a separate explicit release action from a reviewed clean commit/tag.
+
+## 0.4 local-database comparison policy
+
+Comparison-only dependencies stay under `benchmark/`; they must not raise the root package SDK floor or become production dependencies.
+
+Correctness hard gate:
+
+```text
+same payloads
+  -> putAll
+  -> overwrite
+  -> contains existing/missing
+  -> delete deterministic subset
+  -> close/reopen
+  -> verify deleted/retained records
+  -> compare final snapshots across engines
+```
+
+Diagnostic matrix:
+
+```text
+sequential_put
+batch_put
+point_get
+contains
+delete_all
+reopen_read
+```
+
+Each engine receives one warmup and three measured samples. Evidence records engine, scenario, operation count, raw samples, median, min, and max.
+
+Interpretation rules:
+
+- correctness mismatch is a release blocker;
+- inability to execute the harness is a test/harness failure;
+- timing differences are not pass/fail thresholds;
+- hosted CI timings are diagnostic and not stable marketing benchmarks;
+- performance optimization requires repeated evidence of a product-relevant bottleneck.
+
+See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
 
 ## Developer workflow
 
@@ -221,6 +270,8 @@ make query-index-test
 make query-sort-test
 make process-crash
 make benchmark-smoke
+make benchmark-comparison-correctness
+make benchmark-comparison
 make benchmark-query-index
 make diagnose-point-read
 make rust-check
@@ -264,22 +315,30 @@ Do not reopen 0.3 query/index/migration work for speculative optimization. Chang
 - hybrid byte/percentage budget enforced;
 - machine-readable evidence uploaded.
 
-### PH-02 — Package-quality / publication hardening — active (PR #28)
+### PH-02 — Package-quality / publication hardening — complete (PR #28)
 
-Acceptance:
+Completed acceptance:
 
 - root `dxtr_box` is a self-contained Flutter FFI plugin;
 - no nested `rust_builder` path dependency;
 - native crate and Cargokit required by consumers are inside the published package;
 - `dart doc` succeeds;
-- `dart pub publish --dry-run` succeeds and archive contents are reviewed;
+- pub dry-run validates the archive with the intentional exact FRB 2.8 pin documented;
 - CHANGELOG/example/public library docs are current;
 - CI and all five Platform Builds are green;
-- README, handoff, code walkthrough, and `PACKAGE_RELEASE_04.md` agree.
+- README, handoff, code walkthrough, and `PACKAGE_RELEASE_04.md` agree on topology.
 
-### PH-03 — Broader Flutter local-database comparison — after PH-02
+### PH-03 — Broader Flutter local-database comparison — active (PR #29)
 
-Expand comparison evidence beyond the current Hive CE smoke harness. Keep benchmark timings diagnostic; correctness and durability remain hard gates.
+Acceptance:
+
+- at least four representative engines in the matrix, including dxtr_box and Hive CE;
+- comparison dependencies remain benchmark-only;
+- shared CRUD/delete/reopen correctness workload is a hard CI gate;
+- timing scenarios remain diagnostic only;
+- machine-readable evidence is uploaded from CI;
+- no benchmark threshold drives speculative optimization;
+- README, handoff, code walkthrough, and `LOCAL_DATABASE_COMPARISON_04.md` agree.
 
 ## Deferred beyond current 0.4 slice
 
