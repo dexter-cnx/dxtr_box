@@ -172,16 +172,15 @@ fn wire__crate__api__compact_impl(
     )
 }
 fn wire__crate__api__contains_key_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
             debug_name: "contains_key",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
         },
         move || {
             let message = unsafe {
@@ -196,12 +195,10 @@ fn wire__crate__api__contains_key_impl(
             let api_box_name = <String>::sse_decode(&mut deserializer);
             let api_key = <String>::sse_decode(&mut deserializer);
             deserializer.end();
-            move |context| {
-                transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::api::contains_key(api_box_name, api_key)?;
-                    Ok(output_ok)
-                })())
-            }
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::contains_key(api_box_name, api_key)?;
+                Ok(output_ok)
+            })())
         },
     )
 }
@@ -404,16 +401,15 @@ fn wire__crate__api__encrypt_box_impl(
     )
 }
 fn wire__crate__api__get_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
             debug_name: "get",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
         },
         move || {
             let message = unsafe {
@@ -428,12 +424,10 @@ fn wire__crate__api__get_impl(
             let api_box_name = <String>::sse_decode(&mut deserializer);
             let api_key = <String>::sse_decode(&mut deserializer);
             deserializer.end();
-            move |context| {
-                transform_result_sse::<_, String>((move || {
-                    let output_ok = crate::api::get(api_box_name, api_key)?;
-                    Ok(output_ok)
-                })())
-            }
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::get(api_box_name, api_key)?;
+                Ok(output_ok)
+            })())
         },
     )
 }
@@ -988,12 +982,10 @@ fn pde_ffi_dispatcher_primary_impl(
     match func_id {
         2 => wire__crate__api__clear_impl(port, ptr, rust_vec_len, data_len),
         4 => wire__crate__api__compact_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__contains_key_impl(port, ptr, rust_vec_len, data_len),
         6 => wire__crate__api__create_index_impl(port, ptr, rust_vec_len, data_len),
         7 => wire__crate__api__delete_impl(port, ptr, rust_vec_len, data_len),
         8 => wire__crate__api__delete_all_impl(port, ptr, rust_vec_len, data_len),
         10 => wire__crate__api__drop_index_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__get_impl(port, ptr, rust_vec_len, data_len),
         13 => wire__crate__api__get_all_keys_impl(port, ptr, rust_vec_len, data_len),
         15 => wire__crate__api__length_impl(port, ptr, rust_vec_len, data_len),
         16 => wire__crate__api__list_indexes_impl(port, ptr, rust_vec_len, data_len),
@@ -1015,8 +1007,10 @@ fn pde_ffi_dispatcher_sync_impl(
     match func_id {
         1 => wire__crate__api__box_exists_impl(ptr, rust_vec_len, data_len),
         3 => wire__crate__api__close_box_impl(ptr, rust_vec_len, data_len),
+        5 => wire__crate__api__contains_key_impl(ptr, rust_vec_len, data_len),
         9 => wire__crate__api__delete_box_impl(ptr, rust_vec_len, data_len),
         11 => wire__crate__api__encrypt_box_impl(ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__get_impl(ptr, rust_vec_len, data_len),
         14 => wire__crate__api__init_db_impl(ptr, rust_vec_len, data_len),
         17 => wire__crate__api__open_box_impl(ptr, rust_vec_len, data_len),
         21 => wire__crate__api__unwatch_box_impl(ptr, rust_vec_len, data_len),
