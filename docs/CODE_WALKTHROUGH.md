@@ -217,11 +217,14 @@ Box.query
   -> one FRB call
   -> api::scan_query
   -> query::decode_query once
-  -> index::candidate_keys(filter)
+  -> open one redb ReadTransaction snapshot
+  -> index::candidate_keys(read, filter)
+       -> index definitions + entry ranges from the same snapshot
        -> Some(keys) for usable equality/range index candidates
        -> None when scan is required
+  -> fallback key enumeration from the same snapshot when needed
   -> sort + deduplicate candidate keys
-  -> db::get current primary payload for each candidate
+  -> primary payload reads from the same snapshot
   -> decrypt if required
   -> query::matches_record evaluates complete original predicate
   -> deterministic key ordering
@@ -229,7 +232,7 @@ Box.query
   -> one FRB response
 ```
 
-The planner never treats persisted index membership as final truth. Every candidate is re-read from committed primary data and re-evaluated with the complete original predicate.
+The planner never treats persisted index membership as final truth. Every candidate is re-read from committed primary data and re-evaluated with the complete original predicate. Candidate discovery and primary-record reads now share one redb read transaction, so a single query observes one consistent redb snapshot instead of composing several independently opened read snapshots.
 
 ## 13. Scan/index equivalence gate
 
@@ -317,9 +320,9 @@ make example-windows
 
 The range-capable planner is now implemented with equivalence coverage. Next work should stay correctness-driven:
 
-1. improve persisted-index lookup efficiency without relying on raw MessagePack numeric byte ordering;
-2. consider a one-redb-read-transaction query execution path;
-3. add planner diagnostics/selection tests if they materially improve maintainability;
+1. keep the implemented bounded index-name range and single-read-transaction query snapshot as execution invariants;
+2. add planner diagnostics/selection tests if they materially improve maintainability;
+3. define/order-preserving scalar encoding only if scalar-level redb range seek is justified by benchmarks;
 4. define explicit `sortBy` semantics as a separate public API decision;
 5. add query/index benchmark scenarios only after execution semantics remain stable;
 6. keep encrypted persisted-index design, cross-commit native-size policy, and Dart 3.13 tree shaking as separate workstreams.

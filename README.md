@@ -106,7 +106,8 @@ Current native query behavior:
 - plaintext and encrypted native scans;
 - full-profile planner can narrow candidates through matching persisted scalar indexes for `equal`, `>`, `>=`, `<`, `<=`, and `between`;
 - multiple usable persisted indexes under an AND group may be intersected;
-- every candidate is still re-read and re-evaluated from primary committed data.
+- every candidate is still re-read and re-evaluated from primary data;
+- planner lookup, fallback key enumeration, and primary-record reads share one redb read transaction snapshot per native query.
 
 Legacy `Box.where(predicate)` remains available as a Dart-side linear scan, separate from the declarative native engine.
 
@@ -128,7 +129,7 @@ Persisted index definitions and entries live in redb and are maintained in the s
 
 Planner eligibility applies at the top level or recursively beneath `AND` groups when an index exists for the exact field. The planner deliberately does not narrow through `OR` groups. `notEqual`, `isNull`, and `isNotNull` remain scan-backed.
 
-For AND queries with several usable indexes, candidate key sets are intersected starting from the smallest set. The full original predicate is then re-evaluated against current primary data before deterministic ordering and pagination.
+For AND queries with several usable indexes, candidate key sets are intersected starting from the smallest set. The full original predicate is then re-evaluated against primary data before deterministic ordering and pagination. Candidate planning, fallback enumeration, and primary reads all use the same redb `ReadTransaction`, giving each native query a single consistent storage snapshot.
 
 Range planning is correctness-first. Persisted scalar components use MessagePack encoding, whose raw lexicographic byte order is not a general numeric order. Therefore current range matching decodes indexed scalar components and applies the same exact comparator as the query engine instead of treating MessagePack bytes as redb numeric range bounds. A faster range seek requires an order-preserving scalar encoding or equivalent proven ordering contract.
 
