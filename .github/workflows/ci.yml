@@ -68,6 +68,39 @@ jobs:
         working-directory: benchmark
         run: flutter analyze
 
+  package-readiness:
+    name: Package / docs + pub dry-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Verify self-contained native plugin layout
+        run: |
+          test ! -d rust_builder
+          test -f rust/Cargo.toml
+          test -d cargokit
+          test -f android/build.gradle
+          test -f ios/dxtr_box.podspec
+          test -f macos/dxtr_box.podspec
+          test -f linux/CMakeLists.txt
+          test -f windows/CMakeLists.txt
+          if grep -A30 '^dependencies:' pubspec.yaml | grep -q 'path:'; then
+            echo 'publishable dependencies must not use path sources' >&2
+            exit 1
+          fi
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Generate public API docs
+        run: dart doc --output build/doc
+      - name: Pub publication dry-run
+        run: dart pub publish --dry-run
+
   frb-bindings:
     name: FRB / generated bindings current
     runs-on: ubuntu-latest
