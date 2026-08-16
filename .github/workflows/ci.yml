@@ -160,9 +160,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout with comparison history
+      - name: Checkout exact candidate with comparison history
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
