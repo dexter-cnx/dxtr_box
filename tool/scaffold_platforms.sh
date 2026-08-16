@@ -12,13 +12,25 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 flutter pub get
 
-# Native build ownership lives exclusively in the checked-in Cargokit plugin.
-# Do not recreate root android/ios/macos/linux/windows plugin_ffi scaffolds: the
-# root package is the Dart-facing facade, while rust_builder/ owns native builds.
-if [[ ! -d "$root/rust_builder" ]]; then
-  echo "rust_builder/ is missing; restore the checked-in FRB/Cargokit integration" >&2
-  exit 1
-fi
+# Native build ownership now lives in the root package. Keep the checked-in
+# Cargokit integration and per-platform plugin files intact; this script only
+# validates that topology and refreshes FRB bindings from the Rust crate.
+required_paths=(
+  "$root/cargokit"
+  "$root/rust/Cargo.toml"
+  "$root/android/build.gradle"
+  "$root/ios/dxtr_box.podspec"
+  "$root/macos/dxtr_box.podspec"
+  "$root/linux/CMakeLists.txt"
+  "$root/windows/CMakeLists.txt"
+)
+
+for required_path in "${required_paths[@]}"; do
+  if [[ ! -e "$required_path" ]]; then
+    echo "missing root plugin integration: ${required_path#$root/}" >&2
+    exit 1
+  fi
+done
 
 # Refresh bindings from the real `crate::api` implementation in rust/src/api.rs.
 # FRB code generation should not need to re-run `integrate` for normal updates.
