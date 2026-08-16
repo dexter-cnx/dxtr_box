@@ -214,15 +214,19 @@ void _validateStagedPayload(Directory stagedPackage) {
 void _wireConsumerDependency(Directory consumer) {
   final pubspecFile = File('${consumer.path}/pubspec.yaml');
   final original = pubspecFile.readAsStringSync();
-  const anchor = 'dependencies:\n  flutter:';
-  if (!original.contains(anchor)) {
+  final anchor = RegExp(r'dependencies:\r?\n  flutter:');
+  if (!anchor.hasMatch(original)) {
     throw StateError(
       'generated consumer pubspec shape changed; dependency anchor not found',
     );
   }
+  final lineEnding = original.contains('\r\n') ? '\r\n' : '\n';
   final updated = original.replaceFirst(
     anchor,
-    'dependencies:\n  dxtr_box:\n    path: ../published-payload/dxtr_box\n  flutter:',
+    'dependencies:$lineEnding'
+    '  dxtr_box:$lineEnding'
+    '    path: ../published-payload/dxtr_box$lineEnding'
+    '  flutter:',
   );
   pubspecFile.writeAsStringSync(updated);
 }
