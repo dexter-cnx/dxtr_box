@@ -152,6 +152,8 @@ Ordered range candidates require numeric or string scalar bounds. `notEqual`, `i
 
 Nested dotted fields such as `profile.age` are eligible when a persisted index exists for that exact field path.
 
+Planner selection is a separate pure internal step in `rust/src/index.rs`. Candidate extraction determines what predicates are safe to index; selection matches those candidates to persisted definitions by exact field path. If several persisted indexes target the same field, the lexicographically smallest index name is chosen deterministically. Missing definitions are ignored, so an `AND` group may still narrow through the usable subset. An empty selection means native scan fallback. Unit coverage locks these choices independently from storage lookup.
+
 ## 9. Persisted index representation
 
 `rust/src/index.rs` stores:
@@ -320,11 +322,10 @@ make example-windows
 
 The range-capable planner is now implemented with equivalence coverage. Next work should stay correctness-driven:
 
-1. keep the implemented bounded index-name range and single-read-transaction query snapshot as execution invariants;
-2. add planner diagnostics/selection tests if they materially improve maintainability;
-3. define/order-preserving scalar encoding only if scalar-level redb range seek is justified by benchmarks;
-4. define explicit `sortBy` semantics as a separate public API decision;
-5. add query/index benchmark scenarios only after execution semantics remain stable;
+1. keep bounded index-name ranges, deterministic planner selection, and the single-read-transaction query snapshot as execution invariants;
+2. define explicit `sortBy` semantics as a separate public API decision;
+3. add focused query/index benchmark scenarios now that planner selection and execution semantics are stable;
+4. define an order-preserving scalar encoding only if scalar-level redb range seek is justified by benchmarks;
 6. keep encrypted persisted-index design, cross-commit native-size policy, and Dart 3.13 tree shaking as separate workstreams.
 
 ## 19. Bounded persisted-index iteration

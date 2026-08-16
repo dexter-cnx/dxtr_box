@@ -8,15 +8,15 @@ Target: Hive-simple Flutter ergonomics backed by redb, with durable storage outs
 
 The 1.0 claim is functional replacement for practical Hive/Hive CE local-database workloads, not source-level API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` remains a release gate.
 
-## Current snapshot — 0.3 single-snapshot query execution
+## Current snapshot — 0.3 planner selection hardening
 
-Main contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, and bounded index-name redb iteration. Current branch:
+Main contains the native query/index foundation, equality/range planning, nested indexes, AND intersection, bounded index-name redb iteration, and single-snapshot query execution. Current branch:
 
 ```text
-feature/0.3-query-read-transaction
+feature/0.3-planner-selection-tests
 ```
 
-refactors native query execution so planner lookup, fallback key enumeration, and primary reads share one redb `ReadTransaction`, without changing the public Dart API or FRB shape.
+hardens the internal planner by separating persisted-index selection from candidate extraction and adding direct deterministic selection/fallback tests, without changing the public Dart API or FRB shape.
 
 Current capabilities include:
 
@@ -291,9 +291,9 @@ The current range planner was additionally finalized through a temporary workflo
 
 1. Completed: bounded persisted-index lookup/drop cleanup by index-name range.
 2. Completed: one-redb-read-transaction query execution for planner/fallback/primary reads.
-3. Add planner diagnostics/selection tests only if useful for maintainability.
+3. Completed: deterministic pure planner-selection step with direct selection/fallback tests.
 4. Define an explicit public `sortBy` contract separately.
-5. Add query/index benchmark scenarios now that core execution semantics are stable.
+5. Add focused query/index benchmark scenarios now that planner and execution semantics are stable.
 6. Continue point-get/contains performance diagnosis independently.
 7. Keep encrypted-index design, cross-commit size policy, and Dart 3.13 tree shaking separate.
 
@@ -341,5 +341,5 @@ Refresh Hive Functional Parity Audit against the then-current Hive CE release an
 
 Important constraint: this is **not** scalar-order range seeking. MessagePack scalar components are still decoded and compared using the query engine comparator. Any future scalar-level seek requires an order-preserving encoding proven equivalent to query numeric/string semantics.
 
-The next architecture work is no longer read-transaction plumbing: one native query now observes one redb read snapshot across planner, fallback, and primary reads. Next candidates are planner diagnostics, an explicit sort contract, and benchmark scenarios; scalar-level redb seeks still require a separately proven order-preserving scalar encoding.
+The planner now also has a pure deterministic selection step with direct tests for exact-field matching, partial/multi-index AND behavior, duplicate-field choice, and fallback. Next candidates are an explicit sort contract and focused benchmark scenarios; scalar-level redb seeks still require a separately proven order-preserving scalar encoding.
 
