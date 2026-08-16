@@ -131,7 +131,8 @@ void main() {
   test(
     'rejects unsupported values before creating destination',
     () async {
-      final root = await Directory.systemTemp.createTemp('dxtr_hive_preflight_');
+      final root =
+          await Directory.systemTemp.createTemp('dxtr_hive_preflight_');
       final hiveRoot = Directory('${root.path}/hive')..createSync();
       final dxtrRoot = Directory('${root.path}/dxtr')..createSync();
       addTearDown(() async {
@@ -143,7 +144,10 @@ void main() {
 
       hive.Hive.init(hiveRoot.path);
       final sourceBox = await hive.Hive.openBox<dynamic>('unsupported');
-      await sourceBox.put('big', BigInt.parse('123456789012345678901234567890'));
+      await sourceBox.put(
+        'big',
+        BigInt.parse('123456789012345678901234567890'),
+      );
 
       await DxtrBox.init(path: dxtrRoot.path);
       await expectLater(
