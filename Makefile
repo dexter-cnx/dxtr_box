@@ -1,4 +1,4 @@
-.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
+.PHONY: help pub-get format format-check analyze test rust-fmt rust-clippy rust-test rust-test-profiles rust-check frb-generate native-build native-build-minimal native-build-encryption native-size-baseline native-size-stability native-test hive-ce-migration-test query-index-test query-sort-test process-crash benchmark-smoke benchmark-full benchmark-query-index diagnose-point-read preflight example-android example-linux example-windows example-macos example-ios
 
 FLUTTER ?= flutter
 CARGO ?= cargo
@@ -16,6 +16,7 @@ help:
 	@echo "  make preflight            Format check + analyze + Dart/Rust tests"
 	@echo "  make frb-generate         Refresh flutter_rust_bridge bindings"
 	@echo "  make native-test          Native FRB round-trip test"
+	@echo "  make hive-ce-migration-test Real Hive CE 2.19.3 migration fixtures"
 	@echo "  make query-index-test     Rust full-profile query/index integration test"
 	@echo "  make query-sort-test      Dart sort contract + Rust query sort integration tests"
 	@echo "  make native-build-minimal Build core CRUD/lifecycle/watch only"
@@ -33,11 +34,11 @@ pub-get:
 	$(FLUTTER) pub get
 
 format:
-	dart format lib test example benchmark/test
+	dart format lib test example benchmark/test tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
 format-check:
-	dart format --output=none --set-exit-if-changed lib test example benchmark/test
+	dart format --output=none --set-exit-if-changed lib test example benchmark/test tool/hive_ce_migration_fixture/test
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
 analyze: pub-get
@@ -82,7 +83,10 @@ native-size-stability:
 	DXTR_BOX_SIZE_RUNS=$(SIZE_STABILITY_RUNS) bash tool/native_size_stability.sh
 
 native-test: pub-get native-build
-	DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test test/native_integration_test.dart --reporter expanded
+	LD_LIBRARY_PATH="rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="rust/target/release:$$PATH" DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test test/native_integration_test.dart --reporter expanded
+
+hive-ce-migration-test: native-build
+	cd tool/hive_ce_migration_fixture && $(FLUTTER) pub get && LD_LIBRARY_PATH="../../rust/target/release:$${LD_LIBRARY_PATH:-}" DYLD_LIBRARY_PATH="../../rust/target/release:$${DYLD_LIBRARY_PATH:-}" PATH="../../rust/target/release:$$PATH" DXTR_BOX_NATIVE_TEST=1 $(FLUTTER) test --reporter expanded
 
 query-index-test:
 	$(CARGO) test --manifest-path rust/Cargo.toml --test query_index -- --nocapture

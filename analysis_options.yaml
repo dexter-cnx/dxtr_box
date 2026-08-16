@@ -8,6 +8,7 @@ analyzer:
     - macos/**
     - linux/**
     - benchmark/**
+    - tool/hive_ce_migration_fixture/**
     - rust_builder/cargokit/**
 include: package:flutter_lints/flutter.yaml
 

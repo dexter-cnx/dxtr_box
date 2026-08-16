@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.3 query/index planner / active development**. Public API and storage format are not stable yet.
+> Status: **0.3 query/index + migration / active development**. Public API and storage format are not stable yet.
 
 ## Compatibility
 
@@ -31,6 +31,7 @@ The minimum is verified in CI using Flutter 3.22.0 / Dart 3.4.0. Minimum SDK inc
 - MessagePack dynamic value encoding.
 - Per-box encryption with Argon2 + ChaCha20Poly1305.
 - Explicit transactional plaintext -> encrypted migration.
+- Explicit Hive CE -> dxtr_box migration without parsing `.hive` files.
 - Native cross-handle `watch()` fan-out.
 - Declarative native query execution with one FRB call per query.
 - Persisted secondary indexes with transactional maintenance and conservative index-backed planning.
@@ -70,6 +71,34 @@ await secure.close();
 ```
 
 Encrypted boxes require the same key on reopen. Plaintext boxes are never silently reinterpreted as encrypted. Plaintext-to-encrypted migration is explicit and transactional.
+
+## Hive CE migration
+
+The core package does **not** depend on Hive CE. Applications that need migration wrap an already-open Hive CE box with `HiveCeMigrationSource`, then migrate into a new dxtr_box destination:
+
+```dart
+final source = HiveCeMigrationSource(
+  name: hiveBox.name,
+  isOpen: () => hiveBox.isOpen,
+  keys: () => hiveBox.keys,
+  get: hiveBox.get,
+);
+
+final result = await migrateFromHiveCe(
+  source,
+  destinationName: 'settings_v2',
+  valueConverter: (value) {
+    if (value is MyLegacyModel) {
+      return value.toJson();
+    }
+    throw UnsupportedError('Unsupported ${value.runtimeType}');
+  },
+);
+```
+
+Migration preserves String keys, maps int keys to `@hive-int:<decimal>` by default, rejects converted-key collisions, preflights all converted values before destination creation, rejects an existing destination, and writes migrated entries through one `putAll` / one native redb write transaction. Encrypted Hive CE sources are opened by the application with Hive CE first; encrypted dxtr_box destinations use `destinationEncryptionKey`.
+
+Compatibility is validated against a separate Hive CE 2.19.3 fixture package so Hive CE cannot raise dxtr_box's Dart 3.4 / Flutter 3.22 minimum. See [`docs/HIVE_CE_MIGRATION_03.md`](docs/HIVE_CE_MIGRATION_03.md).
 
 ## Declarative query API
 
@@ -195,9 +224,13 @@ The root `Makefile` is the preferred entry point:
 ```bash
 make preflight
 make native-test
+make hive-ce-migration-test
 make query-index-test
+make query-sort-test
 make process-crash
 make benchmark-smoke
+make benchmark-query-index
+make diagnose-point-read
 make native-build-minimal
 make native-build-encryption
 make native-size-baseline
@@ -208,8 +241,9 @@ Additional targets cover FRB regeneration, larger local benchmarks, Rust-only ch
 
 ## Engineering docs
 
-- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB -> Rust -> redb, including range planner and multi-index intersection paths.
+- [Code walkthrough](docs/CODE_WALKTHROUGH.md) — Dart API -> codec -> FRB -> Rust -> redb, including query/index, sorting, diagnostics, and Hive CE migration.
 - [Query / Index 0.3 contract](docs/QUERY_INDEX_03.md) — query semantics, planner eligibility, equivalence rules, and persisted-index security.
+- [Hive CE migration 0.3](docs/HIVE_CE_MIGRATION_03.md) — source adapter, key/value conversion, failure behavior, and fixture validation.
 - [Project handoff](docs/PROJECT_HANDOFF.md) — current implementation state and sequencing.
 - [Testing strategy](docs/TESTING.md) — Dart/Rust test matrix, process-kill durability, benchmarks, profiles, and CI gates.
 - [Native feature profiles](docs/NATIVE_FEATURE_PROFILES.md) — minimal/encryption/full contracts.
@@ -220,13 +254,13 @@ Additional targets cover FRB regeneration, larger local benchmarks, Rust-only ch
 
 ## Test suite
 
-Coverage includes minimum-SDK and current Flutter checks, native lifecycle/watch semantics, FRB round trips, encryption/migration, process-kill durability, query AST behavior, scan/index equivalence, range/index equivalence, multi-index AND intersection, persisted-index mutation maintenance, encrypted index rejection, FRB drift detection, all three Rust profiles on Ubuntu/macOS/Windows, native-size reproducibility, and Android/iOS/macOS/Linux/Windows example compilation.
+Coverage includes minimum-SDK and current Flutter checks, native lifecycle/watch semantics, FRB round trips, encryption/migration, real Hive CE 2.19.3 migration fixtures, process-kill durability, query AST behavior, scan/index equivalence, range/index equivalence, multi-index AND intersection, deterministic sorting, persisted-index mutation maintenance, encrypted index rejection, FRB drift detection, all three Rust profiles on Ubuntu/macOS/Windows, native-size reproducibility, and Android/iOS/macOS/Linux/Windows example compilation.
 
 ## Roadmap
 
 ### 0.3.x — Query & migration
 
-Implemented foundation:
+Completed foundation:
 
 - declarative native query AST;
 - one-call native scan executor;
@@ -234,15 +268,23 @@ Implemented foundation:
 - transactional index maintenance;
 - encrypted-index safety restrictions;
 - equality and range index planner with scan/index equivalence coverage;
-- multi-index candidate intersection for AND groups.
+- multi-index candidate intersection for AND groups;
+- bounded index-name iteration;
+- one-redb-read-transaction query snapshot;
+- deterministic planner selection;
+- explicit deterministic `sortBy`;
+- query/index diagnostic benchmark matrix;
+- point-get/contains diagnosis;
+- explicit Hive CE migration path with Hive CE 2.19.3 fixtures.
 
-Next:
+Next: **0.3 closure audit**. The audit should verify documentation, CI/profile invariants, migration/query coverage, and branch/tool cleanup rather than expand feature scope.
 
-- improve persisted-index lookup efficiency without assuming raw MessagePack numeric byte ordering;
-- consider one-redb-read-transaction query execution;
-- explicit sort contract / `sortBy`;
-- query/index benchmark scenarios after semantics stabilize;
-- Hive CE migration design/implementation.
+Deferred beyond 0.3 closure unless required to fix a release blocker:
+
+- encrypted persisted indexes;
+- order-preserving persisted scalar encoding / true scalar-level redb range seeks;
+- controlled cross-commit binary-size regression thresholds;
+- Dart 3.13 recorded-use/native tree shaking.
 
 ### 0.4.x — Production hardening
 
@@ -268,7 +310,6 @@ MIT
 ### Persisted-index lookup optimization
 
 Index-backed queries bound redb iteration to the selected persisted index name rather than scanning unrelated `index_entries`. Range predicates still decode stored MessagePack scalars and use the query comparator; raw MessagePack byte order is not used as numeric order.
-
 
 ### Deterministic query sorting
 
