@@ -114,14 +114,17 @@ These are not blockers for 0.3 closure:
 - file-level crash-atomic Hive migration staging/promotion;
 - Web/IndexedDB support and 1.0 parity closure.
 
-## Final merge gate
+## Final merge evidence
 
-0.3 may be marked closed only when the closure PR itself has:
+PR #24 final implementation/documentation head: `93e69251d5f01d613c2cc3376a3c0c1bd03c87a1`.
 
-- [ ] current CI green on the final head;
-- [ ] Platform Builds green on the final head;
-- [ ] no unresolved review threads or request-changes reviews after Ready-for-review;
-- [x] no temporary workflows or helper workflow files in the final diff;
-- [x] no stale 0.3 roadmap entries that describe already-completed work as `Next`;
-- [ ] merged branch deleted after merge;
-- [ ] repository branch list verified clean after merge.
+- [x] CI #286 (`31933799866`) completed successfully on the final PR head.
+- [x] Platform Builds #196 (`31933799871`) completed successfully on the final PR head.
+- [x] PR #24 was Ready for review, mergeable, and had no unresolved review threads or request-changes reviews before merge.
+- [x] No temporary workflow or helper workflow file was present in the PR final diff.
+- [x] No stale 0.3 roadmap entry described completed work as `Next`.
+- [x] PR #24 was squash-merged as `ff84dc1c3dc879da3ed73f79a4358659a3ea189b`.
+- [x] `feature/0.3-closure-audit` was deleted after merge by transient branch-only cleanup workflow `31934090243`; that workflow was never merged to `main`.
+- [x] Repository branch API was rechecked after cleanup and returned only `main`.
+
+**0.3 query/index + Hive CE migration milestone: CLOSED.**
