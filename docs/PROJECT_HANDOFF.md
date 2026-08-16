@@ -24,8 +24,8 @@ Current milestone:
 
 ```text
 0.5 — Performance / Read-path Optimization
-PR 1 — read-path benchmark decomposition: evidence complete, ready to close
-PR 2 — single-key read optimization: next
+PR 1 — read-path benchmark decomposition: corrected evidence baseline complete
+PR 2 — single-key read optimization: next, boundary-first investigation
 ```
 
 Normative performance document:
@@ -133,25 +133,27 @@ Indexes narrow candidates only. They do not replace predicate re-evaluation and 
 
 Encrypted boxes can use scan queries but cannot create persisted plaintext-derived secondary indexes. Plaintext-to-encrypted migration is rejected while persisted index definitions exist. Reduced native profiles reject boxes containing persisted indexes because they cannot safely maintain derived state.
 
-## 0.5 Phase A — completed evidence baseline
+## 0.5 Phase A — corrected evidence baseline
 
 PR #33 introduces measurement-only decomposition. No production read behavior was optimized in PR 1.
 
-Successful evidence run:
+The first artifact-producing run (#7) exposed an important review issue: the Rust medium payload used a `Vec<u8>` body, which `rmp-serde` encoded as a 4,096-element sequence, while the public Dart workload used `DxtrCodec`'s tagged map with a 4,096-character string. That inflated native MessagePack validation and invalidated the original conclusion that validation dominated the medium read.
+
+The Rust harness was corrected to encode the same logical public wire shape. The superseding baseline is:
 
 ```text
-Read-path Benchmark #7
-run id:     31947858383
-artifact:   read-path-benchmark-linux-x64
-artifact id: 9263812713
-head:       ec0da61bdd53f70201a31f3c44fddfdfe325a3c8
+Read-path Benchmark #11
+run id:      31949461503
+artifact:    read-path-benchmark-linux-x64
+artifact id: 9264234449
+head:        09c407139b824c3cbb6ce12f3bd8dacf84d03285
 ```
 
 Runner/toolchain:
 
 ```text
-Ubuntu 24.04 / Linux x86_64
-AMD EPYC 9V74 / 4 logical CPUs
+Ubuntu hosted runner / Linux x86_64 / kernel 6.17.0-1022-azure
+Intel Xeon Platinum 8370C @ 2.80GHz / 4 logical CPUs
 Flutter 3.47.0
 Dart 3.13.0
 rustc 1.97.1
@@ -170,73 +172,73 @@ runner.txt
 cpu.txt
 ```
 
-The Makefile now fails if either JSONL file is missing. Rust output uses an absolute repository-root path so Cargo test working-directory behavior cannot silently place evidence under `rust/build/...`.
+The Makefile fails if either JSONL file is missing. Rust output uses an absolute repository-root path so Cargo test working-directory behavior cannot silently place evidence under `rust/build/...`.
 
-### Measured Rust facts from run #7
+### Measured Rust facts from corrected run #11
 
 Representative medians:
 
 ```text
 small payload
-  transaction create             0.112 us
-  transaction + table open       0.395 us
-  borrowed lookup hit            0.040 us
-  lookup + copy hit              0.059 us
-  MessagePack validation         0.314 us
-  full plaintext db_get hit      0.875 us
-  decrypt/authenticate           2.273 us
-  full encrypted db_get hit      3.176 us
+  transaction create             0.199 us
+  transaction + table open       0.492 us
+  borrowed lookup hit            0.100 us
+  lookup + copy hit              0.107 us
+  MessagePack validation         0.084 us
+  full plaintext db_get hit      0.742 us
+  decrypt/authenticate           1.700 us
+  full encrypted db_get hit      2.454 us
 
-medium payload (~4 KiB body)
-  transaction create             0.113 us
-  transaction + table open       0.387 us
-  borrowed lookup hit            0.106 us
-  lookup + copy hit              1.650 us
-  MessagePack validation        17.369 us
-  full plaintext db_get hit     19.633 us
-  decrypt/authenticate           5.878 us
-  full encrypted db_get hit     24.204 us
+medium payload (~4 KiB string body in public wire shape)
+  transaction create             0.200 us
+  transaction + table open       0.567 us
+  borrowed lookup hit            0.116 us
+  lookup + copy hit              0.191 us
+  MessagePack validation         0.211 us
+  full plaintext db_get hit      1.055 us
+  decrypt/authenticate           4.952 us
+  full encrypted db_get hit      6.056 us
 ```
 
-Misses and in-process `containsKey` remain roughly in the ~0.49–0.56 us region in this run because they avoid successful-payload validation/decode work.
+Medium in-process misses and `containsKey` remain around ~0.65 us.
 
-### Measured Dart/public-path facts from run #7
+### Measured Dart/public-path facts from corrected run #11
 
 Representative medians:
 
 ```text
 Dart DxtrCodec.decode
-  small                          8.868 us
-  medium                         5.908 us
+  small                         10.368 us
+  medium                         5.972 us
 
 native adapter plaintext get hit
-  small                        133.990 us
-  medium                        90.866 us
+  small                        132.822 us
+  medium                        90.470 us
 
 public Box.get plaintext hit
-  small                         98.852 us
-  medium                       107.654 us
+  small                        102.628 us
+  medium                       102.118 us
 
 native adapter contains hit
-  small                         76.946 us
-  medium                        74.524 us
+  small                         78.396 us
+  medium                        74.310 us
 
 public Box.containsKey hit
-  small                         75.272 us
-  medium                        81.616 us
+  small                         76.318 us
+  medium                        74.672 us
 ```
 
 The shared-runner Dart measurements are non-monotonic across adjacent layers in some cases, so they are diagnostic end-to-end baselines, not additive component timers.
 
 ### Evidence-based conclusion
 
-**Measured fact:** for medium successful native reads, `validate_message_pack` is the dominant directly isolated Rust component (~17.37 us of ~19.63 us full plaintext `db_get`). Copying is secondary (~1.65 us lookup+copy). Transaction creation/table open is sub-microsecond.
+**Measured fact:** corrected medium plaintext `db_get` is ~1.06 us in-process. Native MessagePack validation is only ~0.21 us, lookup+copy ~0.19 us, and transaction+table open ~0.57 us. The earlier ~17.37 us validation result is superseded and must not guide production work.
 
-**Inference:** the large gap between in-process Rust `db_*` and Dart native-adapter/public paths means the cross-runtime/native-adapter/async region is material. It is not a direct FRB-only measurement and must not be quoted as an exact FRB percentage.
+**Inference:** the large structural gap between in-process Rust (`db_get` ~1.06 us, `containsKey` ~0.65 us) and Dart native-adapter/public paths (~74–102 us) makes the cross-runtime/generated-FRB/Dart-async region the highest-priority end-to-end investigation. This is not a direct FRB-only measurement and must not be quoted as an exact FRB percentage.
 
 **Implemented optimization:** none in PR 1 by design.
 
-**Priority implication:** PR 2 should investigate successful-read native validation first, then avoidable copies. Long-lived read transactions/read sessions are not the first optimization target based on current evidence.
+**Priority implication:** PR 2 should first isolate the bridge/async/conversion region with a controlled diagnostic, then choose a production single-key optimization. Native validation/copy cleanup is secondary unless controlled end-to-end evidence shows otherwise. Long-lived read sessions are not the first target.
 
 ## PR 2 — next: single-key read optimization
 
@@ -244,21 +246,20 @@ PR 2 must be evidence-driven.
 
 Investigation order:
 
-1. Understand why every successful native read performs MessagePack validation.
-2. Determine whether validation work can be made cheaper, deduplicated safely, or restructured while retaining corruption/storage/codec guarantees.
-3. Inspect redb guard -> `Vec<u8>` -> plaintext/decrypt paths for avoidable allocations/copies.
-4. Preserve full encryption authentication.
-5. Preserve authoritative native reads and cross-process visibility.
-6. Do not introduce stale long-lived snapshots as a shortcut.
-7. If targeting bridge overhead, first create a controlled boundary diagnostic rather than subtracting unrelated harness medians.
-8. Record before/after evidence using the same methodology/environment where practical.
-
-A high validation cost does **not** by itself authorize removing validation.
+1. Preserve the corrected public-wire benchmark payload shape.
+2. Add a controlled diagnostic for generated FRB call overhead versus Dart async adapter/conversion work without leaving benchmark-only production API surface behind.
+3. Inspect generated FRB call mode, request/response conversion, async scheduling, and payload allocation/copy behavior.
+4. Select a production optimization only after the boundary diagnostic identifies an actionable source of cost.
+5. Keep native transaction/validation/copy cleanup as secondary work unless end-to-end evidence elevates it.
+6. Preserve full encryption authentication.
+7. Preserve authoritative native reads and cross-process visibility.
+8. Do not introduce stale long-lived snapshots as a shortcut.
+9. Record before/after evidence using the same methodology/environment where practical.
 
 ## Planned 0.5 sequence
 
 ```text
-PR 1 — read-path benchmark decomposition                         complete evidence baseline
+PR 1 — read-path benchmark decomposition                         corrected evidence baseline
 PR 2 — single-key read optimization                              next
 PR 3 — batch/multi-key read path
 PR 4 — read-session investigation / explicit session only if safe
