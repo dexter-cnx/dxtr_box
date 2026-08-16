@@ -55,8 +55,8 @@ jobs:
         run: flutter pub get
       - name: Check formatting
         run: |
-          dart format lib test example benchmark/test tool/hive_ce_migration_fixture/test
-          git diff --exit-code -- lib test example benchmark/test tool/hive_ce_migration_fixture/test
+          dart format lib test example benchmark/lib benchmark/test tool/hive_ce_migration_fixture/test
+          git diff --exit-code -- lib test example benchmark/lib benchmark/test tool/hive_ce_migration_fixture/test
       - name: Analyze
         run: flutter analyze
       - name: Test
@@ -139,9 +139,9 @@ jobs:
         run: git diff --exit-code -- lib/src/rust rust/src/frb_generated.rs
 
   native-linux:
-    name: Native / Linux FRB round trip
+    name: Native / Linux FRB + comparison gates
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -187,6 +187,28 @@ jobs:
           DXTR_BOX_BENCHMARK_OPS: '100'
           LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
         run: flutter test test/benchmark_smoke_test.dart --reporter expanded
+      - name: Broader local database correctness gate
+        working-directory: benchmark
+        env:
+          DXTR_BOX_COMPARISON: '1'
+          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
+        run: flutter test test/local_database_correctness_test.dart --reporter expanded
+      - name: Broader local database diagnostic smoke
+        working-directory: benchmark
+        env:
+          DXTR_BOX_COMPARISON_BENCHMARK: '1'
+          DXTR_BOX_COMPARISON_OPS: '100'
+          DXTR_BOX_COMPARISON_OUTPUT: build/comparison/local-database-comparison.jsonl
+          LD_LIBRARY_PATH: ${{ github.workspace }}/rust/target/release
+        run: flutter test test/local_database_benchmark_test.dart --reporter expanded
+      - name: Upload local database comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-database-comparison
+          path: benchmark/build/comparison/local-database-comparison.jsonl
+          if-no-files-found: warn
+          retention-days: 14
 
   native-size:
     name: Native size / Linux x64 policy
