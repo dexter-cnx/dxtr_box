@@ -1,17 +1,14 @@
 name: FRB Probe
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/frb_probe.yml
-      - tool/scaffold_platforms.sh
-      - flutter_rust_bridge.yaml
-      - rust/**
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: frb-probe-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   generate:
@@ -19,40 +16,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
           cache: true
           cache-workspaces: rust
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Install flutter_rust_bridge_codegen 2.8.0
+      - run: flutter pub get
+      - name: Install pinned flutter_rust_bridge_codegen 2.8.0
         run: cargo install flutter_rust_bridge_codegen --version 2.8.0 --locked
-
       - name: Generate platform scaffolds and FRB bindings
         run: bash tool/scaffold_platforms.sh
-
       - name: Capture generated diff
         shell: bash
         run: |
           git status --short | tee frb-generated-status.txt
           git add -N .
           git diff --binary > frb-generated.patch
-
-      - name: Upload generated output
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: frb-generated
           if-no-files-found: error
