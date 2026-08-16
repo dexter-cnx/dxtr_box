@@ -8,7 +8,7 @@ Target: Hive-simple Flutter ergonomics backed by redb, with durable storage outs
 
 The 1.0 claim is functional replacement for practical Hive/Hive CE local-database workloads, not source-level API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` remains a release gate.
 
-## Current snapshot — 0.4 Production Hardening active
+## Current snapshot — 0.4 Production Hardening complete
 
 Closed milestones:
 
@@ -18,8 +18,9 @@ Closed milestones:
 - PR #28 PH-02 self-contained package/publication hardening.
 - PR #29 PH-03 broader Flutter local-database correctness + diagnostic comparison.
 - PR #30 PH-04 published-payload consumer validation on Android/iOS/macOS/Linux/Windows.
+- PR #31 PH-05 public API + durable storage contract guard.
 
-**PH-05 public API + durable storage contract guard is active.** Package/build evidence is now strong enough that the next hardening gap is accidental compatibility drift: consumer-visible exports/signatures or the current `dxtr_box/1` on-disk format identity must not change silently inside ordinary refactors.
+**PH-01 through PH-05 are complete.** Package/build evidence and accidental compatibility-drift guards are now in place. The next development work returns to `docs/HIVE_FUNCTIONAL_PARITY.md` and the remaining practical Hive/Hive CE capability gaps required before 1.0.
 
 Normative 0.4 docs:
 
@@ -203,9 +204,11 @@ storage meta key: format_version
 storage format:   dxtr_box/1
 ```
 
-`test/public_api_contract_test.dart` compiles representative public constructors/enums/typedefs and typed `Box` method/getter tear-offs. It also invokes `tool/verify_public_storage_contract.dart`, which checks the exact package export set and storage format identity.
+`test/public_api_contract_test.dart` compiles representative public constructors/enums/typedefs and typed `Box`/`DxtrBox`/migration method signatures. It also invokes `tool/verify_public_storage_contract.dart`, which checks the exact package export set and storage format identity.
 
 A deliberate 0.x breaking API change is still allowed, but its contract test/verifier and migration guidance must change in the same reviewed PR. A storage-format change additionally requires explicit backward-read or migration behavior and compatibility evidence. PH-05 does **not** claim 1.0 stability.
+
+PH-05 completed in PR #31 with the contract passing both the minimum Flutter 3.22.0 / Dart 3.4.0 CI job and the normal platform/package gates.
 
 See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
 
@@ -272,9 +275,9 @@ Acceptance completed: four engines, benchmark-only comparison dependencies, corr
 
 Acceptance completed: staged package boundary, required-input/leakage validation, fresh public-API consumer, and green Android/iOS/macOS/Linux/Windows builds from the staged package rather than repository-relative source assumptions.
 
-### PH-05 — Public API + durable storage contract guard — active
+### PH-05 — Public API + durable storage contract guard — complete (PR #31)
 
-Acceptance:
+Acceptance completed:
 
 - package entrypoint export set is guarded explicitly;
 - representative public Dart API signatures compile under the normal test suite;
@@ -283,6 +286,10 @@ Acceptance:
 - storage-format changes require backward compatibility or migration evidence;
 - no claim of 1.0 stability is introduced;
 - README, handoff, walkthrough, and `PUBLIC_API_STORAGE_CONTRACT_04.md` agree.
+
+## Next development direction
+
+Return to `docs/HIVE_FUNCTIONAL_PARITY.md`. The remaining practical gaps, rather than a new hardening-number milestone, drive the next implementation sequence. Current high-value gaps include custom values/schema evolution, remaining primitive coverage, multi-isolate semantics, and Web/IndexedDB support.
 
 ## Deferred beyond current 0.4 slice
 
