@@ -1,0 +1,57 @@
+name: Temporary Planner Selection Finalize
+
+on:
+  push:
+    branches:
+      - feature/0.3-planner-selection-tests
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/0.3-planner-selection-tests
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Apply planner selection hardening
+        run: python3 tool/apply_planner_selection_tests.py
+
+      - name: Format Rust
+        working-directory: rust
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+
+      - name: Validate Rust profiles
+        working-directory: rust
+        run: |
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --no-default-features
+          cargo test --no-default-features --features encryption
+          cargo test --all-features
+
+      - name: Remove temporary tooling
+        run: |
+          rm tool/apply_planner_selection_tests.py
+          rm .github/workflows/planner_selection_temp.yml
+
+      - name: Commit finalized hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/src/index.rs rust/src/query.rs tool/apply_planner_selection_tests.py .github/workflows/planner_selection_temp.yml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "test: harden planner index selection policy"
+          git push origin HEAD:feature/0.3-planner-selection-tests
