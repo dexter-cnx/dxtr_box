@@ -3,12 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('fluent query builder', () {
-    test('compiles chained comparisons to the existing BoxQuery AST', () {
-      final query = BoxQueryBuilder.where('status')
-          .equals('active')
-          .and('profile.age')
-          .gte(18)
-          .build();
+    test('compiles comparisons to the existing BoxQuery AST', () {
+      var builder = BoxQueryBuilder.where('status').equals('active');
+      builder = builder.and('profile.age').gte(18);
+      final query = builder.build();
 
       final root = query.where as QueryGroup;
       expect(root.operator, QueryLogicalOperator.and);
@@ -38,10 +36,12 @@ void main() {
         BoxQueryBuilder.where('v').isNotNull().build(),
       ];
 
+      final operators = queries.map((query) {
+        return (query.where as QueryComparison).operator;
+      }).toList();
+
       expect(
-        queries
-            .map((query) => (query.where as QueryComparison).operator)
-            .toList(),
+        operators,
         <QueryOperator>[
           QueryOperator.equal,
           QueryOperator.notEqual,
@@ -56,14 +56,11 @@ void main() {
       );
     });
 
-    test('mixed AND/OR chains are explicitly left-associative', () {
-      final query = BoxQueryBuilder.where('a')
-          .equals(1)
-          .and('b')
-          .equals(2)
-          .or('c')
-          .equals(3)
-          .build();
+    test('mixed AND/OR chains are left-associative', () {
+      var builder = BoxQueryBuilder.where('a').equals(1);
+      builder = builder.and('b').equals(2);
+      builder = builder.or('c').equals(3);
+      final query = builder.build();
 
       final outer = query.where as QueryGroup;
       expect(outer.operator, QueryLogicalOperator.or);
@@ -76,16 +73,13 @@ void main() {
     });
 
     test('supports explicit nested groups', () {
-      final query = BoxQueryBuilder.where('status')
-          .equals('active')
-          .andGroup(
-            (group) => group
-                .where('profile.age')
-                .gte(18)
-                .or('role')
-                .equals('admin'),
-          )
-          .build();
+      var builder = BoxQueryBuilder.where('status').equals('active');
+      builder = builder.andGroup((group) {
+        var nested = group.where('profile.age').gte(18);
+        nested = nested.or('role').equals('admin');
+        return nested;
+      });
+      final query = builder.build();
 
       final outer = query.where as QueryGroup;
       expect(outer.operator, QueryLogicalOperator.and);
@@ -105,11 +99,9 @@ void main() {
     });
 
     test('fluent and manual forms are structurally equivalent', () {
-      final fluent = BoxQueryBuilder.where('status')
-          .equals('active')
-          .and('age')
-          .gte(18)
-          .build();
+      var fluentBuilder = BoxQueryBuilder.where('status').equals('active');
+      fluentBuilder = fluentBuilder.and('age').gte(18);
+      final fluent = fluentBuilder.build();
 
       final manual = BoxQuery(
         where: QueryGroup.and(<QueryFilter>[
