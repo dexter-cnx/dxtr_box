@@ -59,9 +59,9 @@ Required properties:
 
 The equality token intentionally leaks equality classes/frequency for repeated indexed values. Index definitions expose index/field names; derived entries expose candidate record identifiers and approximate indexed cardinality. Plaintext scalar values and semantic value ordering are not intentionally persisted.
 
-## PR3 encrypted range decision
+## Accepted encrypted range decision
 
-PR3 makes the encrypted ordered/range policy explicit: **encrypted range predicates remain scan-backed in 0.6**.
+PR3 made the encrypted ordered/range policy explicit: **encrypted range predicates remain scan-backed in 0.6**.
 
 This applies to:
 
@@ -96,7 +96,7 @@ An attacker who obtains the database file may infer from encrypted equality-inde
 - approximate frequency/cardinality;
 - index presence for values according to index semantics.
 
-The persisted equality token does not provide meaningful semantic ordering. Because encrypted range execution remains scan-backed, PR3 does not add a persisted order-leakage channel.
+The persisted equality token does not provide meaningful semantic ordering. Because encrypted range execution remains scan-backed, 0.6 does not add a persisted order-leakage channel.
 
 Mutation correctness must prevent stale derived entries from surviving committed writes. Crash/reopen and lifecycle tests remain hard gates.
 
@@ -104,7 +104,7 @@ Mutation correctness must prevent stale derived entries from surviving committed
 
 ### PR1 — threat model + safe-default regression guard + milestone/product docs
 
-Completed.
+Completed and merged as PR #39.
 
 ### PR2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence
 
@@ -114,11 +114,11 @@ PR2 delivered keyed BLAKE2b equality tokens, transactional encrypted index maint
 
 ### PR3 — encrypted range/index decision
 
-Current PR.
+Completed and merged as PR #42.
 
 Accepted outcome: retain scan-backed encrypted ordered/range execution. No order-preserving encrypted representation is added in 0.6.
 
-PR3 regression coverage locks:
+Regression coverage locks:
 
 - scan-equivalent results for all five ordered/range operators before and after encrypted index creation;
 - mixed equality + range `AND` semantics;
@@ -128,7 +128,9 @@ PR3 regression coverage locks:
 
 Final milestone PR.
 
-Close only reliability/API/interoperability gaps that independently strengthen Dxtr_Box as a native local database, then run the 0.6 closure audit and full merge quality bar.
+PR4 intentionally adds no feature expansion unless the audit exposes a concrete correctness issue. Its job is to synchronize release-facing documentation, record the accepted contracts, and require the full merge quality bar as final evidence.
+
+Closure record: `docs/RELEASE_AUDIT_06.md`.
 
 Do not turn PR4 into a Hive/Hive CE parity pass.
 
@@ -152,20 +154,21 @@ make benchmark-query-index
 
 Hosted-runner timing is non-gating. Do not publish or infer timing numbers unless produced by the corresponding benchmark run with methodology/toolchain context.
 
-PR3's encrypted range decision is primarily a security/complexity decision, not a claim that scanning is faster.
+The encrypted range decision is primarily a security/complexity decision, not a claim that scanning is faster.
 
 ## Compatibility impact
 
-PR3 introduces:
+0.6 preserves:
 
-- no public Dart API change;
-- no FRB shape change;
-- no primary storage-format change;
-- no `dxtr_box/1` bump;
-- no fourth native profile;
-- no new cryptographic dependency.
+- the public Dart API shape except for changes explicitly introduced and guarded in earlier milestones;
+- FRB 2.8.0 generated-binding reproducibility;
+- primary storage format `dxtr_box/1`;
+- exactly three native profiles;
+- existing encrypted equality index representation after PR2;
+- scan-backed encrypted range semantics after PR3;
+- authoritative point-read and batch-read semantics from 0.5.
 
-Existing encrypted equality index entries remain unchanged. Existing encrypted range queries retain their scan-backed semantics.
+0.6 introduces no fourth profile, no order-revealing encrypted representation, no Dart whole-box cache, and no reusable stale read snapshot.
 
 ## Acceptance criteria
 
@@ -186,7 +189,10 @@ Existing encrypted equality index entries remain unchanged. Existing encrypted r
 13. query/index/migration/crash-reopen tests remain green;
 14. native-size policy remains green;
 15. staged Android/iOS/macOS/Linux/Windows consumers remain green;
-16. public docs consistently position Dxtr_Box as a native local database, not as a Hive/Hive CE replacement.
+16. public docs consistently position Dxtr_Box as a native local database, not as a Hive/Hive CE replacement;
+17. PR4 passes `CI / Merge Gate / full quality bar` before the milestone is marked closed.
+
+Detailed final matrix: `docs/RELEASE_AUDIT_06.md`.
 
 ## Product boundary
 
