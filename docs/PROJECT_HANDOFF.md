@@ -278,6 +278,118 @@ After each merged PR:
 - keep temporary CI/debug tooling out of final branches;
 - use Fast CI / affected gates during iteration and full merge validation before merge.
 
+## Post-0.6 product maturity roadmap — Datum-inspired ideas
+
+The following ideas are intentionally recorded as product-maturity work rather than 0.6 scope. They are inspired by useful architectural patterns seen in Datum, but Dxtr_Box should preserve its identity as a compact native embedded database rather than grow into an offline-sync framework.
+
+Priority order:
+
+### A. Reusable conformance / contract test kit — high priority
+
+Create a reusable storage-contract suite that can certify Dxtr_Box behavior across public facade, native runtime, migration paths, durability scenarios, and future implementation variants.
+
+Candidate coverage:
+
+- CRUD and bulk-operation semantics;
+- query/index semantic equivalence between scan and indexed execution;
+- index maintenance invariants;
+- transaction visibility and rollback behavior;
+- cross-handle watch behavior;
+- crash/reopen durability;
+- plaintext/encrypted parity where semantics are expected to match;
+- migration compatibility;
+- seeded fuzz/property scenarios where practical.
+
+This may initially remain an internal test harness. A public `dxtr_box_test` package should only be created if downstream adapter/plugin authors have a real need for it.
+
+### B. Optional typed schema metadata — 0.7+ candidate
+
+Investigate an optional strongly typed schema layer where one field/schema definition can drive multiple concerns instead of duplicating field metadata across APIs.
+
+Potential uses of one metadata source:
+
+```text
+typed query fields
+      +
+index definitions
+      +
+query validation
+      +
+migration/schema-change detection
+      +
+serializer/planner hints where justified
+```
+
+Constraints:
+
+- keep the existing dynamic box-style API first-class;
+- do not require application-level model code generation;
+- do not turn Dxtr_Box into an ORM;
+- prefer typed field references over stringly typed field names when users opt in;
+- introduce code generation only if later evidence shows that a non-codegen approach is inadequate.
+
+A conceptual future API may resemble `UserFields.age` rather than raw `'age'` strings, but no public syntax is committed yet.
+
+### C. Schema/config fingerprint + startup fast path — high ROI candidate
+
+Evaluate a small persisted fingerprint for schema/index configuration so unchanged definitions can skip unnecessary reconciliation, validation, or migration work at open time.
+
+Requirements before implementation:
+
+- fingerprint inputs must be deterministic and explicitly versioned;
+- a fingerprint match may skip redundant work but must never bypass durable-format compatibility checks or correctness validation that remains required;
+- changed definitions must fall back to authoritative reconciliation;
+- benchmark cold-open/reopen impact before claiming value.
+
+This is expected to be a relatively small optimization and should be considered before building a broader schema framework.
+
+### D. Capability-based internal architecture — investigate when multiple execution variants justify it
+
+Consider explicit internal capabilities such as query/index/transaction/watch support when they materially simplify planner/runtime branching or future test conformance.
+
+Do not add capability abstractions speculatively. Introduce them only when they replace meaningful runtime probing, condition scattering, or duplicated contract logic.
+
+### E. Benchmark scenarios must remain user-facing
+
+Continue evolving benchmarks around real operations and decisions rather than isolated microbenchmarks only.
+
+Prefer scenarios such as:
+
+- point read;
+- multi-key read;
+- scan vs indexed query;
+- encrypted query cost;
+- mutation cost with indexes;
+- reopen/startup cost;
+- migration cost;
+- crash/recovery behavior where measurable.
+
+Every benchmark result should state operation semantics, data size, runtime/platform, correctness checks, and what decision the benchmark is intended to support.
+
+### Explicitly not adopted from Datum
+
+Do not add these to the planned product scope without a separate product-direction decision:
+
+- built-in cloud/offline synchronization engine;
+- backend sync adapters;
+- pending-operation replication queues;
+- vector clocks;
+- CRDT collections/text;
+- generic local-first application framework behavior.
+
+Those features operate at a different architectural layer and would materially expand Dxtr_Box beyond its current embedded-database mission.
+
+Recommended sequencing after 0.6:
+
+```text
+1. conformance / contract test kit
+2. schema/config fingerprint + startup fast path
+3. optional typed schema/query metadata investigation
+4. capability abstractions only where runtime complexity proves the need
+```
+
+The first three items should be evaluated as maturity improvements, not as reasons to delay stable core behavior or inflate the 1.0 definition unnecessarily.
+
 ## Deferred beyond 0.6 unless explicitly reprioritized
 
 - Dart 3.13 recorded-use/native tree shaking;
