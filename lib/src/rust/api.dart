@@ -55,6 +55,10 @@ Uint8List? get_({required String boxName, required String key}) =>
 bool containsKey({required String boxName, required String key}) =>
     RustLib.instance.api.crateApiContainsKey(boxName: boxName, key: key);
 
+Future<List<NativeBatchRecord>> getAll(
+        {required String boxName, required List<String> keys}) =>
+    RustLib.instance.api.crateApiGetAll(boxName: boxName, keys: keys);
+
 Future<void> delete({required String boxName, required String key}) =>
     RustLib.instance.api.crateApiDelete(boxName: boxName, key: key);
 
@@ -91,6 +95,27 @@ Future<List<String>> getAllKeys({required String boxName}) =>
 
 Future<BigInt> length({required String boxName}) =>
     RustLib.instance.api.crateApiLength(boxName: boxName);
+
+class NativeBatchRecord {
+  final String key;
+  final Uint8List value;
+
+  const NativeBatchRecord({
+    required this.key,
+    required this.value,
+  });
+
+  @override
+  int get hashCode => key.hashCode ^ value.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NativeBatchRecord &&
+          runtimeType == other.runtimeType &&
+          key == other.key &&
+          value == other.value;
+}
 
 class NativeBoxEvent {
   final String boxName;

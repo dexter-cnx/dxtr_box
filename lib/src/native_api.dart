@@ -26,6 +26,13 @@ final class NativeQueryRecord {
   final Uint8List value;
 }
 
+final class NativeBatchRecord {
+  const NativeBatchRecord({required this.key, required this.value});
+
+  final String key;
+  final Uint8List value;
+}
+
 final class NativeIndexDefinition {
   const NativeIndexDefinition({required this.name, required this.field});
 
@@ -54,6 +61,10 @@ abstract interface class NativeDxtrApi {
   Future<int> length(String boxName);
 }
 
+abstract interface class NativeBatchReadApi {
+  Future<List<NativeBatchRecord>> getAll(String boxName, List<String> keys);
+}
+
 abstract interface class NativeQueryApi {
   Future<List<NativeQueryRecord>> scanQuery(
     String boxName,
@@ -77,6 +88,7 @@ abstract interface class NativeEncryptionMigrationApi {
 final class FrbNativeDxtrApi
     implements
         NativeDxtrApi,
+        NativeBatchReadApi,
         NativeQueryApi,
         NativeIndexApi,
         NativeEncryptionMigrationApi {
@@ -177,6 +189,23 @@ final class FrbNativeDxtrApi
   Future<bool> containsKey(String boxName, String key) async {
     await _ensureInitialized();
     return frb.containsKey(boxName: boxName, key: key);
+  }
+
+  @override
+  Future<List<NativeBatchRecord>> getAll(
+    String boxName,
+    List<String> keys,
+  ) async {
+    await _ensureInitialized();
+    final records = await frb.getAll(boxName: boxName, keys: keys);
+    return records
+        .map(
+          (record) => NativeBatchRecord(
+            key: record.key,
+            value: Uint8List.fromList(record.value),
+          ),
+        )
+        .toList(growable: false);
   }
 
   @override
