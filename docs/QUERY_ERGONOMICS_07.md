@@ -4,26 +4,123 @@
 
 Make common Dxtr_Box queries substantially easier to read and write without replacing the existing query engine, changing durable storage, or turning Dxtr_Box into an ORM/schema framework.
 
-The 0.7 direction is a Dart-side ergonomics layer that compiles to the existing `BoxQuery` AST and therefore reuses the current serialization, FRB, Rust planner, persisted-index, encryption, sorting, and pagination paths.
+The fluent API is an additive Dart-side authoring layer over the existing `BoxQuery` AST:
 
 ```text
 Fluent Dart API
       |
       v
-existing BoxQuery AST
+existing BoxQuery / QueryFilter AST
       |
       v
 existing serialization / FRB
       |
       v
-existing Rust query planner + indexes
+existing Rust planner + indexes + authoritative record checks
 ```
 
-The current `Box.query(BoxQuery)` API remains supported for advanced/dynamic composition. The fluent layer is additive and should not be a breaking change.
+`Box.query(BoxQuery)` remains first-class for advanced and dynamic composition.
 
-## Target usage
+## Milestone sequence
 
-Common query:
+```text
+PR1 — fluent where/comparison/AND/OR/grouping builder
+PR2 — orderBy/offset/limit/find ergonomics; efficient native-backed convenience terminals only
+PR3 — optional DxtrField<T> typed field metadata; no mandatory schema/codegen
+PR4 — README/examples/API equivalence/compatibility closure
+```
+
+## PR1 accepted public surface
+
+PR1 adds a fluent AST builder covering every existing comparison operator while keeping execution on the existing `Box.query` path:
+
+```dart
+final query = box
+    .where('status').equals('active')
+    .and('profile.age').gte(18)
+    .build();
+
+final users = await box.query(query);
+```
+
+The standalone entry point is also available when a box instance is not needed while composing the AST:
+
+```dart
+final query = BoxQueryBuilder
+    .where('score').between(50, 100)
+    .build();
+```
+
+Supported PR1 comparison methods map one-to-one onto the existing `QueryOperator` contract:
+
+```text
+equals        -> equal
+notEquals     -> notEqual
+gt            -> greaterThan
+gte           -> greaterThanOrEqual
+lt            -> lessThan
+lte           -> lessThanOrEqual
+between       -> between
+isNull        -> isNull
+isNotNull     -> isNotNull
+```
+
+## Boolean semantics
+
+Mixed `AND` / `OR` chains are intentionally **left-associative**.
+
+```dart
+BoxQueryBuilder
+    .where('a').equals(1)
+    .and('b').equals(2)
+    .or('c').equals(3)
+```
+
+means:
+
+```text
+(a == 1 AND b == 2) OR c == 3
+```
+
+No hidden SQL-style precedence is introduced.
+
+When grouping matters, use `andGroup` / `orGroup` explicitly:
+
+```dart
+final query = BoxQueryBuilder
+    .where('status').equals('active')
+    .andGroup(
+      (group) => group
+          .where('profile.age').gte(18)
+          .or('role').equals('admin'),
+    )
+    .build();
+```
+
+This compiles to the existing nested `QueryGroup` AST.
+
+## PR1 correctness contract
+
+PR1 is Dart-only query authoring ergonomics. It must not:
+
+- add Dart-side filtering or sorting;
+- duplicate Rust planner logic;
+- add a second query AST or wire representation;
+- change query serialization;
+- change index selection semantics;
+- change encrypted equality-index behavior;
+- change encrypted ordered/range scan-backed behavior;
+- change `dxtr_box/1`;
+- change native profiles or FRB bindings;
+- weaken authoritative primary-record predicate rechecks.
+
+Field validation remains inherited from `QueryComparison`, so malformed dotted paths fail under the same contract as direct manual AST construction.
+
+## PR2 target
+
+PR1 intentionally stops at `build()` plus existing `Box.query(...)` execution.
+
+PR2 owns the final common-query shape:
 
 ```dart
 final users = await box
@@ -34,95 +131,28 @@ final users = await box
     .find();
 ```
 
-Range + sort:
+PR2 scope:
 
-```dart
-final products = await box
-    .where('price').between(100, 500)
-    .and('category').equals('camera')
-    .orderBy('price', descending: true)
-    .find();
-```
+- `orderBy`, including descending and null-placement options compatible with `QuerySort`;
+- `offset`;
+- `limit`;
+- terminal `find()` bound to the originating `Box`;
+- evaluate `findFirst`, `exists`, and `count` only when backed by efficient native operations rather than full-result materialization across FRB.
 
-Nested field:
+## PR3 optional typed fields
 
-```dart
-final result = await box
-    .where('profile.country').equals('TH')
-    .and('profile.age').between(20, 40)
-    .find();
-```
-
-Grouped predicates should remain explicit rather than relying on operator-overloading magic:
-
-```dart
-final result = await box
-    .where('status').equals('active')
-    .andGroup((q) => q
-        .where('role').equals('admin')
-        .or('role').equals('moderator'))
-    .find();
-```
-
-## Proposed fluent surface
-
-Initial comparison helpers:
-
-```text
-where(field)
-equals(value)
-gt(value)
-gte(value)
-lt(value)
-lte(value)
-between(lower, upper)
-isNull()
-isNotNull()
-and(field)
-or(field)
-andGroup(...)
-orGroup(...)
-orderBy(field, descending: false)
-offset(n)
-limit(n)
-find()
-```
-
-Only expose predicates that map cleanly to the actual engine contract. Do not create Dart-only semantics that silently degrade to inefficient full-result filtering.
-
-## Optional typed fields
-
-Typed fields are desirable as an opt-in safety layer, while string field paths remain first-class:
+Typed fields remain opt-in and string paths remain first-class:
 
 ```dart
 const age = DxtrField<int>('age');
 const name = DxtrField<String>('name');
-
-final result = await box
-    .where(age).gte(18)
-    .and(name).equals('Dexter')
-    .find();
 ```
 
-This should provide compile-time value-type checking without requiring code generation or a mandatory schema.
-
-Nested paths must continue to work with either raw strings or typed field metadata.
-
-## Convenience operations
-
-Potential convenience APIs include:
-
-```text
-findFirst(...)
-exists(...)
-count(...)
-```
-
-`exists()` and `count()` should only become public convenience APIs when backed by efficient native query operations. Do not implement them as `query().isNotEmpty` or `query().length` if that would materialize unnecessary records across FRB.
+No mandatory schema, ORM, or code generation is allowed merely to support typed query metadata.
 
 ## Explicit non-goals
 
-Do not add in the first 0.7 pass:
+Do not add in 0.7 without a separate product decision:
 
 - SQL string parsing;
 - ORM/entity repositories;
@@ -132,88 +162,38 @@ Do not add in the first 0.7 pass:
 - a second native query engine;
 - a second wire/query AST;
 - Dart-side post-filtering that bypasses the native planner;
-- automatic index creation hidden inside fluent query calls.
+- automatic index creation hidden inside fluent query calls;
+- index-backed ORDER BY;
+- encrypted order-revealing persisted indexes.
 
-The API should stay simple, predictable, and visibly connected to the existing Dxtr_Box query semantics.
-
-## Compatibility and architecture rules
+## Compatibility rules
 
 0.7 query ergonomics must preserve:
 
 - `Box.query(BoxQuery)` as the canonical advanced query API;
 - the existing native query execution path;
-- one native query crossing per query;
+- one native query crossing per executed query;
 - authoritative primary-record re-read and full predicate re-evaluation;
-- encrypted equality-index behavior;
-- encrypted ordered/range scan-backed behavior;
 - deterministic sort-before-pagination semantics;
 - `dxtr_box/1` storage compatibility;
-- Dart >=3.4 / Flutter >=3.22 unless a separate compatibility decision changes them;
-- exactly `minimal | encryption | full` native profiles.
-
-The fluent builder should compile into the same AST used by `BoxQuery`, not introduce parallel semantics.
-
-## Recommended four-PR sequence
-
-### PR1 — fluent predicates
-
-- `box.where(...)` entry point;
-- comparison helpers;
-- `and` / `or` composition;
-- grouped predicates;
-- AST equivalence tests against direct `BoxQuery` construction.
-
-### PR2 — result/sort/pagination ergonomics
-
-- `orderBy`;
-- `offset`;
-- `limit`;
-- `find`;
-- evaluate `findFirst`, `exists`, and `count` only where implementation remains efficient and native-backed.
-
-### PR3 — optional typed fields
-
-- `DxtrField<T>` or equivalent lightweight typed metadata;
-- nested field support;
-- compile-time type safety tests;
-- no mandatory code generation.
-
-### PR4 — docs/examples/compatibility closure
-
-- README examples centered on fluent queries;
-- code walkthrough and API documentation;
-- old/new API equivalence coverage;
-- compatibility audit and full merge quality bar.
+- Dart >= 3.4 / Flutter >= 3.22;
+- exactly `minimal | encryption | full` native profiles;
+- FRB 2.8.0 and redb 2.1.0 unless separately reprioritized.
 
 ## Acceptance criteria
 
-0.7 is successful when common queries are shorter and more readable while preserving a single query model internally.
+0.7 succeeds when common queries are shorter and more readable while preserving one query model internally.
 
-Specifically:
+PR1 specifically requires:
 
-1. common filtering can start with `box.where(...)`;
-2. fluent queries compile to the existing `BoxQuery` AST;
-3. direct `Box.query(BoxQuery)` remains supported;
-4. fluent and direct forms produce equivalent query semantics;
-5. nested fields remain supported;
-6. grouping has explicit precedence semantics;
-7. sort/offset/limit preserve current engine ordering rules;
-8. no implicit Dart-side materialization/filtering is introduced;
-9. optional typed fields do not require a schema framework;
-10. no storage-format, native-profile, encryption, or query-planner regression is introduced.
+1. fluent filtering can start with `box.where(...)` or `BoxQueryBuilder.where(...)`;
+2. every existing comparison operator has a fluent equivalent;
+3. AND/OR chaining has documented deterministic precedence;
+4. explicit nested grouping is supported;
+5. fluent queries compile to the existing `BoxQuery` AST;
+6. direct `Box.query(BoxQuery)` remains supported;
+7. nested field validation remains unchanged;
+8. AST-equivalence tests cover fluent versus direct construction;
+9. no Rust/FRB/storage-format/native-profile change is introduced.
 
-## Product outcome
-
-The intended public feel is:
-
-```dart
-final adults = await users
-    .where('active').equals(true)
-    .and('age').gte(18)
-    .orderBy('name')
-    .find();
-```
-
-while advanced code can still construct and reuse `BoxQuery` directly.
-
-This keeps Dxtr_Box a compact native local database with box-style ergonomics rather than expanding it into a full ORM or application framework.
+The intended 0.7 outcome is a compact native local database with easier box-style query ergonomics, not a larger ORM or application framework.
