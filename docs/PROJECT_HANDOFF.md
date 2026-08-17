@@ -175,13 +175,12 @@ A native integration regression guard requires encrypted index creation to stay 
 
 ```text
 PR 1 — threat model + safe-default regression guard + milestone/product docs
-PR 2 — encrypted equality index implementation, only if representation is accepted
-PR 3 — plaintext planner/range/index polish + measured benchmark evidence
-PR 4 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
-PR 5 — compatibility cleanup + 0.6 closure audit
+PR 2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence
+PR 3 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
+PR 4 — compatibility cleanup + 0.6 closure audit
 ```
 
-Small focused PRs are preferred. Do not combine all runtime changes into one review surface.
+The former PR2 and PR3 are intentionally combined. They share the same query/index execution surface and benchmark evidence, so one focused runtime PR is preferable to splitting closely coupled changes across two review cycles.
 
 ## 0.6 performance policy
 
