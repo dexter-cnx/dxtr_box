@@ -18,6 +18,7 @@ The intended product identity stays compact:
 - declarative native query engine;
 - persisted secondary indexes;
 - Argon2 + ChaCha20Poly1305 encryption;
+- encrypted equality-index narrowing with keyed tokens under `full`;
 - transactional bulk operations and index maintenance;
 - native cross-handle watch events;
 - crash/reopen durability coverage;
@@ -41,17 +42,24 @@ Current milestone:
 
 # 0.6 — Query / Index + Encryption Hardening
 
-0.6 intentionally combines query/index polish and encryption hardening instead of creating two broad milestones.
-
 Normative 0.6 document: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+
+PR state:
+
+```text
+PR 1 — threat model + safe-default regression guard + milestone/product docs: merged (#39)
+PR 2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence: active (#40)
+PR 3 — encrypted range/index decision: next
+PR 4 — core reliability/API closure + 0.6 audit: final
+```
 
 Bounded scope:
 
 1. query/index production polish;
 2. encrypted query/index security and implementation decisions;
-3. compatibility/migration improvements only when they materially improve adoption without changing the product direction.
+3. core reliability/API/interoperability improvements only when they independently strengthen the product.
 
-Explicitly out of scope unless separately prioritized: ORM/code generation, cloud sync/replication, general schema framework, reactive-query redesign, and unrelated product expansion.
+Explicitly out of scope unless separately prioritized: ORM/code generation, cloud sync/replication, general schema framework, reactive-query redesign, Hive/Hive CE feature parity, and unrelated product expansion.
 
 ## Stable package/runtime contract
 
@@ -82,8 +90,10 @@ Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly pu
 - Explicit compact and plaintext-to-encrypted migration.
 - Process crash/reopen durability coverage.
 - Declarative `Box.query(BoxQuery)` with one FRB call per query.
-- Persisted named scalar indexes under `full` for plaintext boxes.
-- Equality/range candidate narrowing, nested indexes, AND intersection.
+- Persisted named scalar indexes under `full`.
+- Plaintext equality/range candidate narrowing, nested indexes, AND intersection.
+- Encrypted equality candidate narrowing using deterministic keyed BLAKE2b MAC tokens.
+- Encrypted ordered/range predicates remain authoritative scan-backed.
 - One redb read snapshot per native query.
 - Deterministic semantic sorting before pagination.
 - Optional Hive CE 2.19.3 migration fixtures/tooling.
@@ -93,7 +103,7 @@ Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly pu
 - Fresh staged-payload Android/iOS/macOS/Linux/Windows consumer builds.
 - Public export and durable-format compatibility guards.
 - Change-aware Fast CI plus full merge validation.
-- Machine-readable read-path and comparison benchmark evidence.
+- Machine-readable read-path/comparison/query-index benchmark harnesses.
 
 ## Hard correctness invariants
 
@@ -101,7 +111,9 @@ Primary `data` is authoritative; persisted indexes are derived state. Mutations 
 
 `Box.get`, `Box.containsKey`, and `Box.getAll` remain authoritative native reads. Do not substitute Dart key metadata, a Dart whole-box cache, or an implicit long-lived read snapshot; those weaken cross-handle/cross-process freshness.
 
-Encrypted reads retain full AEAD authentication. Every query result, including future encrypted-index candidates, must resolve through the authoritative primary record and complete decrypt/authenticate plus predicate re-evaluation before returning to Dart.
+Encrypted reads retain full AEAD authentication. Every encrypted-index candidate must resolve through the authoritative encrypted primary record and complete decrypt/authenticate plus full predicate re-evaluation before returning to Dart.
+
+Encrypted index entries must not contain raw plaintext scalar bytes. Equality tokens intentionally leak equality classes/frequency and are domain-separated by index name/field; that leakage is documented in `docs/QUERY_INDEX_ENCRYPTION_06.md`.
 
 `dxtr_box/1` remains readable. A storage-format change requires deliberate compatibility/migration evidence, not just a marker update.
 
@@ -130,9 +142,9 @@ Batch reads remain asynchronous and use one redb snapshot/table open for the req
 
 Do not regress these paths opportunistically during 0.6.
 
-## Query/index baseline entering 0.6
+## Query/index baseline and PR2 behavior
 
-Plaintext indexes currently provide:
+Plaintext indexes provide:
 
 - named scalar index definitions;
 - exact dotted-field matching;
@@ -144,32 +156,52 @@ Plaintext indexes currently provide:
 
 Persisted indexes narrow WHERE candidates only. They do not currently satisfy ORDER BY, and raw MessagePack bytes are not treated as semantic numeric order.
 
-## Encrypted-index safe default
-
-Encrypted boxes currently execute query scans but reject persisted index creation in Rust:
+PR2 adds encrypted persisted-index support for equality narrowing only:
 
 ```text
-persisted indexes are not yet supported for encrypted boxes; native scan queries remain available
+encrypted equality query
+  -> query planner selects matching field index
+  -> query scalar canonicalization
+  -> BLAKE2b keyed MAC token, domain-separated by index name + field
+  -> exact token candidate lookup
+  -> authoritative encrypted primary read
+  -> ChaCha20Poly1305 authenticate/decrypt
+  -> full predicate re-evaluation
+  -> sort / offset / limit
 ```
 
-0.6 begins by turning that limitation into an explicit security contract rather than immediately removing it.
+Encrypted `>`, `>=`, `<`, `<=`, and `between` predicates do not use keyed tokens as fake ordering. They fall back to authoritative scan.
 
-The repository must not persist plaintext scalar index bytes for encrypted boxes simply to recover plaintext-index performance.
+Index create/backfill and put/putAll/delete/deleteAll maintenance remain transactional with primary data.
 
-Threat-model questions that must be answered before encrypted indexes ship include leakage of:
+## PR2 validation state
 
-- indexed field names;
-- record identifiers;
-- equality classes / repeated values;
-- ordering;
-- cardinality/frequency;
-- null/missing state.
+Latest validated implementation head before docs sync:
 
-Preferred first production target, if justified: equality-only keyed deterministic tokens with domain separation and full primary decrypt/authenticate + predicate recheck. Frequency/equality leakage must still be documented.
+```text
+commit: 5346c1176b2753cea9fc248b60055215041815c9
+CI:     32069766813 — success
+```
 
-Encrypted range indexing is optional. If an acceptable representation requires excessive order leakage or complexity, encrypted range queries remain scan-only in 0.6.
+That Draft run passed Fast CI, Dart tests, three Rust profiles, native integration, storage/query regression, FRB drift, minimum SDK, native-size policy, all five platform consumers, benchmark smoke/comparison, and Merge Gate.
 
-A native integration regression guard requires encrypted index creation to stay blocked until that contract changes intentionally, while encrypted scan queries remain functional.
+Native-size evidence after reusing the BLAKE2 implementation already present through Argon2:
+
+```text
+full:       2,385,720 -> 2,416,152 bytes   +30,432 / +1.276%   PASS
+minimal:    marginal change
+ encryption: marginal change
+```
+
+An earlier BLAKE3 implementation exceeded the native-size budget and was removed. Do not reintroduce a second hash dependency without evidence that the size cost is justified.
+
+The query/index benchmark harness now includes plaintext scan/index scenarios plus encrypted equality scan/index scenarios. It remains diagnostic-only:
+
+```bash
+make benchmark-query-index
+```
+
+Do not invent timing numbers when the harness has not been executed in the current environment.
 
 ## 0.6 implementation sequence
 
@@ -177,10 +209,10 @@ A native integration regression guard requires encrypted index creation to stay 
 PR 1 — threat model + safe-default regression guard + milestone/product docs
 PR 2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence
 PR 3 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
-PR 4 — compatibility cleanup + 0.6 closure audit
+PR 4 — core reliability/API closure + 0.6 audit
 ```
 
-The former PR2 and PR3 are intentionally combined. They share the same query/index execution surface and benchmark evidence, so one focused runtime PR is preferable to splitting closely coupled changes across two review cycles.
+PR4 is not a Hive/Hive CE parity pass. Compatibility work enters only when independently valuable to Dxtr_Box.
 
 ## 0.6 performance policy
 
@@ -191,13 +223,13 @@ Measure where relevant:
 ```text
 plaintext scan vs indexed equality
 plaintext scan vs indexed range
-encrypted scan vs encrypted equality index (if implemented)
+encrypted scan vs encrypted equality index
 index create/backfill
 mutation overhead with indexes
 reopen/query
 ```
 
-Use representative 100 / 1,000 / 10,000 record sizes where CI cost permits. Every performance claim must record methodology and correctness validation.
+Use representative dataset sizes where CI/runtime cost permits. Every performance claim must record methodology and correctness validation.
 
 Do not trade security or durability for a benchmark win.
 
