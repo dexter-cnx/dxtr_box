@@ -22,18 +22,20 @@ Closed milestones:
 - PR #34 change-aware Fast CI / selective affected gates / full merge gate.
 - PR #33 0.5 PR1 read-path decomposition and corrected benchmark baseline.
 - PR #35 0.5 PR2 single-key cross-runtime read optimization merged.
+- PR #36 0.5 PR3 one-snapshot batch/multi-key reads merged.
 
 Current 0.5 sequence:
 
 ```text
-PR 1 / #33 — read-path decomposition + corrected evidence baseline   complete
+PR 1 / #33 — read-path decomposition + corrected evidence baseline   complete / merged
 PR 2 / #35 — sync FRB point-read boundary for get / containsKey      complete / merged
-PR 3 / #36 — one-snapshot batch / multi-key reads                     complete / final validation
-PR 4       — read-session investigation                               next
-PR 5       — comparison matrix + 0.5 closure audit                    planned
+PR 3 / #36 — one-snapshot batch / multi-key reads                     complete / merged
+PR 4 / #37 — read-session investigation                               decision complete / validation
+PR 5       — comparison matrix + 0.5 closure audit                    next
 ```
 
 Normative performance document: `docs/PERFORMANCE_READ_PATH_05.md`.
+Normative read-session decision: `docs/READ_SESSION_INVESTIGATION_05.md`.
 Normative CI document: `docs/CI_STRATEGY.md`.
 
 ## Stable package/runtime contract
@@ -82,7 +84,7 @@ Dart 3.13 recorded-use/native tree shaking remains deferred outside current 0.5 
 
 Primary `data` is authoritative; persisted indexes are derived state. Mutations keep primary and index changes in one redb write transaction and publish watch events only after commit.
 
-`Box.get`, `Box.containsKey`, and `Box.getAll` remain authoritative native reads. Do not substitute Dart key metadata or a Dart whole-box cache; that would weaken cross-handle/cross-process freshness.
+`Box.get`, `Box.containsKey`, and `Box.getAll` remain authoritative native reads. Do not substitute Dart key metadata, a Dart whole-box cache, or an implicit long-lived read snapshot; those would weaken cross-handle/cross-process freshness.
 
 Encrypted reads retain full AEAD authentication. Query/index/migration behavior and `dxtr_box/1` compatibility remain hard gates.
 
@@ -137,31 +139,17 @@ N keys
   -> Dart decode
 ```
 
-Semantics are explicit:
+Semantics:
 
-- result entries preserve input order for hits;
+- hits preserve requested order;
 - missing keys are omitted;
 - duplicate input keys produce duplicate result entries;
-- an empty key iterable returns an empty result without crossing native;
-- every key is validated before the native call;
-- production FRB batch dispatch stays asynchronous so large batches do not synchronously block the Dart/UI isolate.
+- empty input returns empty without crossing native;
+- every key is validated before native dispatch;
+- encrypted hits retain full AEAD authentication;
+- FRB batch dispatch remains asynchronous.
 
-`NativeBatchReadApi` is a capability seam rather than widening the base `NativeDxtrApi` contract for every injected test/fake adapter.
-
-## PR3 validation and evidence
-
-Read-path Benchmark #31, run `31978434993`, generated the pinned FRB 2.8.0 bindings and validated the implementation before committing `dc457be39c8055ea09b76dc7de47f377315875dc`.
-
-Validation passed:
-
-- `flutter analyze` with no issues;
-- Fast CI tests and public/storage contract guard;
-- Rust formatting, clippy, all three profile compile checks, and cheap Rust tests;
-- native Dart -> FRB -> Rust -> redb integration;
-- encrypted `getAll` order/duplicate/missing-key semantics;
-- batch benchmark matrix.
-
-Hosted Linux x64 medians from run #31:
+PR3 hosted evidence from Read-path Benchmark #31:
 
 | Keys | `getAll` batch | N independent `get` calls | Improvement |
 |---:|---:|---:|---:|
@@ -169,9 +157,24 @@ Hosted Linux x64 medians from run #31:
 | 100 | 814 us | 5,256 us | ~6.46x |
 | 1,000 | 3,729 us | 32,032 us | ~8.59x |
 
-These are diagnostic hosted-runner timings, not release-performance guarantees.
+PR #36 merged as `392bdf6e0af3741133eb4fb28b0638f4ecbd5a32` after full Merge Gate success.
 
-Temporary PR3 generation tooling has been removed before merge. `.github/workflows/read_path_benchmark.yml` is restored to read-only behavior and does not mutate source or auto-commit.
+## PR4 read-session decision
+
+PR4 investigated a reusable native/redb snapshot across multiple Dart calls. **Decision: do not add a production read-session API in 0.5.**
+
+Reasons:
+
+1. redb read transactions capture a fixed snapshot at `begin_read()`. A reusable session is therefore intentionally stale after later commits.
+2. Ordinary `get` / `containsKey` / `getAll` have established authoritative fresh-per-call semantics and must not silently inherit a stale snapshot.
+3. PR1 measured transaction + table-open at roughly 0.567 us for the representative medium plaintext workload; this is no longer the dominant point-read cost after PR2.
+4. PR3 already gives callers with known key sets one Dart/FRB crossing + one redb snapshot through `getAll`.
+5. A cross-call session would require explicit close/leak/box-close/compact/migration/multi-handle lifecycle semantics and a native registry or equivalent ownership model.
+6. The project is pinned to redb 2.1.0; upstream 2.1.1 specifically fixed a panic involving `compact()` while a read transaction is in progress. Intentionally lengthening read-transaction lifetimes is therefore a poor fit for the current pinned dependency.
+
+This is an evidence-backed rejection, not a permanent ban. Reconsider only for a concrete product requirement for coherent snapshot semantics across separate logical calls, with explicit stale-within-session behavior and new benchmark/lifecycle evidence.
+
+Detailed record: `docs/READ_SESSION_INVESTIGATION_05.md`.
 
 ## CI topology
 
@@ -199,22 +202,22 @@ rust-check
 
 Ready-for-review/non-draft work must still satisfy the full merge quality bar.
 
-## Next — PR4 read-session investigation
+## Next — PR5 comparison matrix + 0.5 closure audit
 
-PR4 is an investigation first, not an assumed implementation.
+PR5 should:
 
-Evaluate:
+- rerun the final comparison matrix with current 0.5 APIs where applicable;
+- preserve correctness-first interpretation of benchmark results;
+- verify Dart >=3.4 / Flutter >=3.22;
+- verify FRB 2.8.0 drift protection;
+- verify exactly three native profiles;
+- verify `dxtr_box/1` readability;
+- verify query/index/migration regressions;
+- verify native-size policy;
+- verify staged published consumers on Android/iOS/macOS/Linux/Windows;
+- close 0.5 only if all hard gates remain green.
 
-- redb transaction/snapshot lifetime;
-- writer interaction and blocking behavior;
-- stale-data semantics;
-- resource retention and memory/file-handle cost;
-- Flutter lifecycle and cancellation/disposal;
-- multi-handle behavior;
-- cross-process freshness expectations;
-- whether explicit read-session semantics provide meaningful benefit beyond `getAll`.
-
-Do not silently move ordinary `get` onto a long-lived stale snapshot. If reusable sessions are justified, prefer explicit session semantics. Document an evidence-backed rejection if a session API is not worth the complexity.
+Do not reopen read-session implementation inside PR5 unless new evidence changes the PR4 decision.
 
 ## Existing 0.4 policies that remain active
 
@@ -252,7 +255,7 @@ storage format:    dxtr_box/1
 12. Query/index/migration stays green — required at final merge gate.
 13. Native-size gate stays green — required at final merge gate.
 14. Five-platform staged consumers stay green — required at final merge gate.
-15. Read-session decision — pending PR4.
+15. Read-session decision — satisfied by PR #37 rejection record, pending PR merge.
 16. Comparison/closure audit — pending PR5.
 
 ## Working style
@@ -260,7 +263,7 @@ storage format:    dxtr_box/1
 Use small focused branches/PRs. After each merged PR:
 
 - update `docs/PROJECT_HANDOFF.md`;
-- update `docs/CODE_WALKTHROUGH.md`;
+- update `docs/CODE_WALKTHROUGH.md` when architecture/execution flow changes;
 - update performance evidence when relevant;
 - update README only for material public/developer behavior changes;
 - remove obsolete merged branches;

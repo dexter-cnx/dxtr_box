@@ -5,14 +5,14 @@
 0.5 is active.
 
 ```text
-PR 1 / #33 — read-path decomposition + corrected baseline      complete
+PR 1 / #33 — read-path decomposition + corrected baseline      complete / merged
 PR 2 / #35 — single-key FRB boundary optimization              complete / merged
-PR 3 / #36 — one-snapshot batch/multi-key read path            complete / final validation
-PR 4       — read-session investigation                        next
-PR 5       — comparison matrix + 0.5 closure audit             planned
+PR 3 / #36 — one-snapshot batch/multi-key read path            complete / merged
+PR 4 / #37 — read-session investigation                        decision complete / validation
+PR 5       — comparison matrix + 0.5 closure audit             next
 ```
 
-This document distinguishes measured fact, inference, implemented optimization, and deferred ideas. Hosted-runner timings are diagnostic, not release-performance guarantees.
+This document distinguishes measured fact, inference, implemented optimization, and rejected/deferred ideas. Hosted-runner timings are diagnostic, not release-performance guarantees.
 
 ## Stable constraints
 
@@ -25,9 +25,10 @@ native library = rust_lib_dxtr_box
 native profiles = minimal | encryption | full
 format_version = dxtr_box/1
 flutter_rust_bridge = 2.8.0
+redb = 2.1.0
 ```
 
-`Box.get`, `Box.containsKey`, and `Box.getAll` remain authoritative native reads. Do not introduce a Dart whole-box cache. Preserve encryption authentication, cross-process visibility, durability, query/index/migration behavior, and storage compatibility.
+`Box.get`, `Box.containsKey`, and `Box.getAll` remain authoritative native reads. Do not introduce a Dart whole-box cache or implicit long-lived stale snapshot. Preserve encryption authentication, cross-process visibility, durability, query/index/migration behavior, and storage compatibility.
 
 Dart 3.13 recorded-use/native tree shaking remains outside this milestone unless explicitly requested.
 
@@ -57,7 +58,7 @@ The Rust payload represents the same logical tagged-map wire shape produced by p
 
 ### PR2 boundary benchmark
 
-`test/read_path_boundary_benchmark_test.dart` separates generated FRB calls from the Future-based Dart adapter and uses existing sync FRB behavior as a control.
+`test/read_path_boundary_benchmark_test.dart` separates generated FRB calls from the Future-based Dart adapter.
 
 ### PR3 batch benchmark
 
@@ -134,9 +135,7 @@ PR2 demonstrated that the dominant point-read overhead was FRB `NormalTask` disp
 
 ## PR3 — one-snapshot batch reads
 
-### Product contract
-
-PR #36 introduces:
+PR #36 added:
 
 ```dart
 Future<List<MapEntry<String, dynamic>>> Box.getAll(
@@ -168,36 +167,7 @@ Semantics:
 - encrypted hits retain full AEAD authentication;
 - no cache or long-lived snapshot is introduced.
 
-The FRB batch entrypoint intentionally remains asynchronous. The single-key sync optimization must not be generalized to potentially large batches.
-
-### PR3 validation run
-
-Read-path Benchmark #31:
-
-```text
-run id: 31978434993
-implementation commit: dc457be39c8055ea09b76dc7de47f377315875dc
-Flutter: 3.47.0 stable
-Dart: 3.13.0
-Rust: 1.97.1
-runner: hosted Linux x64
-```
-
-The run generated checked-in FRB 2.8.0 bindings, then passed:
-
-- `make ci-fast`;
-- Flutter analyze with no issues;
-- Dart fast tests and public/storage contract guard;
-- rustfmt + clippy;
-- minimal/encryption/full compile checks;
-- cheap Rust tests;
-- `make native-test`;
-- encrypted `getAll` native integration semantics;
-- `make benchmark-batch-read`.
-
-### PR3 batch evidence
-
-Median hosted-runner timings:
+Read-path Benchmark #31, run `31978434993`:
 
 | Keys | `Box.getAll` | N independent `Box.get` | Relative improvement |
 |---:|---:|---:|---:|
@@ -213,23 +183,79 @@ Approximate latency reduction:
 1,000 keys   ~88%
 ```
 
-The larger improvement at 100/1,000 keys is consistent with amortizing Dart/FRB crossings and redb transaction/table-open overhead across the batch. This is an inference from the architecture plus measured result; it is not a claim that every workload will realize the same ratio.
+PR3 accepted efficient multi-key support because it is useful independently of benchmarking and amortizes both Dart/FRB crossing and redb setup while preserving storage/encryption semantics.
 
-### PR3 decision
-
-**Accepted:** efficient multi-key support is justified and implemented.
-
-The product API is useful independently of benchmarking and preserves authoritative storage/encryption semantics. It is preferable to requiring callers to issue N independent point reads when they already know the key set.
-
-Temporary source-generation workflow/script used during PR construction are removed before merge. Permanent benchmark CI remains read-only.
+PR #36 merged as `392bdf6e0af3741133eb4fb28b0638f4ecbd5a32` after the full quality bar passed.
 
 ## Remaining cost after PR3
 
 For point reads, public Future/adapter work remains more expensive than direct generated sync FRB calls. Do not make the public API synchronous merely to chase microbenchmarks.
 
-For known multi-key workloads, PR3 now amortizes the boundary and transaction setup cost. That reduces the motivation for implicit long-lived read snapshots.
+For known multi-key workloads, PR3 now amortizes boundary and transaction setup cost. That substantially reduces the motivation for cross-call snapshot reuse.
 
 Encrypted hits still carry mandatory authenticated-decryption cost and must not weaken authentication for performance.
+
+## PR4 — reusable read-session investigation
+
+Detailed record: `docs/READ_SESSION_INVESTIGATION_05.md`.
+
+### redb semantics
+
+A redb `ReadTransaction` captures the database snapshot at `begin_read()`. Data committed later is not visible through that transaction. Read transactions may coexist with writes.
+
+Therefore a reusable session has unavoidable semantics:
+
+```text
+session opens at T0
+writer commits at T1
+session reads again at T2
+=> T2 read still sees the T0 snapshot
+```
+
+That is coherent snapshot behavior, but it is intentionally stale relative to post-T0 commits. It cannot transparently replace ordinary `get`, `containsKey`, or `getAll` without weakening their established fresh-per-call behavior.
+
+### incremental performance case
+
+The representative PR1 native cost that a reusable transaction could avoid was approximately:
+
+```text
+transaction + table open   0.567 us
+```
+
+After PR2, generated FRB point reads are already low-single-digit microseconds, while the Future-based adapter path remains higher. A session spanning multiple Dart calls would still pay repeated Dart/FRB call overhead unless it changes the API shape to batch work.
+
+For known batches, PR3 already uses the optimal shape available to the current API contract: one public call, one FRB call, one redb snapshot, N reads.
+
+**Inference:** snapshot reuse across separate calls has little demonstrated performance value unless the caller specifically needs coherent multi-call snapshot semantics. No such product requirement exists in the current milestone.
+
+### lifecycle/resource case
+
+A production session API would add explicit semantics for:
+
+- session close/dispose and leaks;
+- box close while sessions exist;
+- compact while sessions exist;
+- plaintext-to-encrypted migration while sessions exist;
+- multiple Dart handles and isolates;
+- native session identity/registry ownership;
+- stale session IDs after teardown;
+- encrypted value authentication on every session read.
+
+This is meaningful lifecycle/API surface, not a transparent optimization.
+
+### pinned redb 2.1.0 consideration
+
+The project intentionally remains pinned to redb 2.1.0. The upstream redb 2.1.1 changelog specifically lists a fix for a panic when `compact()` is called while a read transaction is in progress.
+
+That known version-adjacent maintenance interaction is additional evidence against deliberately introducing long-lived read transactions while staying on 2.1.0. PR4 does **not** upgrade redb; dependency upgrades remain an independent compatibility/regression decision.
+
+### PR4 decision
+
+**Rejected for 0.5:** production reusable read-session API.
+
+No public API, FRB binding, native profile, dependency, or storage-format change is introduced.
+
+Reconsider only if a future consumer has a concrete need for one coherent snapshot across multiple logically separate operations and accepts an explicitly documented stale-within-session contract. Any reconsideration must bring new workload benchmarks plus close/leak/compact/migration lifecycle tests.
 
 ## Deferred/rejected shortcuts
 
@@ -241,28 +267,14 @@ Do not use:
 - skipped native validation without a correctness case;
 - storage-format changes solely for benchmark numbers;
 - long-lived implicit stale read snapshots;
+- hidden periodically refreshed snapshots;
 - public synchronous API changes solely for microbenchmark results.
 
-## Next — PR4 read-session investigation
+## Next — PR5 closure audit
 
-PR4 must evaluate rather than assume a reusable read-session API is beneficial.
+PR5 should rerun the comparison matrix with the final 0.5 APIs where appropriate, verify all hard compatibility/correctness gates, and decide whether 0.5 can close.
 
-Investigate:
-
-1. redb snapshot/transaction lifetime;
-2. writer interaction and blocking behavior;
-3. stale-data semantics;
-4. resource retention;
-5. Flutter lifecycle/disposal;
-6. multi-handle behavior;
-7. cross-process freshness;
-8. incremental benefit after `Box.getAll`.
-
-Do not silently change ordinary `get` to use a long-lived stale snapshot. If an explicit session cannot demonstrate a meaningful use case/performance win without unacceptable semantics or complexity, document the rejection and move to PR5.
-
-## PR5 closure audit
-
-PR5 should re-run the comparison matrix with the final 0.5 APIs where appropriate, verify all hard compatibility/correctness gates, and decide whether 0.5 can close.
+The read-session decision should remain closed unless new evidence materially changes PR4's conclusion.
 
 ## Performance evidence policy
 
