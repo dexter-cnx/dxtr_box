@@ -7,20 +7,24 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   final nativeEnabled = Platform.environment['DXTR_BOX_NATIVE_TEST'] == '1';
 
-  test('native getAll preserves order, duplicates, misses, and encryption',
-      () async {
-    final dir = await Directory.systemTemp.createTemp('dxtr_box_batch_native_');
-    addTearDown(() => dir.delete(recursive: true));
+  test(
+    'native getAll preserves order, duplicates, misses, and encryption',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('dxtr_box_batch_native_');
+      addTearDown(() => dir.delete(recursive: true));
 
-    await DxtrBox.init(path: dir.path);
-    final box = await DxtrBox.open('batch-native', encryptionKey: 'secret');
-    await box.putAll(<String, dynamic>{'a': 1, 'b': 2, 'c': 3});
+      await DxtrBox.init(path: dir.path);
+      final box = await DxtrBox.open('batch-native', encryptionKey: 'secret');
+      await box.putAll(<String, dynamic>{'a': 1, 'b': 2, 'c': 3});
 
-    final values = await box.getAll(<String>['b', 'missing', 'a', 'b']);
-    expect(values.map((entry) => entry.key), <String>['b', 'a', 'b']);
-    expect(values.map((entry) => entry.value), <int>[2, 1, 2]);
-    await box.close();
-  });
+      final values = await box.getAll(<String>['b', 'missing', 'a', 'b']);
+      expect(values.map((entry) => entry.key), <String>['b', 'a', 'b']);
+      expect(values.map((entry) => entry.value), <int>[2, 1, 2]);
+      await box.close();
+    },
+    skip:
+        nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
+  );
 
   test(
     'Dart -> FRB -> Rust -> redb round trip persists across reopen',
