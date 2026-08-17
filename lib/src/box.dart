@@ -135,18 +135,18 @@ final class Box {
   /// duplicate input keys produce duplicate result entries.
   Future<List<MapEntry<String, dynamic>>> getAll(Iterable<String> keys) async {
     _ensureOpen();
-    if (_api is! NativeBatchReadApi) {
-      throw UnsupportedError(
-        'The configured native engine does not support batch reads.',
-      );
-    }
-
     final requested = keys.toList(growable: false);
     for (final key in requested) {
       _validateKey(key);
     }
     if (requested.isEmpty) {
       return const <MapEntry<String, dynamic>>[];
+    }
+
+    if (_api is! NativeBatchReadApi) {
+      throw UnsupportedError(
+        'The configured native engine does not support batch reads.',
+      );
     }
 
     final records = await (_api as NativeBatchReadApi).getAll(name, requested);
