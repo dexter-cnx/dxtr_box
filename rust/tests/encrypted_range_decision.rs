@@ -1,6 +1,6 @@
 #![cfg(feature = "full")]
 
-use std::{io::Cursor, sync::Mutex};
+use std::sync::Mutex;
 
 use rmpv::Value;
 use rust_lib_dxtr_box::{close_box, create_index, init_db, open_box, put, scan_query};
@@ -164,12 +164,7 @@ fn encrypted_mixed_and_uses_equality_narrowing_without_changing_range_semantics(
             "filters",
             Value::Array(vec![
                 comparison("status", "equal", Value::from("active"), Value::Nil),
-                comparison(
-                    "age",
-                    "greaterThanOrEqual",
-                    Value::from(22_i64),
-                    Value::Nil,
-                ),
+                comparison("age", "greaterThanOrEqual", Value::from(22_i64), Value::Nil),
             ]),
         ),
     ]);
