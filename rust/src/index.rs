@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use redb::{Database, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction};
 
-use crate::{db::EncryptionState, query};
+use crate::{crypto, db::EncryptionState, index_token, query};
 
 const INDEX_DEFINITIONS: TableDefinition<&str, &str> = TableDefinition::new("index_definitions");
 const INDEX_ENTRIES: TableDefinition<&[u8], &[u8]> = TableDefinition::new("index_entries");
@@ -24,12 +24,6 @@ pub(crate) fn create(
     field: &str,
 ) -> Result<(), String> {
     query::validate_index_definition(name, field)?;
-    if encryption.is_encrypted() {
-        return Err(
-            "persisted indexes are not yet supported for encrypted boxes; native scan queries remain available"
-                .to_string(),
-        );
-    }
 
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
@@ -52,8 +46,11 @@ pub(crate) fn create(
         let mut derived = Vec::new();
         for item in data.iter().map_err(|e| e.to_string())? {
             let (record_key, value) = item.map_err(|e| e.to_string())?;
-            if let Some(scalar) = query::index_scalar_key(value.value(), field)? {
-                derived.push(entry_key(name, &scalar, record_key.value()));
+            let record_key = record_key.value();
+            let plaintext = decode_index_value(encryption, record_key, value.value())?;
+            if let Some(scalar) = query::index_scalar_key(&plaintext, field)? {
+                let persisted = persisted_scalar(encryption, name, field, &scalar)?;
+                derived.push(entry_key(name, &persisted, record_key));
             }
         }
         drop(data);
@@ -118,9 +115,13 @@ fn select_index_candidates(
 
 pub(crate) fn candidate_keys(
     read: &ReadTransaction,
+    encryption: &EncryptionState,
     filter: &query::Filter,
 ) -> Result<Option<Vec<String>>, String> {
-    let candidates = query::index_candidates(filter)?;
+    let mut candidates = query::index_candidates(filter)?;
+    if encryption.is_encrypted() {
+        candidates.retain(|candidate| matches!(candidate.op, query::CompareOp::Equal));
+    }
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -134,7 +135,7 @@ pub(crate) fn candidate_keys(
     let mut candidate_sets = Vec::<HashSet<String>>::with_capacity(selections.len());
     for (index_name, candidate) in selections {
         candidate_sets.push(
-            lookup_candidate(read, &index_name, &candidate)?
+            lookup_candidate(read, encryption, &index_name, &candidate)?
                 .into_iter()
                 .collect(),
         );
@@ -153,9 +154,18 @@ pub(crate) fn candidate_keys(
 
 fn lookup_candidate(
     read: &ReadTransaction,
+    encryption: &EncryptionState,
     index_name: &str,
     candidate: &query::IndexCandidate,
 ) -> Result<Vec<String>, String> {
+    if encryption.is_encrypted() {
+        if !matches!(candidate.op, query::CompareOp::Equal) {
+            return Err("encrypted persisted indexes support equality narrowing only".to_string());
+        }
+        let scalar = persisted_scalar(encryption, index_name, &candidate.field, &candidate.value)?;
+        return lookup_exact_scalar(read, index_name, &scalar);
+    }
+
     let prefix = index_prefix(index_name);
     let upper = prefix_successor(&prefix)
         .ok_or_else(|| "persisted index prefix has no lexicographic successor".to_string())?;
@@ -171,6 +181,26 @@ fn lookup_candidate(
             Ok(Some(key)) => Some(Ok(key)),
             Ok(None) => None,
             Err(error) => Some(Err(error)),
+        })
+        .collect()
+}
+
+fn lookup_exact_scalar(
+    read: &ReadTransaction,
+    index_name: &str,
+    scalar: &[u8],
+) -> Result<Vec<String>, String> {
+    let prefix = index_scalar_prefix(index_name, scalar);
+    let upper = prefix_successor(&prefix).ok_or_else(|| {
+        "persisted index scalar prefix has no lexicographic successor".to_string()
+    })?;
+    let entries = read.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
+    entries
+        .range(prefix.as_slice()..upper.as_slice())
+        .map_err(|e| e.to_string())?
+        .map(|item| {
+            let (key, _) = item.map_err(|e| e.to_string())?;
+            decode_record_key(key.value(), prefix.len())
         })
         .collect()
 }
@@ -257,6 +287,7 @@ pub(crate) fn drop_index(db: &Database, name: &str) -> Result<bool, String> {
 
 pub(crate) fn maintain_put(
     write: &WriteTransaction,
+    encryption: &EncryptionState,
     record_key: &str,
     old_value: Option<&[u8]>,
     new_value: &[u8],
@@ -266,19 +297,24 @@ pub(crate) fn maintain_put(
         return Ok(());
     }
 
+    let old_plaintext = old_value
+        .map(|value| decode_index_value(encryption, record_key, value))
+        .transpose()?;
     let mut entries = write.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     for (index_name, field) in definitions {
-        if let Some(old) = old_value {
+        if let Some(old) = old_plaintext.as_deref() {
             if let Some(scalar) = query::index_scalar_key(old, &field)? {
+                let persisted = persisted_scalar(encryption, &index_name, &field, &scalar)?;
                 entries
-                    .remove(entry_key(&index_name, &scalar, record_key).as_slice())
+                    .remove(entry_key(&index_name, &persisted, record_key).as_slice())
                     .map_err(|e| e.to_string())?;
             }
         }
         if let Some(scalar) = query::index_scalar_key(new_value, &field)? {
+            let persisted = persisted_scalar(encryption, &index_name, &field, &scalar)?;
             entries
                 .insert(
-                    entry_key(&index_name, &scalar, record_key).as_slice(),
+                    entry_key(&index_name, &persisted, record_key).as_slice(),
                     EMPTY_VALUE,
                 )
                 .map_err(|e| e.to_string())?;
@@ -289,6 +325,7 @@ pub(crate) fn maintain_put(
 
 pub(crate) fn maintain_delete(
     write: &WriteTransaction,
+    encryption: &EncryptionState,
     record_key: &str,
     old_value: &[u8],
 ) -> Result<(), String> {
@@ -297,11 +334,13 @@ pub(crate) fn maintain_delete(
         return Ok(());
     }
 
+    let old_plaintext = decode_index_value(encryption, record_key, old_value)?;
     let mut entries = write.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     for (index_name, field) in definitions {
-        if let Some(scalar) = query::index_scalar_key(old_value, &field)? {
+        if let Some(scalar) = query::index_scalar_key(&old_plaintext, &field)? {
+            let persisted = persisted_scalar(encryption, &index_name, &field, &scalar)?;
             entries
-                .remove(entry_key(&index_name, &scalar, record_key).as_slice())
+                .remove(entry_key(&index_name, &persisted, record_key).as_slice())
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -361,6 +400,34 @@ fn remove_index_entries(write: &WriteTransaction, index_name: &str) -> Result<()
     Ok(())
 }
 
+fn decode_index_value(
+    encryption: &EncryptionState,
+    record_key: &str,
+    stored: &[u8],
+) -> Result<Vec<u8>, String> {
+    match encryption {
+        EncryptionState::Plain => Ok(stored.to_vec()),
+        EncryptionState::Encrypted { key, .. } => {
+            crypto::decrypt_with_aad(key, record_key.as_bytes(), stored)
+                .map_err(|_| "encrypted value authentication failed".to_string())
+        }
+    }
+}
+
+fn persisted_scalar(
+    encryption: &EncryptionState,
+    index_name: &str,
+    field: &str,
+    scalar: &[u8],
+) -> Result<Vec<u8>, String> {
+    match encryption {
+        EncryptionState::Plain => Ok(scalar.to_vec()),
+        EncryptionState::Encrypted { key, .. } => {
+            index_token::encrypted_equality_token(key, index_name, field, scalar)
+        }
+    }
+}
+
 fn entry_key(index_name: &str, scalar: &[u8], record_key: &str) -> Vec<u8> {
     let name = index_name.as_bytes();
     let record = record_key.as_bytes();
@@ -374,6 +441,13 @@ fn entry_key(index_name: &str, scalar: &[u8], record_key: &str) -> Vec<u8> {
 fn index_prefix(index_name: &str) -> Vec<u8> {
     let mut prefix = Vec::with_capacity(4 + index_name.len());
     push_component(&mut prefix, index_name.as_bytes());
+    prefix
+}
+
+fn index_scalar_prefix(index_name: &str, scalar: &[u8]) -> Vec<u8> {
+    let mut prefix = Vec::with_capacity(8 + index_name.len() + scalar.len());
+    push_component(&mut prefix, index_name.as_bytes());
+    push_component(&mut prefix, scalar);
     prefix
 }
 
@@ -397,7 +471,7 @@ fn push_component(output: &mut Vec<u8>, value: &[u8]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{index_prefix, prefix_successor, select_index_candidates};
+    use super::{index_prefix, index_scalar_prefix, prefix_successor, select_index_candidates};
     use crate::query::{CompareOp, IndexCandidate};
 
     fn candidate(field: &str) -> IndexCandidate {
@@ -484,6 +558,21 @@ mod tests {
 
         let other_index = index_prefix("by-status");
         assert!(other_index < prefix || other_index >= upper);
+    }
+
+    #[test]
+    fn scalar_prefix_bounds_one_exact_scalar_region() {
+        let scalar = [0x10, 0x20, 0x30];
+        let prefix = index_scalar_prefix("by-status", &scalar);
+        let upper = prefix_successor(&prefix).unwrap();
+
+        let mut matching = prefix.clone();
+        matching.extend_from_slice(&[0, 0, 0, 3, b'k', b'e', b'y']);
+        assert!(matching >= prefix);
+        assert!(matching < upper);
+
+        let other = index_scalar_prefix("by-status", &[0x10, 0x20, 0x31]);
+        assert!(other < prefix || other >= upper);
     }
 
     #[test]

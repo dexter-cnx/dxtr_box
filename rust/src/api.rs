@@ -294,7 +294,7 @@ pub fn scan_query(
         let spec = query::decode_query(&query_payload)?;
         let (database, encryption) = db::database(&box_name)?;
         let read = database.begin_read().map_err(|e| e.to_string())?;
-        let mut keys = match index::candidate_keys(&read, &spec.filter)? {
+        let mut keys = match index::candidate_keys(&read, encryption.as_ref(), &spec.filter)? {
             Some(keys) => keys,
             None => db::query_all_keys(&read)?,
         };

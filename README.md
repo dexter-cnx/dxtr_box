@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered local database for Flutter. No model code generation.
 
-> Status: **0.6 Query / Index + Encryption Hardening has started** on top of the completed 0.5 production read-path work. 0.6 is deliberately narrow: polish the existing query/index engine, define and enforce a non-misleading security contract for encrypted indexes, and improve interoperability only where it materially helps adoption. Dxtr_Box is not positioned as a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer. The package remains pre-1.0; public API and storage format are not declared stable.
+> Status: **0.6 Query / Index + Encryption Hardening is in progress** on top of the completed 0.5 production read-path work. PR1 established the encrypted-index threat model; PR2 adds encrypted persisted indexes for equality narrowing while keeping encrypted range predicates scan-backed. Dxtr_Box is not positioned as a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer. The package remains pre-1.0; public API and storage format are not declared stable.
 
 ## Key Features
 
@@ -14,8 +14,9 @@ A fast, ACID, encrypted, Rust-powered local database for Flutter. No model code 
 - **Simple box-style Flutter API** — asynchronous CRUD without application model code generation.
 - **Fast authoritative reads** — optimized point reads plus one-snapshot `getAll` multi-key reads.
 - **Declarative native queries** — nested field comparisons, boolean groups, pagination, and deterministic sorting.
-- **Persisted secondary indexes** — equality/range candidate narrowing and multi-index AND intersection for plaintext boxes.
+- **Persisted secondary indexes** — equality/range candidate narrowing for plaintext boxes plus equality-only encrypted narrowing under `full`.
 - **First-class encryption** — Argon2 key derivation + ChaCha20Poly1305 authenticated encryption.
+- **Encrypted equality tokens** — domain-separated deterministic keyed BLAKE2b MAC tokens; plaintext scalar bytes are not persisted in encrypted index entries.
 - **Transactional bulk operations** — primary records and derived index maintenance commit atomically.
 - **Native watch events** — cross-handle change notifications through Flutter Rust Bridge streams.
 - **Crash/reopen durability coverage** — acknowledged writes are validated across reopen/crash scenarios.
@@ -103,7 +104,7 @@ await secure.put('token', 'secret');
 await secure.close();
 ```
 
-Encrypted boxes require the same key on reopen. Plaintext-to-encrypted conversion is explicit and transactional. Encrypted point and batch reads retain full AEAD authentication.
+Encrypted boxes require the same key on reopen. Plaintext-to-encrypted conversion is explicit and transactional. Encrypted point, batch, query, and encrypted-index candidate reads retain full AEAD authentication.
 
 ## Hive CE migration
 
@@ -166,8 +167,10 @@ Current query guarantees:
 - record-key ascending final tie-break;
 - one redb read snapshot for planner, primary reads, and sort inputs;
 - plaintext/encrypted scans;
-- persisted scalar index narrowing for `equal`, `>`, `>=`, `<`, `<=`, and `between` under `full`;
-- multi-index candidate intersection under AND;
+- plaintext persisted scalar index narrowing for `equal`, `>`, `>=`, `<`, `<=`, and `between` under `full`;
+- encrypted persisted index narrowing for `equal` under `full`;
+- encrypted ordered/range predicates remain scan-backed;
+- multi-index candidate intersection under AND where usable candidates exist;
 - authoritative primary-record re-read and full predicate re-evaluation.
 
 Persisted indexes narrow `where` candidates only; they do not currently satisfy ORDER BY. Raw MessagePack bytes are not treated as numeric order.
@@ -185,7 +188,11 @@ final removed = await box.dropIndex('by-age');
 
 Primary data is authoritative. Index definitions and entries are derived state maintained in the same redb write transaction as primary mutations.
 
-Encrypted boxes currently **reject persisted index creation** and continue to execute native scan queries. 0.6 keeps that rejection as the safe default until the encrypted-index leakage contract and representation are explicitly accepted. Raw plaintext scalar values must not be persisted merely to make encrypted indexes fast. The first preferred production target, if justified, is equality-only keyed tokens with full primary decrypt/authenticate + predicate recheck; encrypted range indexing may remain scan-only if a secure, appropriately bounded representation is not justified. See `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+For plaintext boxes, persisted scalar indexes support equality and ordered/range narrowing. For encrypted boxes, persisted indexes use deterministic 256-bit BLAKE2b keyed MAC tokens for **equality narrowing only**. Tokens are derived from authenticated box key material and domain-separated by index name and field. Raw plaintext scalar values are not persisted in encrypted index entries.
+
+Encrypted equality indexing intentionally leaks equality classes/frequency for repeated indexed values, and index metadata still exposes index/field names plus record identifiers. Every candidate is still resolved through the authoritative encrypted primary record, ChaCha20Poly1305 authenticated/decrypted, and fully predicate-rechecked before it can be returned. Encrypted range operators do not treat keyed tokens as order-preserving and continue to use authoritative scan fallback. See `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+
+Plaintext-to-encrypted migration still requires persisted plaintext indexes to be dropped before migration; recreate them after opening the encrypted box so derived state is generated using the encrypted equality-index contract.
 
 ## Native feature profiles
 
@@ -206,6 +213,8 @@ Exactly three Rust capability profiles are supported:
 ```text
 allowed_growth = max(65,536 bytes, 3% of base artifact)
 ```
+
+PR2's encrypted equality-index implementation reuses BLAKE2 already present through Argon2 rather than adding a second heavy hash dependency. The validated Linux x64 full-profile artifact moved from 2,385,720 to 2,416,152 bytes: +30,432 bytes / +1.276%, within policy.
 
 The budget is a regression alarm, not routine allowance. See `docs/NATIVE_SIZE_POLICY_04.md`.
 
@@ -273,6 +282,16 @@ The correctness gate verifies a shared CRUD/overwrite/delete/close/reopen worklo
 
 CI uploads machine-readable JSONL evidence as the `local-database-comparison` artifact. Hosted-runner timing is diagnostic only and must not be presented as stable product performance. See `docs/LOCAL_DATABASE_COMPARISON_04.md` and `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
 
+## Query/index diagnostic benchmark
+
+Use the dedicated matrix for query/index engineering evidence:
+
+```bash
+make benchmark-query-index
+```
+
+The harness covers plaintext scan/index equality, range, AND intersection, and sorted-range scenarios plus encrypted equality scan versus encrypted equality-index narrowing. Timing is diagnostic only; correctness, authenticated primary recheck, durability, and the encrypted-index security contract are the hard gates.
+
 ## Fast local preflight
 
 Run this before pushing:
@@ -339,7 +358,7 @@ make example-windows
 
 - `docs/PROJECT_HANDOFF.md` — current milestone state and sequencing.
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture and CI DAG.
-- `docs/QUERY_INDEX_ENCRYPTION_06.md` — 0.6 scope, encrypted-index threat model, sequencing, and acceptance criteria.
+- `docs/QUERY_INDEX_ENCRYPTION_06.md` — 0.6 scope, encrypted-index threat model, accepted equality-token contract, sequencing, and acceptance criteria.
 - `docs/PERFORMANCE_READ_PATH_05.md` — 0.5 read-path measurements and production decisions.
 - `docs/READ_SESSION_INVESTIGATION_05.md` — evidence-backed read-session decision.
 - `docs/PERFORMANCE_05_CLOSURE_AUDIT.md` — final 0.5 acceptance audit.

@@ -58,6 +58,7 @@ Core differentiators:
 - declarative native queries;
 - persisted secondary indexes;
 - first-class authenticated encryption;
+- encrypted equality-index narrowing under `full`;
 - native watch fan-out;
 - crash/reopen durability validation;
 - Android/iOS/macOS/Linux/Windows package consumers.
@@ -91,6 +92,8 @@ Box.put / putAll / delete / deleteAll / clear
 ```
 
 Primary data is authoritative. Persisted indexes are derived state.
+
+For encrypted boxes, index maintenance decrypts/authenticates the prior stored record when required, derives equality tokens from plaintext query scalar semantics, mutates derived entries, and commits those changes atomically with the new primary ciphertext.
 
 ## 6. Production point-read path after 0.5
 
@@ -198,28 +201,133 @@ Box.query
 
 Persisted indexes narrow candidates only; they do not replace predicate re-evaluation and do not satisfy ORDER BY.
 
-## 10. 0.6 encrypted-index boundary
+## 10. Plaintext index path
 
-Encrypted point, batch, and scan-query reads preserve full AEAD authentication.
+Plaintext indexes retain the existing persisted scalar representation and support equality plus ordered/range candidate narrowing.
 
-Encrypted boxes currently reject persisted secondary-index creation. That remains the safe default until 0.6 accepts a representation with an explicit leakage contract.
+```text
+query filter
+  -> query::index_candidates
+  -> deterministic matching index selection
+  -> persisted scalar/range lookup
+  -> candidate record-key set
+  -> authoritative primary read
+  -> full predicate recheck
+```
 
-The preferred first candidate is equality-only keyed deterministic tokens with domain separation. Even if such an index is introduced, every candidate must still resolve through the authoritative encrypted primary record and complete decrypt/authenticate plus full predicate re-evaluation.
+AND groups can intersect multiple candidate sets. Raw MessagePack bytes are not treated as semantic numeric ordering; scalar encoding remains explicit.
 
-Encrypted range indexing is optional. A documented scan-only decision is acceptable when order leakage or complexity is disproportionate to the product value.
+## 11. 0.6 encrypted equality-index path
 
-## 11. 0.6 implementation sequence — four PRs
+PR2 accepts encrypted persisted indexes for equality narrowing only.
+
+Creation/backfill:
+
+```text
+Box.createIndex
+  -> FRB
+  -> index::create
+  -> read encrypted primary record
+  -> ChaCha20Poly1305 authenticate/decrypt using record-key AAD
+  -> extract canonical query scalar
+  -> BLAKE2b keyed MAC token
+       key: authenticated box key material
+       domain: index name + field
+  -> persist token + record-key derived entry
+  -> commit definition + derived entries
+```
+
+Query:
+
+```text
+encrypted Box.query(equal)
+  -> query::index_candidates
+  -> retain encrypted equality candidates only
+  -> select matching persisted index
+  -> canonicalize query scalar
+  -> derive same domain-separated BLAKE2b keyed token
+  -> exact token lookup
+  -> candidate record keys
+  -> authoritative encrypted primary read
+  -> ChaCha20Poly1305 authenticate/decrypt
+  -> full predicate re-evaluation
+  -> sort / offset / limit
+```
+
+Mutation:
+
+```text
+put / putAll / delete / deleteAll
+  -> one redb write transaction
+  -> authenticate/decrypt old value when index removal needs it
+  -> derive old/new equality tokens
+  -> remove/add index entries
+  -> write/remove authoritative primary record
+  -> one commit
+```
+
+Security semantics:
+
+- raw plaintext scalar values are not persisted in encrypted index entries;
+- deterministic tokens intentionally reveal equality classes/frequency;
+- index/field names and record identifiers remain visible as derived metadata;
+- tokens are not order-preserving;
+- every candidate is authenticated/decrypted and predicate-rechecked before return.
+
+## 12. Encrypted range fallback
+
+Encrypted `>`, `>=`, `<`, `<=`, and `between` predicates do not use equality tokens as fake ordering.
+
+```text
+encrypted ordered/range filter
+  -> no usable encrypted index candidate
+  -> primary key scan
+  -> authenticate/decrypt each relevant record
+  -> full predicate evaluation
+  -> sort / offset / limit
+```
+
+PR3 decides whether any encrypted range representation is justified. Scan-only is an acceptable final decision.
+
+## 13. 0.6 implementation sequence — four PRs
 
 ```text
 PR 1 — threat model + safe-default regression guard + milestone/product docs
 PR 2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence
 PR 3 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
-PR 4 — compatibility cleanup + 0.6 closure audit
+PR 4 — core reliability/API closure + 0.6 audit
 ```
 
-PR2 intentionally combines the two closely coupled query/index runtime tracks so 0.6 remains compact.
+PR4 is explicitly not a Hive/Hive CE parity pass.
 
-## 12. Native profiles
+## 14. PR2 size/performance evidence
+
+The first BLAKE3 implementation exceeded the native-size regression budget. PR2 replaced it with BLAKE2b keyed MAC while reusing the BLAKE2 implementation already present through Argon2.
+
+Measured Linux x64 full-profile delta:
+
+```text
+2,385,720 -> 2,416,152 bytes
++30,432 bytes / +1.276%
+PASS
+```
+
+Validated runtime head before docs sync:
+
+```text
+commit 5346c1176b2753cea9fc248b60055215041815c9
+CI run 32069766813: success
+```
+
+The query/index timing harness remains diagnostic-only and now includes encrypted equality scan/index scenarios in addition to plaintext scenarios:
+
+```bash
+make benchmark-query-index
+```
+
+Do not turn hosted timing into a merge threshold.
+
+## 15. Native profiles
 
 Profiles remain exactly:
 
@@ -231,7 +339,9 @@ full
 
 Do not add a fourth profile for encrypted indexing or performance tuning.
 
-## 13. Migration/interoperability
+The equality-token dependency is full-profile-only at the feature level; the design intentionally avoids adding a second heavy hash implementation.
+
+## 16. Migration/interoperability
 
 Core `dxtr_box` has no runtime Hive CE dependency. Hive CE migration is optional tooling:
 
@@ -251,7 +361,9 @@ migrateFromHiveCe
 
 This interoperability path does not define product parity or 1.0 success.
 
-## 14. FRB drift and package gates
+Plaintext-to-encrypted migration still rejects a source box with persisted plaintext indexes. The caller must drop those indexes before migration and recreate them after opening the encrypted box so encrypted derived state is generated under the accepted token contract.
+
+## 17. FRB drift and package gates
 
 Checked-in bindings are generated with FRB 2.8.0. Full CI regenerates them and fails on any diff.
 
@@ -263,7 +375,7 @@ make package-readiness
   -> dart pub publish --dry-run --ignore-warnings
 ```
 
-## 15. Native-size policy
+## 18. Native-size policy
 
 ```text
 allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
@@ -271,11 +383,11 @@ allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
 
 Minimal, encryption, and full are measured independently.
 
-## 16. Staged published consumers
+## 19. Staged published consumers
 
 `tool/validate_published_consumer.dart` validates the consumer-visible package payload on Android, iOS, macOS, Linux, and Windows.
 
-## 17. Change-aware CI
+## 20. Change-aware CI
 
 ```text
 change-detection
@@ -301,7 +413,7 @@ rust-check
 
 Full validation remains mandatory before merge.
 
-## 18. Invariants to preserve
+## 21. Invariants to preserve
 
 - Dart >=3.4 / Flutter >=3.22.
 - FRB exactly 2.8.0.
@@ -313,6 +425,9 @@ Full validation remains mandatory before merge.
 - No Dart whole-box cache.
 - No implicit long-lived stale snapshot.
 - Full encrypted authentication.
+- No plaintext scalar bytes in encrypted index entries.
+- Encrypted equality-token leakage remains documented.
+- Encrypted range predicates remain scan-backed unless PR3 explicitly accepts a representation.
 - Query/index/migration correctness.
 - Native-size regression policy.
 - Five-platform staged consumer builds.
@@ -331,6 +446,7 @@ make query-index-test
 make query-sort-test
 make benchmark-comparison-correctness
 make benchmark-comparison
+make benchmark-query-index
 make benchmark-read-path
 make benchmark-batch-read
 make native-size-regression
@@ -341,4 +457,4 @@ make published-consumer-linux
 make published-consumer-windows
 ```
 
-See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative 0.6 plan and `docs/PROJECT_HANDOFF.md` for current execution state.
+See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative 0.6 security/decision record and `docs/PROJECT_HANDOFF.md` for current execution state.
