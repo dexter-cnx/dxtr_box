@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.5 Performance / Read-path Optimization is at final closure audit**. 0.4 Production Hardening remains complete. 0.5 optimized authoritative single-key reads, added one-snapshot `Box.getAll` multi-key reads, and rejected long-lived read sessions after an evidence-backed freshness/lifecycle investigation. The package remains pre-1.0; public API and storage format are not declared stable. PR5 closes 0.5 only after the full merge quality bar remains green.
+> Status: **0.6 Query / Index + Encryption Hardening has started** on top of the completed 0.5 production read-path work. 0.6 is deliberately narrow: polish the existing query/index engine, define and enforce a non-misleading security contract for encrypted indexes, and close only Hive/Hive CE parity gaps that are necessary for practical replacement. The package remains pre-1.0; public API and storage format are not declared stable.
 
 ## Compatibility
 
@@ -168,7 +168,9 @@ final indexes = await box.listIndexes();
 final removed = await box.dropIndex('by-age');
 ```
 
-Primary data is authoritative. Index definitions and entries are derived state maintained in the same redb write transaction as primary mutations. Encrypted boxes intentionally reject persisted index creation until a non-leaking representation is designed.
+Primary data is authoritative. Index definitions and entries are derived state maintained in the same redb write transaction as primary mutations.
+
+Encrypted boxes currently **reject persisted index creation** and continue to execute native scan queries. 0.6 keeps that rejection as the safe default until the encrypted-index leakage contract and representation are explicitly accepted. Raw plaintext scalar values must not be persisted merely to make encrypted indexes fast. The first preferred production target, if justified, is equality-only keyed tokens with full primary decrypt/authenticate + predicate recheck; encrypted range indexing may remain scan-only if a secure, appropriately bounded representation is not justified. See `docs/QUERY_INDEX_ENCRYPTION_06.md`.
 
 ## Native feature profiles
 
@@ -322,6 +324,7 @@ make example-windows
 
 - `docs/PROJECT_HANDOFF.md` — current milestone state and sequencing.
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture and CI DAG.
+- `docs/QUERY_INDEX_ENCRYPTION_06.md` — 0.6 scope, encrypted-index threat model, sequencing, and acceptance criteria.
 - `docs/PERFORMANCE_READ_PATH_05.md` — 0.5 read-path measurements and production decisions.
 - `docs/READ_SESSION_INVESTIGATION_05.md` — evidence-backed read-session decision.
 - `docs/PERFORMANCE_05_CLOSURE_AUDIT.md` — final 0.5 acceptance audit.
@@ -337,4 +340,4 @@ make example-windows
 
 ## 1.0 direction
 
-A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. Completed 0.4 hardening and the closing 0.5 read-path milestone strengthen the implementation and evidence base; neither is a stable-API claim.
+A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. 0.6 intentionally strengthens the existing product identity — Hive-like ergonomics, Rust/redb durability, query/index support, and first-class encryption — instead of adding ORM, cloud sync, or a general schema framework.
