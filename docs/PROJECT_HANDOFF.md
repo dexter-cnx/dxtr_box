@@ -53,6 +53,51 @@ PR4 is intentionally a closure/audit PR, not a Hive/Hive CE parity pass and not 
 
 When PR4 passes `CI / Merge Gate / full quality bar` and merges, **0.6 is complete**.
 
+## Next milestone — 0.7 Query Ergonomics
+
+Planned design record: `docs/QUERY_ERGONOMICS_07.md`.
+
+After 0.6 closes, the preferred next milestone is **0.7 Query Ergonomics**: improve the Dart query experience without replacing the existing query engine or changing durable storage.
+
+Target public style:
+
+```dart
+final users = await box
+    .where('status').equals('active')
+    .and('age').gte(18)
+    .orderBy('name')
+    .limit(20)
+    .find();
+```
+
+Architectural rule:
+
+```text
+Fluent Dart API
+      |
+      v
+existing BoxQuery AST
+      |
+      v
+existing serialization / FRB
+      |
+      v
+existing Rust planner + indexes
+```
+
+`Box.query(BoxQuery)` remains first-class for advanced/dynamic composition. The fluent API is additive, not a parallel query model.
+
+Recommended 0.7 sequence:
+
+```text
+PR1 — fluent where/comparison/AND/OR/grouping builder
+PR2 — orderBy/offset/limit/find ergonomics; native-backed convenience operations only where efficient
+PR3 — optional DxtrField<T> typed field metadata; no mandatory codegen/schema
+PR4 — README/examples/API equivalence/compatibility closure
+```
+
+Do not turn 0.7 into an ORM, SQL parser, schema framework, or Dart-side post-filtering layer. `exists()` / `count()` should only be exposed when backed by efficient native operations rather than materializing full result sets across FRB.
+
 ## Current capabilities
 
 - Rust/redb ACID storage, one `{box}.dxtr` file per box.
@@ -211,7 +256,7 @@ change detection
       v
    Fast CI
       |
-      +--> affected expensive gates during Draft iteration
+      +--> affected expensive validation during Draft iteration
       |
       v
 Merge Gate / full quality bar
@@ -234,13 +279,13 @@ Full merge validation must preserve:
 - package/pub readiness;
 - staged Android/iOS/macOS/Linux/Windows consumers.
 
-## Post-0.6 maturity candidates
+## Post-0.7 maturity candidates
 
 Datum-inspired ideas retained for later evaluation:
 
 1. reusable conformance / storage-contract test kit;
 2. schema/config fingerprint + startup fast path;
-3. optional typed schema/query metadata while keeping the dynamic box API first-class;
+3. broader typed schema/query metadata only if `DxtrField<T>` proves valuable while keeping the dynamic box API first-class;
 4. capability abstractions only when multiple execution variants justify them;
 5. user-facing benchmark scenarios rather than isolated microbenchmarks only.
 
