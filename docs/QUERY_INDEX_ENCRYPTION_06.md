@@ -84,11 +84,13 @@ Primary encrypted records remain ChaCha20Poly1305 authenticated ciphertext. Ever
 
 Default preference: support less functionality securely rather than exposing plaintext-compatible scalar bytes.
 
-### PR 2 — secure encrypted equality indexes, if justified
+### PR 2 — encrypted equality index + plaintext query/index polish
 
-Preferred first production target is equality indexing only, using keyed deterministic tokens derived from authenticated box key material and index context.
+This PR intentionally combines the former encrypted-equality and plaintext-planner PRs because they share the same index representation, planner, maintenance, and benchmark surfaces.
 
-Requirements:
+Preferred encrypted target is equality indexing only, using keyed deterministic tokens derived from authenticated box key material and index context.
+
+Encrypted requirements:
 
 - no raw plaintext scalar in index entries;
 - domain separation per index/field;
@@ -99,11 +101,7 @@ Requirements:
 - reopen, wrong-key, tamper, crash/reopen, migration, drop/recreate tests;
 - explicit documentation that equality frequency can still be observable if deterministic tokens are persisted.
 
-Do not extend to range operators by pretending keyed hashes are order-preserving.
-
-### PR 3 — query/index planner polish
-
-Use measured workloads and correctness evidence to close practical planner gaps:
+Plaintext/planner requirements:
 
 - verify equality/range/AND planner behavior remains deterministic;
 - benchmark plaintext index narrowing after 0.5 read-path changes;
@@ -112,7 +110,9 @@ Use measured workloads and correctness evidence to close practical planner gaps:
 - keep full predicate re-evaluation mandatory;
 - do not add index-backed ORDER BY unless measurements and implementation simplicity justify it.
 
-### PR 4 — encrypted range/index decision
+Do not extend encrypted equality tokens to range operators by pretending keyed hashes are order-preserving.
+
+### PR 3 — encrypted range/index decision
 
 Encrypted range indexing is optional, not a milestone requirement.
 
@@ -120,9 +120,9 @@ If no design provides acceptable leakage, complexity, and maintenance cost, 0.6 
 
 A documented rejection is an acceptable outcome.
 
-### PR 5 — compatibility cleanup + closure audit
+### PR 4 — compatibility cleanup + closure audit
 
-Close only compatibility/migration gaps that materially improve adoption and remain consistent with the native-database product direction.
+Close only compatibility/migration gaps that materially improve adoption and remain consistent with the native-database product direction, then run the 0.6 closure audit and full merge quality bar.
 
 Do not pull in:
 
