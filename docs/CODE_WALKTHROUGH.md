@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough covers the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution paths, completed 0.4/0.5 work, and the current 0.6 Query / Index + Encryption Hardening milestone.
+This walkthrough covers the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution paths, completed 0.4/0.5 work, and the final 0.6 Query / Index + Encryption Hardening contract.
 
 ## 1. Package boundary
 
@@ -185,7 +185,7 @@ Index create/backfill and mutation/delete maintenance stay in the same redb writ
 
 ## 10. Encrypted range execution after PR3
 
-PR3 makes the range policy explicit: encrypted ordered/range predicates remain scan-backed in 0.6.
+PR #42 made the range policy explicit: encrypted ordered/range predicates remain scan-backed in 0.6.
 
 Planner contract:
 
@@ -221,7 +221,7 @@ This preserves exact-match acceleration while adding no persisted order-revealin
 
 Decision record: `docs/ENCRYPTED_RANGE_DECISION_06.md`.
 
-Regression guard: `rust/tests/encrypted_range_decision.rs` validates all five ordered/range operators and mixed equality+range AND semantics before/after encrypted index creation.
+Regression guards: `rust/tests/encrypted_range_decision.rs` validates all five ordered/range operators and mixed equality+range AND semantics before/after encrypted index creation; `rust/tests/encrypted_range_planner_guard.rs` locks the equality-only encrypted planner rule.
 
 ## 11. Why encrypted range indexing is rejected for 0.6
 
@@ -323,16 +323,18 @@ make preflight
 
 Ready/non-draft work must satisfy full merge validation.
 
-## 17. 0.6 sequence
+## 17. 0.6 sequence and closure
 
 ```text
 PR1 — threat model + safe-default guard + docs: merged (#39)
 PR2 — encrypted equality index + planner polish: merged (#40)
-PR3 — encrypted range decision / scan-only guard: active (#42)
-PR4 — core reliability/API closure + 0.6 audit: final
+PR3 — encrypted range decision / scan-only guard: merged (#42)
+PR4 — core reliability/API closure + 0.6 audit: active/final
 ```
 
-PR4 is not a Hive/Hive CE parity pass.
+PR4 is not a Hive/Hive CE parity pass. It intentionally avoids feature expansion and closes 0.6 only after the full merge quality bar validates the accepted runtime/security/compatibility matrix.
+
+Closure record: `docs/RELEASE_AUDIT_06.md`.
 
 ## 18. Invariants to preserve
 
@@ -370,4 +372,4 @@ make benchmark-batch-read
 make native-size-regression
 ```
 
-See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative milestone contract, `docs/ENCRYPTED_RANGE_DECISION_06.md` for the PR3 decision, and `docs/PROJECT_HANDOFF.md` for current execution state.
+See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative milestone contract, `docs/ENCRYPTED_RANGE_DECISION_06.md` for the encrypted range decision, `docs/RELEASE_AUDIT_06.md` for the final closure matrix, and `docs/PROJECT_HANDOFF.md` for current execution state.
