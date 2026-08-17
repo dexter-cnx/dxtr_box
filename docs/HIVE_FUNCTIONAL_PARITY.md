@@ -1,185 +1,111 @@
-# Hive Functional Parity Audit
+# Hive / Hive CE Compatibility Reference
 
-## Goal
+> **Historical/reference document — not a product roadmap or 1.0 release gate.**
+>
+> Dxtr_Box is a native local database for Flutter. It is **not** positioned as a Hive/Hive CE replacement and does not require feature-by-feature Hive parity for 1.0. Hive CE remains useful as an optional migration source, compatibility reference, and benchmark peer.
 
-`dxtr_box` targets **functional replacement** of Hive / Hive CE for practical local NoSQL database workloads.
+## Purpose
 
-This does **not** mean source-level or drop-in API compatibility. Applications may need to change call sites, especially synchronous reads to asynchronous reads. The release criterion is that a workload reasonably implemented with Hive/Hive CE can be implemented with `dxtr_box` without losing an essential database capability.
+This document preserves the older Hive-oriented capability audit as a **compatibility inventory**. It can help when migrating an existing Hive/Hive CE application or comparing practical local-database capabilities, but gaps listed here do not automatically become Dxtr_Box product requirements.
 
-## 1.0 release gate
+A capability should be implemented only when it independently strengthens Dxtr_Box or is required by an explicit interoperability/migration contract.
 
-`dxtr_box` must not be declared 1.0 stable until this audit is complete.
+## Classification
 
-Every practical Hive/Hive CE capability must be classified as one of:
+When comparing a Hive/Hive CE workload with Dxtr_Box, use these descriptive labels only:
 
 - `Exact` — equivalent user-visible capability and semantics.
 - `Compatible` — same practical capability with a different API or implementation model.
-- `Superseded` — dxtr_box provides a different mechanism that fully covers the practical use case.
-- `Not applicable` — Hive-specific implementation detail with no user-facing capability loss.
-- `Gap` — practical capability is still missing. Any `Gap` blocks the 1.0 functional-parity claim.
+- `Superseded` — Dxtr_Box provides a different mechanism covering the practical use case.
+- `Not applicable` — Hive-specific behavior that is not part of the Dxtr_Box product model.
+- `Gap` — a capability an application may need when migrating from Hive/Hive CE; **not automatically a Dxtr_Box roadmap commitment**.
 
-## Scope baseline
+## Compatibility inventory
 
-The audit baseline is current Hive CE functionality, including normal boxes, lazy boxes, isolate-aware access, box events, encryption, custom-object persistence, web storage, and lifecycle/maintenance operations.
-
-The audit should be refreshed against the latest Hive CE release immediately before the 1.0 release candidate.
-
-## Capability matrix
-
-| Area | Hive/Hive CE capability | dxtr_box target | Status |
+| Area | Hive/Hive CE capability | Dxtr_Box position | Status / note |
 |---|---|---|---|
-| Initialization | configurable storage path | `DxtrBox.init(path:)` | Implemented; final audit pending |
-| Box lifecycle | open / close / delete / exists | equivalent lifecycle | Implemented; final audit pending |
-| CRUD | put / get / delete | equivalent capability | Implemented; final audit pending |
-| Batch writes | putAll / deleteAll | transactional batch operations | Implemented; final audit pending |
-| Introspection | keys / values / length / isEmpty / containsKey | equivalent capability | In progress |
-| Defaults | get with default value | equivalent capability | Implemented; final audit pending |
-| Clear | clear entire box | one ACID write transaction | Implemented; final audit pending |
-| Lazy access | values not retained wholesale in Dart RAM | native storage reads on demand; `lazy` semantics finalized before 1.0 | Gap |
-| Events | `watch()` / key filtering | native Rust event broadcast exposed through FRB stream | Implemented; isolate semantics pending |
-| Compaction | manual / strategy-driven compaction | explicit redb-backed `compact()` plus future policy | Compatible candidate; policy audit pending |
-| Encryption | encrypted boxes | Argon2-derived key + ChaCha20Poly1305 authenticated values | Implemented; binary-size/audit gate pending |
-| Encryption migration | plaintext box -> encrypted box | explicit transactional `DxtrBox.encryptBox()` | Implemented; dedicated interruption injection still future hardening |
-| Custom values | TypeAdapter-backed objects | codegen-free structured codec / explicit serializer extension mechanism | Gap |
-| Schema evolution | adapter-compatible model evolution | versioned codec/schema migration mechanism | Gap |
-| Primitive coverage | null, bool, number, String, List, Map, binary, DateTime, etc. | MessagePack codec plus required additional built-ins | In progress |
-| Sets / Duration | Hive CE built-ins | add codec support or equivalent representation | Gap |
-| Object helpers | HiveObject save/delete relationships | ergonomic object/repository helper if practical use case warrants | Planned audit |
-| Object references | HiveList/reference-style relationships | explicit reference/link mechanism or documented superseding pattern | Planned audit |
-| Isolates | `IsolatedHive` | safe multi-isolate native database access and event behavior | Gap |
-| Concurrent reads | supported access model | redb concurrent read transactions | Engine capability; Dart/isolate integration tests required |
-| Write serialization | database-safe writes | redb ACID single-writer transaction model | Engine capability; broader concurrency tests required |
-| Crash durability | persisted writes survive process failure | acknowledged-commit process-kill/reopen suite | Implemented foundation; broader soak/fault injection pending |
-| Web | IndexedDB/Web/WASM support | IndexedDB fallback behind same Dart API | Gap |
-| Flutter integration | Flutter initialization/helpers | dxtr_box Flutter facade | In progress |
-| DevTools inspection | Hive CE Inspector | optional dxtr_box inspector/tooling; evaluate as parity requirement | Planned audit |
-| Hive data migration | existing Hive data | `migrateFromHiveCe()` with documented supported types | Implemented for documented 0.3 contract; final parity audit pending |
-| Query/filter | app-side filtering | native query helpers + indexes where useful | Implemented 0.3 foundation; broader parity audit pending |
-| Binary size | pure-Dart Hive has no native payload | explicit native-size budget, Cargo profiles/features, future tree shaking | Same-commit profile reproducibility implemented; cross-commit budget deferred |
+| Initialization | configurable storage path | `DxtrBox.init(path:)` | Implemented |
+| Box lifecycle | open / close / delete / exists | equivalent lifecycle | Implemented |
+| CRUD | put / get / delete | asynchronous native-backed operations | Implemented |
+| Batch writes | putAll / deleteAll | transactional batch operations | Implemented |
+| Introspection | keys / values / length / isEmpty / containsKey | native-backed equivalents where exposed | Compatibility inventory |
+| Defaults | get with default value | equivalent capability | Implemented |
+| Clear | clear entire box | one ACID write transaction | Implemented |
+| Lazy access | lazy box semantics | native storage reads are already on-demand; no Hive-style LazyBox contract required | Not a parity gate |
+| Events | `watch()` / key filtering | native Rust event broadcast through FRB stream | Implemented foundation |
+| Compaction | manual / strategy-driven compaction | explicit redb-backed `compact()` | Compatible |
+| Encryption | encrypted boxes | Argon2 + ChaCha20Poly1305 authenticated storage | Implemented |
+| Encryption migration | plaintext -> encrypted | explicit transactional migration | Implemented |
+| Custom values | TypeAdapter-backed objects | codegen-free dynamic values; optional typed/serializer ergonomics may evolve independently | Product decision, not parity gate |
+| Schema evolution | adapter/model evolution | no general schema framework currently required | Deferred unless product evidence justifies it |
+| Primitive coverage | common primitive/list/map/binary/date values | MessagePack dynamic codec | Compatibility inventory |
+| Sets / Duration | Hive CE built-ins | represent explicitly or add codec support when independently useful | Optional |
+| Object helpers | HiveObject helpers | application/repository layer concern unless a strong generic use case emerges | Not a parity gate |
+| Object references | HiveList/reference-style relations | application-level references unless Dxtr_Box later adopts a native relation feature | Not a parity gate |
+| Isolates | `IsolatedHive` | native database access/concurrency semantics should be validated on their own merits | Reliability candidate |
+| Concurrent reads | supported access model | redb concurrent read transactions | Engine capability |
+| Write serialization | database-safe writes | redb ACID single-writer transaction model | Engine capability |
+| Crash durability | persisted writes survive failure | process-kill/reopen durability coverage | Implemented foundation |
+| Web | IndexedDB/Web support | no current Web strategy | Deferred product/platform decision |
+| Flutter integration | Flutter initialization/helpers | Flutter FFI plugin facade | Implemented |
+| DevTools inspection | Hive inspector | optional tooling opportunity | Not a release gate |
+| Hive data migration | existing Hive data | `migrateFromHiveCe()` for documented supported types | Implemented interoperability path |
+| Query/filter | mostly app-side filtering | native query engine + persisted indexes | Dxtr_Box-specific capability |
+| Binary size | pure-Dart baseline | explicit native-size profiles/regression policy | Dxtr_Box-specific constraint |
 
 ## Compatibility principle
 
-API shape is allowed to differ when the architecture demands it.
-
-Example:
+API shape may differ when the architecture demands it.
 
 ```dart
 // Hive-style in-memory read
 final value = box.get('key');
 
-// dxtr_box native storage read
+// Dxtr_Box authoritative native-storage read
 final value = await box.get('key');
 ```
 
-This is still `Compatible` if the application can perform the same database task safely and predictably.
+A migration can still be practical even when call sites change. Do not reintroduce a whole-box Dart cache merely to imitate Hive synchronous reads.
 
-Do not reintroduce whole-box Dart caching merely to imitate synchronous Hive reads.
+## Hive CE migration contract
 
-## Custom object strategy
+The supported interoperability path is documented in `HIVE_CE_MIGRATION_03.md`.
 
-Hive CE supports custom classes through `TypeAdapter` and generated adapters. `dxtr_box` intentionally avoids requiring model code generation for basic usage.
+The current migration foundation covers documented primitive/container values, binary data, DateTime, deterministic key conversion, caller-supplied conversion for unsupported custom values, encrypted source/destination scenarios, preflight collision/value validation, and exclusive destination reservation.
 
-Before 1.0, choose and validate a replacement strategy that covers the same practical workloads. Candidate mechanisms include:
+LazyBox migration, direct `.hive` parsing, merge/overwrite into an existing destination, and unrestricted custom-object/schema migration are not implied product requirements. They should be added only under an explicit migration use case.
 
-1. built-in dynamic MessagePack values for maps/lists/primitives,
-2. a small explicit serializer interface for domain objects,
-3. version-tagged records for schema migration,
-4. convenience adapters that are handwritten or runtime-registered rather than generated.
+## Encryption comparison notes
 
-The final mechanism must support forward-compatible schema evolution and migration tests before custom-object parity is marked complete.
+Dxtr_Box encryption requirements are defined by its own security contract rather than Hive parity. Current invariants include:
 
-## Isolate and process semantics
+- per-box persisted random salt;
+- Argon2-derived key material;
+- unique nonces for encrypted values;
+- ChaCha20Poly1305 authenticated encryption;
+- authenticated record-key binding;
+- deterministic wrong-key/tamper rejection;
+- explicit plaintext-to-encrypted migration;
+- native-size measurement by capability profile.
 
-Functional parity requires more than compiling from multiple isolates. Tests must verify:
+Encrypted query/index behavior is defined separately in `QUERY_INDEX_ENCRYPTION_06.md` and `ENCRYPTED_RANGE_DECISION_06.md`.
 
-- two Dart isolates can safely access the same box,
-- reads do not corrupt or block unrelated readers,
-- writes are serialized correctly,
-- stale Dart metadata cannot overwrite native truth,
-- watch events have documented cross-isolate behavior,
-- close/delete/maintenance behavior is deterministic while other handles exist.
+## Performance comparison
 
-## Encryption parity gate
+Performance comparison with Hive CE is useful engineering evidence but not a parity requirement. The broader comparison harness also includes other local-database engines and separates correctness from diagnostic timing.
 
-Before encryption can be marked fully audited:
+Relevant targets include:
 
-- each encrypted box has a unique persisted random salt,
-- Argon2 derives the encryption key,
-- each value uses a unique nonce,
-- ChaCha20Poly1305 authenticates ciphertext,
-- record-key AAD prevents ciphertext swapping between keys,
-- wrong passwords fail deterministically,
-- tampered payloads are rejected,
-- encrypted reopen and plaintext -> encrypted migration are tested,
-- encryption-enabled binary size is measured separately.
+```bash
+make benchmark-comparison-correctness
+make benchmark-comparison
+make benchmark-query-index
+```
 
-The implementation now covers the storage/security behaviors above except the binary-size measurement gate and broader release-audit evidence.
+Hosted-runner timings are diagnostic only.
 
-## Plaintext -> encrypted migration contract
+## 1.0 direction
 
-`DxtrBox.encryptBox()` is a storage-mode maintenance operation, distinct from Hive CE data migration.
+Dxtr_Box 1.0 should represent a coherent, production-ready **Dxtr_Box contract**: durable native storage, understandable public API, query/index semantics, authenticated encryption, compatibility/migration behavior, and reliable five-platform packaging.
 
-Required semantics:
-
-- never triggered implicitly by `open(..., encryptionKey: ...)`,
-- requires all live handles for the box to be closed,
-- validates all plaintext MessagePack payloads before committing the transition,
-- rewrites values and changes encryption metadata in one redb write transaction,
-- persists a fresh salt and authenticated key-check sentinel,
-- rejects missing, open, already-encrypted, unsupported-format, or empty-key cases,
-- successful reopen requires the new key and preserves decoded data.
-
-A dedicated process-kill test that targets an in-flight migration remains future fault-injection hardening. The current contract relies on redb transactional before/after semantics plus tests that pre-commit validation failure preserves plaintext state.
-
-## Hive migration parity gate
-
-The 0.3 `migrateFromHiveCe()` path now covers the following documented migration baseline:
-
-- primitive values,
-- lists/maps,
-- binary data,
-- DateTime,
-- String keys and deterministic int-key mapping,
-- custom/unsupported values through an explicit conversion callback,
-- encrypted Hive CE source boxes opened by the caller with Hive CE credentials,
-- encrypted dxtr_box destinations,
-- preflight collision/value failures before destination creation,
-- exclusive destination reservation so concurrent migrations cannot merge into one target,
-- cleanup of a destination reservation owned by a migration when handle initialization or the single transactional `putAll` fails.
-
-Real Hive CE 2.19.3 fixtures validate this contract. LazyBox migration, direct `.hive` parsing, overwrite/merge into an existing destination, additional Hive CE built-in types not representable by the current codec, and full 1.0 custom-object/schema parity remain outside the 0.3 claim.
-
-A hard process termination during destination creation/commit is not claimed to provide file-level crash-atomic promotion; stronger staging/promotion remains future hardening if product evidence requires it.
-
-## Performance is not parity
-
-Functional parity does not require matching Hive's internal architecture or synchronous latency profile. Performance is evaluated separately.
-
-Required benchmark dimensions before 1.0:
-
-- cold open,
-- random reads,
-- sequential reads,
-- single writes,
-- batched writes,
-- deletes,
-- reopen persistence,
-- memory usage with small and large boxes,
-- database file size,
-- encrypted vs unencrypted cost.
-
-## Release checklist
-
-Before 1.0 RC:
-
-1. Refresh this matrix against the latest Hive CE public API and documentation.
-2. Add tests for every row classified `Exact`, `Compatible`, or `Superseded` where automation is practical.
-3. Resolve every practical capability still marked `Gap`.
-4. Document intentional API/semantic differences in the migration guide.
-5. Run migration tests using real Hive CE fixture databases.
-6. Run Android, iOS, macOS, Linux, Windows, and Web validation.
-7. Publish measured performance, memory, durability, and binary-size results.
-
-Only after these gates pass may the project claim:
-
-> `dxtr_box` is a functional replacement for Hive/Hive CE. Existing applications may need API changes, but practical Hive local-database workloads are covered.
+It is **not** blocked on reproducing every Hive/Hive CE feature. Any future Hive-oriented work must be justified as migration/interoperability value or as an independently useful Dxtr_Box capability.

@@ -33,22 +33,60 @@ native profiles:        minimal | encryption | full
   - added one-snapshot `Box.getAll`;
   - rejected reusable long-lived read sessions because redb read transactions are fixed snapshots and can become stale;
   - final comparison/closure audit merged.
+- **0.6 Query / Index + Encryption Hardening** — complete after PR #43 merges with the full quality bar green.
+  - PR #39 established the encrypted-index threat model and safe-default guard;
+  - PR #40 added encrypted equality indexing with keyed BLAKE2b tokens plus planner polish;
+  - PR #42 locked encrypted ordered/range predicates to authoritative scan-backed execution;
+  - PR #43 is the final closure/audit publication of the completed milestone state.
 - **Change-aware Fast CI** — complete; affected expensive gates during Draft, full merge quality bar for Ready/non-draft work.
 
-## Current milestone — 0.6 Query / Index + Encryption Hardening
+Normative 0.6 design record: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+Closure record: `docs/RELEASE_AUDIT_06.md`.
 
-Normative design/acceptance record: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+## Next milestone — 0.7 Query Ergonomics
 
-Current PR sequence:
+Planned design record: `docs/QUERY_ERGONOMICS_07.md`.
 
-```text
-PR1 — threat model + safe-default regression guard + milestone/product docs: merged (#39)
-PR2 — encrypted equality index + plaintext planner/range/index polish: merged (#40)
-PR3 — encrypted range/index decision: active (#42)
-PR4 — core reliability/API closure + 0.6 audit: final
+The preferred next milestone is **0.7 Query Ergonomics**: improve the Dart query experience without replacing the existing query engine or changing durable storage.
+
+Target public style:
+
+```dart
+final users = await box
+    .where('status').equals('active')
+    .and('age').gte(18)
+    .orderBy('name')
+    .limit(20)
+    .find();
 ```
 
-PR4 is not a Hive/Hive CE parity pass.
+Architectural rule:
+
+```text
+Fluent Dart API
+      |
+      v
+existing BoxQuery AST
+      |
+      v
+existing serialization / FRB
+      |
+      v
+existing Rust planner + indexes
+```
+
+`Box.query(BoxQuery)` remains first-class for advanced/dynamic composition. The fluent API is additive, not a parallel query model.
+
+Recommended 0.7 sequence:
+
+```text
+PR1 — fluent where/comparison/AND/OR/grouping builder
+PR2 — orderBy/offset/limit/find ergonomics; native-backed convenience operations only where efficient
+PR3 — optional DxtrField<T> typed field metadata; no mandatory codegen/schema
+PR4 — README/examples/API equivalence/compatibility closure
+```
+
+Do not turn 0.7 into an ORM, SQL parser, schema framework, or Dart-side post-filtering layer. `exists()` / `count()` should only be exposed when backed by efficient native operations rather than materializing full result sets across FRB.
 
 ## Current capabilities
 
@@ -104,9 +142,9 @@ generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 
 `Box.getAll` uses one native crossing and one redb read snapshot; hosted evidence reached about 8.59x improvement for 1,000 keys versus independent public `get` calls.
 
-Do not regress these paths opportunistically during 0.6.
+Do not regress these paths opportunistically during later work.
 
-## PR2 encrypted equality-index contract
+## Encrypted equality-index contract
 
 Merged PR #40 introduced encrypted equality candidate narrowing:
 
@@ -135,9 +173,9 @@ Not intentionally persisted:
 
 An earlier BLAKE3 implementation exceeded native-size policy and was replaced by BLAKE2 reuse already present through Argon2. Final measured full-profile Linux x64 evidence for PR2 was +30,432 bytes / +1.276%, within policy.
 
-## PR3 encrypted range decision
+## Encrypted range decision
 
-PR3 intentionally **does not** add encrypted persisted range ordering.
+Merged PR #42 intentionally **does not** add encrypted persisted range ordering.
 
 Production contract for encrypted boxes:
 
@@ -163,7 +201,26 @@ Reason: either incorrect ordering semantics, unacceptable order/distribution lea
 
 Decision record: `docs/ENCRYPTED_RANGE_DECISION_06.md`.
 
-PR3 regression guard: `rust/tests/encrypted_range_decision.rs` covers all five ordered/range operators plus mixed equality+range `AND` before/after encrypted index creation.
+Regression guards include `rust/tests/encrypted_range_decision.rs` and `rust/tests/encrypted_range_planner_guard.rs`.
+
+## 0.6 closure audit
+
+The final acceptance matrix lives in `docs/RELEASE_AUDIT_06.md`.
+
+PR #43 is the closure publication commit. Its merge is permitted only when the repository full quality bar is green, including:
+
+- public API/storage contract checks;
+- Dart/Rust/native tests;
+- query/index/encryption regression coverage;
+- migration and process crash/reopen coverage;
+- FRB generated-binding reproducibility;
+- exact three native profiles;
+- native-size regression policy;
+- package/pub readiness;
+- benchmark correctness/smoke;
+- staged Android/iOS/macOS/Linux/Windows consumers.
+
+The state represented by the merged closure commit is **0.6 complete**. Documentation does not bypass the quality bar; the quality bar is the condition for merging that state.
 
 ## Benchmark policy
 
@@ -189,7 +246,7 @@ change detection
       v
    Fast CI
       |
-      +--> affected expensive gates during Draft iteration
+      +--> affected expensive validation during Draft iteration
       |
       v
 Merge Gate / full quality bar
@@ -212,21 +269,13 @@ Full merge validation must preserve:
 - package/pub readiness;
 - staged Android/iOS/macOS/Linux/Windows consumers.
 
-## PR4 target
-
-After PR3 merges, PR4 should be the final **core reliability/API closure + 0.6 audit**.
-
-Only pull in cleanup that independently strengthens Dxtr_Box itself. Avoid feature expansion.
-
-PR4 should verify the 0.6 acceptance matrix, synchronize public/internal docs, record release evidence, and close the milestone.
-
-## Post-0.6 maturity candidates
+## Post-0.7 maturity candidates
 
 Datum-inspired ideas retained for later evaluation:
 
 1. reusable conformance / storage-contract test kit;
 2. schema/config fingerprint + startup fast path;
-3. optional typed schema/query metadata while keeping the dynamic box API first-class;
+3. broader typed schema/query metadata only if `DxtrField<T>` proves valuable while keeping the dynamic box API first-class;
 4. capability abstractions only when multiple execution variants justify them;
 5. user-facing benchmark scenarios rather than isolated microbenchmarks only.
 

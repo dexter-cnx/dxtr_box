@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough covers the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution paths, completed 0.4/0.5 work, and the current 0.6 Query / Index + Encryption Hardening milestone.
+This walkthrough covers the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution paths, completed 0.4/0.5/0.6 work, and the next planned 0.7 Query Ergonomics direction.
 
 ## 1. Package boundary
 
@@ -46,7 +46,7 @@ Rust owns durable storage, transactions, encryption, native watchers, query eval
 
 Dxtr_Box is a native local database for Flutter, not a Hive/Hive CE replacement.
 
-Hive CE remains optional migration/interoperability tooling and a benchmark/reference peer.
+Hive CE remains optional migration/interoperability tooling and a benchmark/reference peer. `docs/HIVE_FUNCTIONAL_PARITY.md` is retained only as a historical compatibility inventory and is not a product roadmap or 1.0 gate.
 
 ## 4. Storage and mutation atomicity
 
@@ -185,7 +185,7 @@ Index create/backfill and mutation/delete maintenance stay in the same redb writ
 
 ## 10. Encrypted range execution after PR3
 
-PR3 makes the range policy explicit: encrypted ordered/range predicates remain scan-backed in 0.6.
+PR #42 made the range policy explicit: encrypted ordered/range predicates remain scan-backed.
 
 Planner contract:
 
@@ -221,7 +221,7 @@ This preserves exact-match acceleration while adding no persisted order-revealin
 
 Decision record: `docs/ENCRYPTED_RANGE_DECISION_06.md`.
 
-Regression guard: `rust/tests/encrypted_range_decision.rs` validates all five ordered/range operators and mixed equality+range AND semantics before/after encrypted index creation.
+Regression guards: `rust/tests/encrypted_range_decision.rs` validates all five ordered/range operators and mixed equality+range AND semantics before/after encrypted index creation; `rust/tests/encrypted_range_planner_guard.rs` locks the equality-only encrypted planner rule.
 
 ## 11. Why encrypted range indexing is rejected for 0.6
 
@@ -323,18 +323,33 @@ make preflight
 
 Ready/non-draft work must satisfy full merge validation.
 
-## 17. 0.6 sequence
+## 17. 0.6 sequence and closure
 
 ```text
 PR1 — threat model + safe-default guard + docs: merged (#39)
 PR2 — encrypted equality index + planner polish: merged (#40)
-PR3 — encrypted range decision / scan-only guard: active (#42)
-PR4 — core reliability/API closure + 0.6 audit: final
+PR3 — encrypted range decision / scan-only guard: merged (#42)
+PR4 — core reliability/API closure + 0.6 audit: complete in #43 when this closure commit merges
 ```
 
-PR4 is not a Hive/Hive CE parity pass.
+The merged PR #43 state represents **0.6 complete**. It is a closure/audit publication, not a Hive/Hive CE parity pass, and introduces no feature-expansion requirement.
 
-## 18. Invariants to preserve
+Closure record: `docs/RELEASE_AUDIT_06.md`.
+
+## 18. Next planned query layer
+
+0.7 Query Ergonomics is planned as an additive Dart API over the same AST:
+
+```text
+Fluent Dart API
+  -> existing BoxQuery AST
+  -> existing serialization / FRB
+  -> existing Rust planner + indexes
+```
+
+The existing `Box.query(BoxQuery)` remains first-class. 0.7 must not introduce a parallel query engine, ORM, SQL parser, mandatory schema/code generation, or Dart-side result filtering. See `docs/QUERY_ERGONOMICS_07.md`.
+
+## 19. Invariants to preserve
 
 - Dart >=3.4 / Flutter >=3.22.
 - FRB exactly 2.8.0.
@@ -370,4 +385,4 @@ make benchmark-batch-read
 make native-size-regression
 ```
 
-See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative milestone contract, `docs/ENCRYPTED_RANGE_DECISION_06.md` for the PR3 decision, and `docs/PROJECT_HANDOFF.md` for current execution state.
+See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative 0.6 contract, `docs/ENCRYPTED_RANGE_DECISION_06.md` for the encrypted range decision, `docs/RELEASE_AUDIT_06.md` for the final closure matrix, `docs/QUERY_ERGONOMICS_07.md` for the next query-API direction, and `docs/PROJECT_HANDOFF.md` for execution state.

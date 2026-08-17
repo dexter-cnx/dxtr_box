@@ -1,3 +1,14 @@
+## 0.6.0-dev.1
+
+- Repositioned Dxtr_Box clearly as its own native local database for Flutter rather than a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer.
+- Added encrypted persisted equality indexes under the `full` profile using deterministic 256-bit BLAKE2b keyed MAC tokens derived from authenticated box key material and domain-separated by index name and field.
+- Kept encrypted primary records authoritative: every encrypted-index candidate is re-read from primary storage, ChaCha20Poly1305 authenticated/decrypted, and fully predicate-checked before returning results.
+- Kept encrypted ordered/range predicates (`>`, `>=`, `<`, `<=`, `between`) scan-backed instead of introducing order-preserving/order-revealing encrypted state.
+- Added regression coverage for encrypted equality lifecycle/mutation/reopen behavior, encrypted range scan equivalence, and mixed equality + range predicates.
+- Preserved transactional primary/index maintenance, `dxtr_box/1`, Dart >=3.4 / Flutter >=3.22, flutter_rust_bridge 2.8.0, redb 2.1.0, native library `rust_lib_dxtr_box`, and exactly `minimal | encryption | full` native profiles.
+- Retained the 0.5 authoritative point-read and one-snapshot `Box.getAll` semantics; no Dart whole-box cache or reusable stale read session was introduced.
+- Added a dedicated 0.6 release audit tying milestone closure to the full merge quality bar, including API/storage, migration, crash-reopen, native-size, package, benchmark correctness, and five-platform consumer validation.
+
 ## 0.5.0-dev.1
 
 - Optimized authoritative single-key reads by moving only native `get` and `containsKey` FRB entrypoints to synchronous generated dispatch while keeping the public Dart API asynchronous.
