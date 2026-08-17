@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed 0.4 hardening, change-aware CI, and the 0.5 PR1/PR2 read-path work.
+This walkthrough describes the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed 0.4 hardening, change-aware CI, and 0.5 read-path work through PR3.
 
 ## 1. Package boundary
 
@@ -36,15 +36,15 @@ Dart 3.13 recorded-use/native tree shaking remains deferred.
 ```text
 Flutter app
   -> DxtrBox / Box / query + migration types
-  -> NativeDxtrApi capability seam
+  -> native capability seams
   -> generated flutter_rust_bridge bindings
   -> Rust API
   -> redb
 ```
 
-Dart owns public ergonomics, MessagePack encoding/decoding, lightweight metadata, lifecycle guards, query objects and Hive CE migration preflight.
+Dart owns public ergonomics, MessagePack encoding/decoding, lightweight metadata, lifecycle guards, query objects, and Hive CE migration preflight.
 
-Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted indexes, maintenance and plaintext-to-encrypted migration.
+Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted indexes, maintenance, and plaintext-to-encrypted migration.
 
 ## 3. Storage identity
 
@@ -92,93 +92,92 @@ Box.get
   -> DxtrCodec.decode
 ```
 
-`Box.containsKey` follows the same authoritative native path but stops at the point lookup and returns a boolean. Rust `contains_key` also uses `#[frb(sync)]`.
+`Box.containsKey` follows the same authoritative native path and Rust `contains_key` also uses `#[frb(sync)]`.
 
-Only these tiny single-key read entrypoints use synchronous FRB dispatch. Query, scans, mutations, migration and other heavier operations keep their existing asynchronous call modes.
+Only these tiny single-key read entrypoints use synchronous FRB dispatch. Query, batch reads, scans, mutations, and migrations remain asynchronous.
 
-No Dart whole-box cache, metadata-backed authoritative shortcut or long-lived stale read snapshot was introduced. Cross-handle/cross-process freshness and encrypted AEAD authentication remain intact.
-
-## 6. Why sync FRB is safe here
-
-PR1 showed the actual in-process native point-read work is very small on the diagnostic workload:
+PR2 controlled evidence:
 
 ```text
-medium plaintext db_get       ~1.055 us
-medium db_contains_key        ~0.655 us
+generated FRB get        ~226 us -> 4.312 us   ~52x faster
+generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 ```
 
-PR2 then isolated FRB `NormalTask` scheduling as the dominant cost. The scope is deliberately limited to point reads so expensive query/scan/mutation work is not moved onto the Dart isolate synchronously.
+No Dart whole-box cache, metadata-backed authoritative shortcut, or long-lived stale read snapshot was introduced.
 
-## 7. PR2 boundary benchmark
+## 6. Production batch-read path after PR #36
 
-`test/read_path_boundary_benchmark_test.dart` measures generated FRB calls separately from the Future-based adapter.
+Public API:
 
-Pre-change representative medians:
+```dart
+Future<List<MapEntry<String, dynamic>>> getAll(Iterable<String> keys)
+```
+
+Execution:
 
 ```text
-generated FRB get NormalTask          ~226 us/op
-generated FRB containsKey NormalTask  ~197 us/op
+Box.getAll
+  -> validate all requested keys
+  -> NativeBatchReadApi.getAll
+  -> FrbNativeDxtrApi.getAll
+  -> generated asynchronous FRB getAll
+  -> Rust api::get_all
+  -> db::get_all
+  -> one redb ReadTransaction
+  -> one DATA table open
+  -> N authoritative key lookups
+  -> decrypt/authenticate every encrypted hit
+  -> validate MessagePack every hit
+  -> one Vec<NativeBatchRecord> response
+  -> Dart DxtrCodec.decode per hit
 ```
 
-Post-change Read-path Benchmark #24 (`31954326856`):
+Semantics:
 
 ```text
-generated FRB get sync hit           4.312 us/op
-generated FRB get sync miss          1.888 us/op
-generated FRB containsKey sync hit   2.570 us/op
-generated FRB containsKey sync miss  1.734 us/op
-native adapter get async hit        21.076 us/op
-native adapter contains async hit   17.636 us/op
+input order for hits: preserved
+missing keys:         omitted
+duplicate input keys: duplicate result entries
+empty input:          empty result without native crossing
 ```
 
-Direct generated-FRB latency improved by roughly 52x for `get` and 77x for `containsKey`. Hosted-runner timing remains diagnostic.
+The batch entrypoint intentionally stays asynchronous. A 1,000-key batch must not inherit the single-key `#[frb(sync)]` policy and synchronously occupy the Dart/UI isolate.
+
+`NativeBatchReadApi` is a separate capability seam so the core `NativeDxtrApi` contract is not widened for unrelated injected adapters.
+
+## 7. PR3 benchmark evidence
+
+`test/batch_read_benchmark_test.dart` compares `Box.getAll` with N independent `Box.get` calls using the same populated box.
+
+Read-path Benchmark #31, run `31978434993`:
+
+| Keys | `getAll` | Independent `get` | Relative improvement |
+|---:|---:|---:|---:|
+| 10 | 445 us | 636 us | ~1.43x |
+| 100 | 814 us | 5,256 us | ~6.46x |
+| 1,000 | 3,729 us | 32,032 us | ~8.59x |
+
+These hosted-runner medians are diagnostic. The important architectural result is that increasing key count no longer requires one Dart/FRB crossing and one redb transaction/table open per key.
+
+Native integration additionally verifies encrypted batch reads while preserving order, duplicate behavior, and missing-key behavior.
 
 ## 8. Existing decomposed read-path harness
 
-`rust/src/read_path_bench.rs` measures:
+`rust/src/read_path_bench.rs` measures transaction creation, table open, point lookup/copy, MessagePack validation, payload copy, authenticated decryption, `db_get`, and `db_contains_key`.
 
-```text
-redb_read_transaction_create
-redb_read_transaction_open_table
-redb_point_lookup_borrowed
-redb_point_lookup_copy
-messagepack_validate
-vec_payload_copy
-decrypt_authenticate
-db_get
-db_contains_key
-```
+`test/read_path_benchmark_test.dart` measures codec decode plus adapter/public point-read paths. `test/read_path_boundary_benchmark_test.dart` isolates generated FRB dispatch from the Future-based adapter.
 
-`test/read_path_benchmark_test.dart` measures:
-
-```text
-dart_dxtr_codec_decode
-native_adapter_get
-public_box_get
-native_adapter_contains_key
-public_box_contains_key
-```
-
-The Rust benchmark payload models the same logical `DxtrCodec` tagged-map wire shape as the Dart workload. The earlier mismatched `Vec<u8>` medium payload is superseded and must not be used for bottleneck decisions.
-
-## 9. Machine-readable evidence
-
-`make benchmark-read-path` produces:
+Machine-readable evidence from the dedicated read-path workflow remains:
 
 ```text
 build/read-path/rust-read-path.jsonl
 build/read-path/dart-read-path.jsonl
-```
-
-PR2 adds:
-
-```text
 build/read-path/dart-boundary.jsonl
 ```
 
-The dedicated workflow uploads runner/toolchain metadata with the evidence and fails closed when required files are missing.
+The permanent workflow is read-only and uploads evidence/toolchain metadata; temporary PR3 source-generation logic is not retained.
 
-## 10. Query execution
+## 9. Query execution
 
 `Box.query(BoxQuery)` remains one structured query through one asynchronous FRB call:
 
@@ -189,7 +188,7 @@ Box.query
   -> one redb ReadTransaction snapshot
   -> optional index candidate narrowing
   -> authoritative primary reads
-  -> optional decrypt
+  -> optional decrypt/authenticate
   -> full predicate re-evaluation
   -> deterministic semantic sort
   -> offset / limit
@@ -198,9 +197,9 @@ Box.query
 
 Persisted indexes narrow candidates only; they do not replace predicate re-evaluation and do not satisfy ORDER BY.
 
-## 11. Encryption/profile safety
+## 10. Encryption/profile safety
 
-Encrypted boxes can use native scan queries but cannot create persisted plaintext-derived secondary indexes. Plaintext-to-encrypted migration is rejected while persisted index definitions exist.
+Encrypted point and batch reads preserve full AEAD authentication. Encrypted boxes can use native scan queries but cannot create persisted plaintext-derived secondary indexes.
 
 Profiles remain exactly:
 
@@ -212,7 +211,7 @@ full
 
 Reduced profiles reject indexed boxes they cannot safely maintain.
 
-## 12. Hive CE migration
+## 11. Hive CE migration
 
 Core `dxtr_box` has no runtime Hive CE dependency.
 
@@ -232,7 +231,7 @@ migrateFromHiveCe
 
 Ordinary opens are excluded while migration owns the destination. Failure cleanup removes migration-owned state and releases its reservation.
 
-## 13. FRB drift and package gates
+## 12. FRB drift and package gates
 
 Checked-in bindings are generated with FRB 2.8.0. Full CI regenerates them and fails on any diff.
 
@@ -244,29 +243,19 @@ make package-readiness
   -> dart pub publish --dry-run --ignore-warnings
 ```
 
-## 14. Native-size policy
+## 13. Native-size policy
 
 ```text
 allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
 ```
 
-Minimal, encryption and full are measured independently.
+Minimal, encryption, and full are measured independently.
 
-## 15. Staged published consumers
+## 14. Staged published consumers
 
-`tool/validate_published_consumer.dart` validates the consumer-visible package payload on:
+`tool/validate_published_consumer.dart` validates the consumer-visible package payload on Android, iOS, macOS, Linux, and Windows.
 
-```text
-Android
-iOS
-macOS
-Linux
-Windows
-```
-
-PR #35 full validation passed all five staged consumers.
-
-## 16. Change-aware CI
+## 15. Change-aware CI
 
 ```text
 change-detection
@@ -290,21 +279,21 @@ contract-check
 rust-check
 ```
 
-Full PR #35 rerun `31954326887` passed Fast CI, minimum SDK, Dart full tests, Rust profiles/cross-platform, native integration, storage/migration/query regressions, FRB drift, package readiness, native-size, benchmark smoke, all five staged consumers and the final Merge Gate.
+Full validation remains mandatory before merge.
 
-## 17. 0.5 implementation sequence
+## 16. 0.5 implementation sequence
 
 ```text
 PR 1 / #33 — read-path decomposition + corrected baseline      complete
-PR 2 / #35 — sync FRB single-key reads                         complete / ready to merge
-PR 3       — batch/multi-key read path                         next
-PR 4       — read-session investigation                        planned
+PR 2 / #35 — sync FRB single-key reads                         complete / merged
+PR 3 / #36 — one-snapshot batch/multi-key reads                complete / final validation
+PR 4       — read-session investigation                        next
 PR 5       — expanded comparison + 0.5 closure audit          planned
 ```
 
-PR3 should target one FRB call plus one redb snapshot for N keys instead of N independent point-read crossings. It must define missing/duplicate-key behavior and support encrypted boxes.
+PR4 should evaluate whether explicit reusable read sessions provide enough benefit after `getAll` to justify stale-snapshot/resource/lifecycle complexity. Ordinary `get` must not silently move to a long-lived snapshot.
 
-## 18. Invariants to preserve
+## 17. Invariants to preserve
 
 - Dart >=3.4 / Flutter >=3.22.
 - FRB exactly 2.8.0.
@@ -312,7 +301,7 @@ PR3 should target one FRB call plus one redb snapshot for N keys instead of N in
 - Exactly three native profiles.
 - `dxtr_box/1` remains readable.
 - Primary data authoritative over indexes.
-- `get` and `containsKey` remain authoritative native reads.
+- `get`, `containsKey`, and `getAll` remain authoritative native reads.
 - No Dart whole-box cache.
 - Full encrypted authentication.
 - Query/index/migration correctness.
@@ -333,6 +322,7 @@ make query-index-test
 make query-sort-test
 make benchmark-comparison-correctness
 make benchmark-read-path
+make benchmark-batch-read
 make native-size-regression
 make published-consumer-android
 make published-consumer-ios
