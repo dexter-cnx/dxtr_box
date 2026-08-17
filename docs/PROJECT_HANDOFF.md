@@ -14,31 +14,24 @@ Closed milestones:
 
 - 0.3 query/index/migration complete.
 - 0.4 Production Hardening PH-01 through PH-05 complete.
-- PR #27 native-size regression policy.
-- PR #28 package/publication hardening.
-- PR #29 four-engine correctness + diagnostic comparison.
-- PR #30 staged published-payload five-platform consumer validation.
-- PR #31 public API + durable-storage contract guard.
+- 0.5 Performance / Read-path Optimization complete: decomposed the read path, removed the dominant single-key FRB `NormalTask` overhead, added one-snapshot `Box.getAll`, and rejected a reusable stale read-session API after investigation.
 - PR #34 change-aware Fast CI / selective affected gates / full merge gate.
-- PR #33 0.5 PR1 read-path decomposition and corrected benchmark baseline.
-- PR #35 0.5 PR2 single-key cross-runtime read optimization merged.
-- PR #36 0.5 PR3 one-snapshot batch/multi-key reads merged.
-- PR #37 0.5 PR4 read-session investigation merged with an evidence-backed rejection of a reusable session API.
 
-Current 0.5 sequence:
+Current milestone:
 
-```text
-PR 1 / #33 — read-path decomposition + corrected evidence baseline   complete / merged
-PR 2 / #35 — sync FRB point-read boundary for get / containsKey      complete / merged
-PR 3 / #36 — one-snapshot batch / multi-key reads                     complete / merged
-PR 4 / #37 — read-session investigation                               complete / merged
-PR 5       — comparison matrix + 0.5 closure audit                    active / final gate
-```
+# 0.6 — Query / Index + Encryption Hardening
 
-Normative performance document: `docs/PERFORMANCE_READ_PATH_05.md`.
-Normative read-session decision: `docs/READ_SESSION_INVESTIGATION_05.md`.
-Normative closure audit: `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
-Normative CI document: `docs/CI_STRATEGY.md`.
+0.6 intentionally combines query/index polish and encryption hardening instead of creating two broad milestones.
+
+Normative 0.6 document: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+
+Bounded scope:
+
+1. query/index production polish;
+2. encrypted query/index security and implementation decisions;
+3. only Hive/Hive CE parity gaps necessary for practical replacement.
+
+Explicitly out of scope unless separately prioritized: ORM/code generation, cloud sync/replication, general schema framework, reactive-query redesign, and unrelated product expansion.
 
 ## Stable package/runtime contract
 
@@ -53,9 +46,9 @@ durable format:         meta[format_version] = dxtr_box/1
 native profiles:        minimal | encryption | full
 ```
 
-`full` is default. Do not add a fourth native profile for performance tuning.
+`full` is default. Do not add a fourth native profile for tuning or encrypted indexing.
 
-Dart 3.13 recorded-use/native tree shaking remains deferred outside current 0.5 work unless explicitly pulled forward.
+Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly pulled forward.
 
 ## Current capabilities
 
@@ -69,7 +62,7 @@ Dart 3.13 recorded-use/native tree shaking remains deferred outside current 0.5 
 - Explicit compact and plaintext-to-encrypted migration.
 - Process crash/reopen durability coverage.
 - Declarative `Box.query(BoxQuery)` with one FRB call per query.
-- Persisted named scalar indexes under `full`.
+- Persisted named scalar indexes under `full` for plaintext boxes.
 - Equality/range candidate narrowing, nested indexes, AND intersection.
 - One redb read snapshot per native query.
 - Deterministic semantic sorting before pagination.
@@ -80,103 +73,114 @@ Dart 3.13 recorded-use/native tree shaking remains deferred outside current 0.5 
 - Fresh staged-payload Android/iOS/macOS/Linux/Windows consumer builds.
 - Public export and durable-format compatibility guards.
 - Change-aware Fast CI plus full merge validation.
-- Machine-readable read-path benchmark evidence.
+- Machine-readable read-path and comparison benchmark evidence.
 
 ## Hard correctness invariants
 
 Primary `data` is authoritative; persisted indexes are derived state. Mutations keep primary and index changes in one redb write transaction and publish watch events only after commit.
 
-`Box.get`, `Box.containsKey`, and `Box.getAll` remain authoritative native reads. Do not substitute Dart key metadata, a Dart whole-box cache, or an implicit long-lived read snapshot; those would weaken cross-handle/cross-process freshness.
+`Box.get`, `Box.containsKey`, and `Box.getAll` remain authoritative native reads. Do not substitute Dart key metadata, a Dart whole-box cache, or an implicit long-lived read snapshot; those weaken cross-handle/cross-process freshness.
 
-Encrypted reads retain full AEAD authentication. Query/index/migration behavior and `dxtr_box/1` compatibility remain hard gates.
+Encrypted reads retain full AEAD authentication. Every query result, including future encrypted-index candidates, must resolve through the authoritative primary record and complete decrypt/authenticate plus predicate re-evaluation before returning to Dart.
 
-## Point-read path after PR #35
+`dxtr_box/1` remains readable. A storage-format change requires deliberate compatibility/migration evidence, not just a marker update.
+
+## 0.5 read-path result retained by 0.6
+
+Single-key point reads keep the PR #35 call-mode optimization:
 
 ```text
 Box.get / Box.containsKey
-  -> Future-based NativeDxtrApi
+  -> Future-based Dart API
   -> FrbNativeDxtrApi
-  -> generated FRB sync call for point read only
-  -> Rust api::get / api::contains_key
-  -> redb authoritative read
+  -> generated FRB sync dispatch for point read only
+  -> Rust authoritative redb read
   -> optional decrypt/authenticate
-  -> MessagePack validation / payload return
-  -> Dart decode where applicable
+  -> MessagePack validation / return
 ```
 
-Only Rust `get` and `contains_key` use `#[frb(sync)]`. Query, batch reads, scans, mutations, migrations, and other potentially heavier operations remain asynchronous.
-
-PR2 controlled boundary evidence:
+Controlled boundary evidence recorded in 0.5:
 
 ```text
 generated FRB get        ~226 us -> 4.312 us   ~52x faster
 generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 ```
 
-## Batch-read path after PR #36
+Batch reads remain asynchronous and use one redb snapshot/table open for the requested key set. Hosted 0.5 evidence reached ~8.59x improvement for 1,000 keys versus N independent public `get` calls.
 
-Public API:
+Do not regress these paths opportunistically during 0.6.
 
-```dart
-Future<List<MapEntry<String, dynamic>>> Box.getAll(
-  Iterable<String> keys,
-)
-```
+## Query/index baseline entering 0.6
 
-Execution:
+Plaintext indexes currently provide:
+
+- named scalar index definitions;
+- exact dotted-field matching;
+- equality and ordered/range candidate narrowing;
+- deterministic lexical index-name selection when duplicate-field indexes exist;
+- multi-index AND intersection;
+- authoritative primary re-read and predicate recheck;
+- semantic sort before offset/limit.
+
+Persisted indexes narrow WHERE candidates only. They do not currently satisfy ORDER BY, and raw MessagePack bytes are not treated as semantic numeric order.
+
+## Encrypted-index safe default
+
+Encrypted boxes currently execute query scans but reject persisted index creation in Rust:
 
 ```text
-N keys
-  -> Box.getAll
-  -> NativeBatchReadApi
-  -> FrbNativeDxtrApi.getAll
-  -> one asynchronous generated FRB call
-  -> Rust api::get_all
-  -> db::get_all
-  -> one redb ReadTransaction
-  -> one DATA table open
-  -> N authoritative lookups
-  -> decrypt/authenticate + MessagePack validation for every hit
-  -> one response
-  -> Dart decode
+persisted indexes are not yet supported for encrypted boxes; native scan queries remain available
 ```
 
-Semantics:
+0.6 begins by turning that limitation into an explicit security contract rather than immediately removing it.
 
-- hits preserve requested order;
-- missing keys are omitted;
-- duplicate input keys produce duplicate result entries;
-- empty input returns empty without crossing native;
-- every key is validated before native dispatch;
-- encrypted hits retain full AEAD authentication;
-- FRB batch dispatch remains asynchronous.
+The repository must not persist plaintext scalar index bytes for encrypted boxes simply to recover plaintext-index performance.
 
-PR3 hosted evidence from Read-path Benchmark #31:
+Threat-model questions that must be answered before encrypted indexes ship include leakage of:
 
-| Keys | `getAll` batch | N independent `get` calls | Improvement |
-|---:|---:|---:|---:|
-| 10 | 445 us | 636 us | ~1.43x |
-| 100 | 814 us | 5,256 us | ~6.46x |
-| 1,000 | 3,729 us | 32,032 us | ~8.59x |
+- indexed field names;
+- record identifiers;
+- equality classes / repeated values;
+- ordering;
+- cardinality/frequency;
+- null/missing state.
 
-PR #36 merged as `392bdf6e0af3741133eb4fb28b0638f4ecbd5a32` after full Merge Gate success.
+Preferred first production target, if justified: equality-only keyed deterministic tokens with domain separation and full primary decrypt/authenticate + predicate recheck. Frequency/equality leakage must still be documented.
 
-## PR4 read-session decision
+Encrypted range indexing is optional. If an acceptable representation requires excessive order leakage or complexity, encrypted range queries remain scan-only in 0.6.
 
-PR4 investigated a reusable native/redb snapshot across multiple Dart calls. **Decision: do not add a production read-session API in 0.5.**
+A native integration regression guard now requires encrypted index creation to stay blocked until that contract changes intentionally, while encrypted scan queries remain functional.
 
-Reasons:
+## 0.6 implementation sequence
 
-1. redb read transactions capture a fixed snapshot at `begin_read()`. A reusable session is therefore intentionally stale after later commits.
-2. Ordinary `get` / `containsKey` / `getAll` have established authoritative fresh-per-call semantics and must not silently inherit a stale snapshot.
-3. PR1 measured transaction + table-open at roughly 0.567 us for the representative medium plaintext workload; this is no longer the dominant point-read cost after PR2.
-4. PR3 already gives callers with known key sets one Dart/FRB crossing + one redb snapshot through `getAll`.
-5. A cross-call session would require explicit close/leak/box-close/compact/migration/multi-handle lifecycle semantics and a native registry or equivalent ownership model.
-6. The project is pinned to redb 2.1.0; upstream 2.1.1 specifically fixed a panic involving `compact()` while a read transaction is in progress. Intentionally lengthening read-transaction lifetimes is therefore a poor fit for the current pinned dependency.
+```text
+PR 1 — threat model + safe-default regression guard + milestone docs
+PR 2 — encrypted equality index implementation, only if representation is accepted
+PR 3 — plaintext planner/range/index polish + measured benchmark evidence
+PR 4 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
+PR 5 — required Hive parity + 0.6 closure audit
+```
 
-This is an evidence-backed rejection, not a permanent ban. Reconsider only for a concrete product requirement for coherent snapshot semantics across separate logical calls, with explicit stale-within-session behavior and new benchmark/lifecycle evidence.
+Small focused PRs are preferred. Do not combine all runtime changes into one review surface.
 
-Detailed record: `docs/READ_SESSION_INVESTIGATION_05.md`.
+## 0.6 performance policy
+
+Benchmarks are engineering evidence, not marketing gates.
+
+Measure where relevant:
+
+```text
+plaintext scan vs indexed equality
+plaintext scan vs indexed range
+encrypted scan vs encrypted equality index (if implemented)
+index create/backfill
+mutation overhead with indexes
+reopen/query
+```
+
+Use representative 100 / 1,000 / 10,000 record sizes where CI cost permits. Every performance claim must record methodology and correctness validation.
+
+Do not trade security or durability for a benchmark win.
 
 ## CI topology
 
@@ -192,7 +196,7 @@ change-detection
 Merge Gate / full quality bar
 ```
 
-`make preflight` mirrors the cheap gate:
+`make preflight` remains the cheap local gate:
 
 ```text
 format-check
@@ -204,27 +208,7 @@ rust-check
 
 Ready-for-review/non-draft work must still satisfy the full merge quality bar.
 
-## PR5 — final comparison + closure audit
-
-PR5 does not add another optimization. It closes 0.5 only after the final full Merge Gate proves the current codebase still satisfies:
-
-- four-engine comparison correctness plus diagnostic timing;
-- benchmark smoke;
-- Dart full tests;
-- native integration;
-- Rust `minimal`, `encryption`, and `full` checks;
-- query/index/migration regressions;
-- FRB 2.8.0 generated-binding drift protection;
-- native-size policy;
-- package/docs + pub dry-run;
-- Android/iOS/macOS/Linux/Windows staged consumers;
-- minimum Flutter 3.22.0 / Dart 3.4.0 compatibility.
-
-The four-engine matrix remains limited to operations with equivalent contracts across dxtr_box, Hive CE, Sembast, and SQLite. `Box.getAll` keeps its dedicated dxtr_box batch benchmark rather than introducing a synthetic cross-engine comparison with mismatched semantics.
-
-See `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
-
-## Existing 0.4 policies that remain active
+## Existing production policies that remain active
 
 Native-size policy:
 
@@ -242,50 +226,49 @@ storage key:       format_version
 storage format:    dxtr_box/1
 ```
 
-## 0.5 acceptance criteria
+## 0.6 acceptance criteria
 
-0.5 closes when PR5's final full Merge Gate succeeds.
+0.6 closes only when:
 
-1. Evidence-backed bottleneck decomposition — satisfied.
-2. At least one production read-path optimization — satisfied by PR #35.
-3. `get` / `containsKey` improvement — satisfied by PR #35 evidence.
-4. Efficient multi-key support or evidence-based rejection — satisfied by PR #36.
-5. No Dart whole-box cache — preserved.
-6. No durability/cross-process regression — preserved.
-7. No encryption/authentication weakening — preserved.
-8. `dxtr_box/1` remains readable — preserved.
-9. Exactly three native profiles remain — preserved.
-10. Dart >=3.4 / Flutter >=3.22 remain supported — preserved.
-11. FRB remains pinned/reproducible at 2.8.0 — preserved.
-12. Query/index/migration stays green — final PR5 gate.
-13. Native-size gate stays green — final PR5 gate.
-14. Five-platform staged consumers stay green — final PR5 gate.
-15. Read-session decision — satisfied by merged PR #37.
-16. Comparison/closure audit — active in PR5; satisfied when Merge Gate passes.
-
-After PR5 merge, further performance work should start under a new milestone based on a newly measured bottleneck rather than extending 0.5 opportunistically.
+1. plaintext query/index behavior is production-polished and regression-covered;
+2. encrypted query/index leakage is explicitly documented;
+3. encrypted equality indexing is implemented securely or rejected with evidence;
+4. encrypted range indexing is implemented under an explicit leakage contract or intentionally remains scan-only;
+5. no plaintext scalar values are silently persisted for encrypted indexes;
+6. authoritative primary decrypt/authenticate + predicate recheck is preserved;
+7. no storage-format change occurs without backward-read/migration evidence;
+8. `dxtr_box/1` remains readable;
+9. exactly `minimal | encryption | full` remain the native profiles;
+10. Dart >=3.4 / Flutter >=3.22 remain supported;
+11. FRB remains pinned/reproducible at 2.8.0;
+12. 0.5 read paths do not regress unexpectedly;
+13. query/index/migration/crash-reopen tests remain green;
+14. native-size policy remains green;
+15. five staged platform consumers remain green;
+16. only necessary Hive/Hive CE parity gaps are pulled into scope.
 
 ## Working style
 
-Use small focused branches/PRs. After each merged PR:
+After each merged PR:
 
 - update `docs/PROJECT_HANDOFF.md`;
 - update `docs/CODE_WALKTHROUGH.md` when architecture/execution flow changes;
-- update performance evidence when relevant;
-- update README only for material public/developer behavior changes;
+- update `README.md` for material public/developer behavior changes;
+- keep `docs/QUERY_INDEX_ENCRYPTION_06.md` as the normative 0.6 design/decision record;
 - remove obsolete merged branches;
 - keep temporary CI/debug tooling out of final branches;
-- prefer Fast CI / affected gates during iteration and full merge validation before merge.
+- use Fast CI / affected gates during iteration and full merge validation before merge.
 
-## Deferred beyond current slice
+## Deferred beyond 0.6 unless explicitly reprioritized
 
 - Dart 3.13 recorded-use/native tree shaking;
-- encrypted persisted-index design;
-- order-preserving scalar encoding / scalar-level redb range seeks;
-- index-backed ORDER BY;
+- ORM/model code generation;
+- built-in cloud replication/sync;
+- general schema framework;
+- index-backed ORDER BY unless measured value justifies complexity;
 - LazyBox migration / direct `.hive` parsing;
 - crash-atomic Hive migration staging/promotion and stale-reservation recovery;
 - application bundle/APK/IPA size budgets;
-- Web/IndexedDB and remaining 1.0 Hive functional-parity gaps.
+- Web/IndexedDB strategy.
 
-Do not trade correctness, durability, encryption, cross-process visibility, compatibility, or evidence quality for benchmark numbers.
+Do not trade correctness, durability, encryption, cross-process visibility, compatibility, or evidence quality for feature count.
