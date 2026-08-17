@@ -158,10 +158,10 @@ void main() {
   );
 
   test(
-    'encrypted persisted indexes stay blocked until a leakage contract exists',
+    'encrypted equality indexes persist and range queries stay correct',
     () async {
       final root = await Directory.systemTemp.createTemp(
-        'dxtr_box_encrypted_index_guard_',
+        'dxtr_box_encrypted_index_',
       );
       addTearDown(() async {
         if (root.existsSync()) {
@@ -170,43 +170,92 @@ void main() {
       });
 
       await DxtrBox.init(path: root.path);
-      final box = await DxtrBox.open(
-        'secure-index-guard',
+      var box = await DxtrBox.open(
+        'secure-index',
         encryptionKey: 'correct horse battery staple',
       );
-      await box.put('user', <String, dynamic>{
-        'email': 'dexter@example.com',
-        'age': 44,
+      await box.putAll(<String, dynamic>{
+        'alice': <String, dynamic>{'email': 'alice@example.com', 'age': 22},
+        'bob': <String, dynamic>{'email': 'bob@example.com', 'age': 44},
+        'carol': <String, dynamic>{'email': 'carol@example.com', 'age': 61},
       });
 
-      Object? createIndexError;
-      try {
-        await box.createIndex(
-          IndexDefinition(name: 'by-email', field: 'email'),
-        );
-      } on Object catch (error) {
-        createIndexError = error;
-      }
-      expect(createIndexError, isNotNull);
-      expect(
-        createIndexError.toString(),
-        contains('persisted indexes are not yet supported for encrypted boxes'),
-      );
+      await box.createIndex(IndexDefinition(name: 'by-email', field: 'email'));
+      await box.createIndex(IndexDefinition(name: 'by-age', field: 'age'));
+      expect((await box.listIndexes()).length, 2);
 
-      expect(await box.listIndexes(), isEmpty);
       expect(
         await box.query(
           BoxQuery(
             where: QueryComparison(
               field: 'email',
               operator: QueryOperator.equal,
-              value: 'dexter@example.com',
+              value: 'bob@example.com',
+            ),
+          ),
+        ),
+        hasLength(1),
+      );
+      expect(
+        await box.query(
+          BoxQuery(
+            where: QueryComparison(
+              field: 'age',
+              operator: QueryOperator.greaterThanOrEqual,
+              value: 44,
+            ),
+          ),
+        ),
+        hasLength(2),
+      );
+
+      await box.put('bob', <String, dynamic>{
+        'email': 'robert@example.com',
+        'age': 45,
+      });
+      expect(
+        await box.query(
+          BoxQuery(
+            where: QueryComparison(
+              field: 'email',
+              operator: QueryOperator.equal,
+              value: 'bob@example.com',
+            ),
+          ),
+        ),
+        isEmpty,
+      );
+      expect(
+        await box.query(
+          BoxQuery(
+            where: QueryComparison(
+              field: 'email',
+              operator: QueryOperator.equal,
+              value: 'robert@example.com',
             ),
           ),
         ),
         hasLength(1),
       );
 
+      await box.close();
+      box = await DxtrBox.open(
+        'secure-index',
+        encryptionKey: 'correct horse battery staple',
+      );
+      expect((await box.listIndexes()).length, 2);
+      expect(
+        await box.query(
+          BoxQuery(
+            where: QueryComparison(
+              field: 'email',
+              operator: QueryOperator.equal,
+              value: 'robert@example.com',
+            ),
+          ),
+        ),
+        hasLength(1),
+      );
       await box.close();
     },
     skip:
