@@ -2,11 +2,26 @@
 
 [![CI](https://github.com/dexter-cnx/dxtr_box/actions/workflows/ci.yml/badge.svg)](https://github.com/dexter-cnx/dxtr_box/actions/workflows/ci.yml)
 
-**The Hive replacement, forged in Rust. By Dxtr.**
+**Native local database for Flutter, forged in Rust. By Dxtr.**
 
-A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
+A fast, ACID, encrypted, Rust-powered local database for Flutter. No model code generation.
 
-> Status: **0.5 Performance / Read-path Optimization is at final closure audit**. 0.4 Production Hardening remains complete. 0.5 optimized authoritative single-key reads, added one-snapshot `Box.getAll` multi-key reads, and rejected long-lived read sessions after an evidence-backed freshness/lifecycle investigation. The package remains pre-1.0; public API and storage format are not declared stable. PR5 closes 0.5 only after the full merge quality bar remains green.
+> Status: **0.6 Query / Index + Encryption Hardening has started** on top of the completed 0.5 production read-path work. 0.6 is deliberately narrow: polish the existing query/index engine, define and enforce a non-misleading security contract for encrypted indexes, and improve interoperability only where it materially helps adoption. Dxtr_Box is not positioned as a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer. The package remains pre-1.0; public API and storage format are not declared stable.
+
+## Key Features
+
+- **Rust/redb ACID storage** — durable native persistence outside the Dart heap.
+- **Simple box-style Flutter API** — asynchronous CRUD without application model code generation.
+- **Fast authoritative reads** — optimized point reads plus one-snapshot `getAll` multi-key reads.
+- **Declarative native queries** — nested field comparisons, boolean groups, pagination, and deterministic sorting.
+- **Persisted secondary indexes** — equality/range candidate narrowing and multi-index AND intersection for plaintext boxes.
+- **First-class encryption** — Argon2 key derivation + ChaCha20Poly1305 authenticated encryption.
+- **Transactional bulk operations** — primary records and derived index maintenance commit atomically.
+- **Native watch events** — cross-handle change notifications through Flutter Rust Bridge streams.
+- **Crash/reopen durability coverage** — acknowledged writes are validated across reopen/crash scenarios.
+- **Migration tooling** — explicit plaintext-to-encrypted conversion and optional Hive CE migration support.
+- **Five native platforms** — Android, iOS, macOS, Linux, and Windows consumer validation.
+- **Self-contained Flutter FFI plugin** — Rust/Cargokit/native platform inputs ship with the package.
 
 ## Compatibility
 
@@ -37,17 +52,17 @@ The Flutter package/plugin identity is `dxtr_box`; the Rust crate/library intent
 
 ## Why
 
-`dxtr_box` targets Hive-like ergonomics while moving persistence, transactions, encryption, maintenance, query execution, and native event fan-out into Rust. Values are not retained wholesale in the Dart heap just to imitate Hive's synchronous read model.
+`dxtr_box` is designed as a native local database for Flutter rather than an in-memory-first Dart store. Persistence, transactions, encryption, maintenance, query execution, and native event fan-out live in Rust/redb, while Dart provides the public developer-facing API and value codec.
 
 Design goals include:
 
-- Hive-simple asynchronous API;
-- functional replacement for practical Hive/Hive CE local-database workloads by 1.0;
+- simple asynchronous Flutter ergonomics;
 - `redb` ACID storage, one `{box}.dxtr` file per box;
 - Flutter Rust Bridge v2 boundary;
 - MessagePack dynamic values;
 - Argon2 + ChaCha20Poly1305 encryption;
-- explicit plaintext-to-encrypted and Hive CE migration;
+- explicit plaintext-to-encrypted migration;
+- optional Hive CE migration/interoperability tooling;
 - native cross-handle `watch()` fan-out;
 - declarative native queries and persisted indexes;
 - Android, iOS, macOS, Linux, Windows first; Web later;
@@ -92,7 +107,7 @@ Encrypted boxes require the same key on reopen. Plaintext-to-encrypted conversio
 
 ## Hive CE migration
 
-Core `dxtr_box` has no runtime dependency on Hive CE. Applications open the source using Hive CE itself and wrap it:
+Hive CE support is optional interoperability tooling, not the product identity or API target. Core `dxtr_box` has no runtime dependency on Hive CE. Applications open the source using Hive CE itself and wrap it:
 
 ```dart
 final source = HiveCeMigrationSource(
@@ -168,7 +183,9 @@ final indexes = await box.listIndexes();
 final removed = await box.dropIndex('by-age');
 ```
 
-Primary data is authoritative. Index definitions and entries are derived state maintained in the same redb write transaction as primary mutations. Encrypted boxes intentionally reject persisted index creation until a non-leaking representation is designed.
+Primary data is authoritative. Index definitions and entries are derived state maintained in the same redb write transaction as primary mutations.
+
+Encrypted boxes currently **reject persisted index creation** and continue to execute native scan queries. 0.6 keeps that rejection as the safe default until the encrypted-index leakage contract and representation are explicitly accepted. Raw plaintext scalar values must not be persisted merely to make encrypted indexes fast. The first preferred production target, if justified, is equality-only keyed tokens with full primary decrypt/authenticate + predicate recheck; encrypted range indexing may remain scan-only if a secure, appropriately bounded representation is not justified. See `docs/QUERY_INDEX_ENCRYPTION_06.md`.
 
 ## Native feature profiles
 
@@ -241,7 +258,7 @@ A deliberate 0.x API change is allowed only with an intentional contract/doc upd
 
 ## Local database comparison
 
-PH-03 broadens benchmark evidence beyond Hive CE. The current matrix runs `dxtr_box`, Hive CE, Sembast, and SQLite through `sqflite_common_ffi`.
+PH-03 broadens benchmark evidence beyond a single peer. The current matrix runs `dxtr_box`, Hive CE, Sembast, and SQLite through `sqflite_common_ffi`.
 
 Correctness and timing are intentionally separate:
 
@@ -322,6 +339,7 @@ make example-windows
 
 - `docs/PROJECT_HANDOFF.md` — current milestone state and sequencing.
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture and CI DAG.
+- `docs/QUERY_INDEX_ENCRYPTION_06.md` — 0.6 scope, encrypted-index threat model, sequencing, and acceptance criteria.
 - `docs/PERFORMANCE_READ_PATH_05.md` — 0.5 read-path measurements and production decisions.
 - `docs/READ_SESSION_INVESTIGATION_05.md` — evidence-backed read-session decision.
 - `docs/PERFORMANCE_05_CLOSURE_AUDIT.md` — final 0.5 acceptance audit.
@@ -332,9 +350,9 @@ make example-windows
 - `docs/NATIVE_SIZE_POLICY_04.md` — controlled native-size regression policy.
 - `docs/LOCAL_DATABASE_COMPARISON_04.md` — PH-03 correctness + diagnostic comparison contract.
 - `docs/QUERY_INDEX_03.md` — query/index semantics and planner constraints.
-- `docs/HIVE_CE_MIGRATION_03.md` — Hive CE migration contract and failure behavior.
-- `docs/HIVE_FUNCTIONAL_PARITY.md` — 1.0 Hive/Hive CE functional-parity release gate.
+- `docs/HIVE_CE_MIGRATION_03.md` — optional Hive CE migration contract and failure behavior.
+- `docs/HIVE_FUNCTIONAL_PARITY.md` — historical/reference parity material, not the product direction.
 
 ## 1.0 direction
 
-A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. Completed 0.4 hardening and the closing 0.5 read-path milestone strengthen the implementation and evidence base; neither is a stable-API claim.
+A 1.0 release should represent a coherent, production-ready native local database contract: durable storage, simple public API, query/index behavior, encryption semantics, migration compatibility, and five-platform packaging. It is not defined by Hive/Hive CE feature parity.

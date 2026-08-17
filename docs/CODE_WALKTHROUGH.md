@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed 0.4 hardening, change-aware CI, and 0.5 read-path work through the final closure audit.
+This walkthrough describes the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed 0.4 hardening, completed 0.5 read-path work, and the current 0.6 Query / Index + Encryption Hardening milestone.
 
 ## 1. Package boundary
 
@@ -42,11 +42,29 @@ Flutter app
   -> redb
 ```
 
-Dart owns public ergonomics, MessagePack encoding/decoding, lightweight metadata, lifecycle guards, query objects, and Hive CE migration preflight.
+Dart owns public ergonomics, MessagePack encoding/decoding, lightweight metadata, lifecycle guards, query objects, and optional migration preflight.
 
 Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted indexes, maintenance, and plaintext-to-encrypted migration.
 
-## 3. Storage identity
+## 3. Product identity
+
+Dxtr_Box is a native local database for Flutter. It is not defined as a Hive/Hive CE replacement.
+
+Core differentiators:
+
+- Rust/redb ACID storage;
+- simple box-style asynchronous Flutter API;
+- optimized authoritative reads;
+- declarative native queries;
+- persisted secondary indexes;
+- first-class authenticated encryption;
+- native watch fan-out;
+- crash/reopen durability validation;
+- Android/iOS/macOS/Linux/Windows package consumers.
+
+Hive CE remains useful as an optional migration source and benchmark/reference peer only.
+
+## 4. Storage identity
 
 Each box maps to `{base_path}/{box_name}.dxtr`.
 
@@ -58,7 +76,7 @@ meta[format_version] = dxtr_box/1
 
 Core tables are `data` and `meta`; `full` additionally maintains persisted index definitions and entries.
 
-## 4. Mutation atomicity
+## 5. Mutation atomicity
 
 ```text
 Box.put / putAll / delete / deleteAll / clear
@@ -74,7 +92,7 @@ Box.put / putAll / delete / deleteAll / clear
 
 Primary data is authoritative. Persisted indexes are derived state.
 
-## 5. Production point-read path after PR #35
+## 6. Production point-read path after 0.5
 
 Public Dart API remains asynchronous:
 
@@ -96,7 +114,7 @@ Box.get
 
 Only these tiny single-key read entrypoints use synchronous FRB dispatch. Query, batch reads, scans, mutations, and migrations remain asynchronous.
 
-PR2 controlled evidence:
+0.5 controlled evidence:
 
 ```text
 generated FRB get        ~226 us -> 4.312 us   ~52x faster
@@ -105,7 +123,7 @@ generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 
 No Dart whole-box cache, metadata-backed authoritative shortcut, or long-lived stale read snapshot was introduced.
 
-## 6. Production batch-read path after PR #36
+## 7. Production batch-read path
 
 Public API:
 
@@ -141,29 +159,13 @@ duplicate input keys: duplicate result entries
 empty input:          empty result without native crossing
 ```
 
-The batch entrypoint intentionally stays asynchronous. A 1,000-key batch must not inherit the single-key `#[frb(sync)]` policy and synchronously occupy the Dart/UI isolate.
+The batch entrypoint intentionally stays asynchronous. A large key set must not inherit the single-key `#[frb(sync)]` policy and synchronously occupy the Dart/UI isolate.
 
-`NativeBatchReadApi` is a separate capability seam so the core `NativeDxtrApi` contract is not widened for unrelated injected adapters.
+0.5 hosted evidence reached ~8.59x improvement for 1,000 keys versus N independent public `get` calls.
 
-## 7. PR3 benchmark evidence
+## 8. Read-session boundary
 
-`test/batch_read_benchmark_test.dart` compares `Box.getAll` with N independent `Box.get` calls using the same populated box.
-
-Read-path Benchmark #31, run `31978434993`:
-
-| Keys | `getAll` | Independent `get` | Relative improvement |
-|---:|---:|---:|---:|
-| 10 | 445 us | 636 us | ~1.43x |
-| 100 | 814 us | 5,256 us | ~6.46x |
-| 1,000 | 3,729 us | 32,032 us | ~8.59x |
-
-These hosted-runner medians are diagnostic. The important architectural result is that increasing key count no longer requires one Dart/FRB crossing and one redb transaction/table open per key.
-
-Native integration additionally verifies encrypted batch reads while preserving order, duplicate behavior, and missing-key behavior.
-
-## 8. Read-session boundary after PR #37
-
-PR4 investigated carrying a redb `ReadTransaction` across multiple Dart calls and deliberately did not add that API.
+0.5 investigated carrying a redb `ReadTransaction` across multiple Dart calls and deliberately did not add that API.
 
 ```text
 ordinary read call
@@ -172,27 +174,11 @@ ordinary read call
   -> transaction ends with the call
 ```
 
-A reusable transaction would be a fixed snapshot and therefore stale relative to commits made after session creation. Because `getAll` already handles known multi-key work in one call, and transaction/table-open cost was not the dominant bottleneck, 0.5 preserves fresh-per-call ordinary read semantics instead of introducing a session registry and cross-call lifecycle rules.
+A reusable transaction would be a fixed snapshot and therefore stale relative to commits made after session creation. Because `getAll` already handles known multi-key work in one call, ordinary reads preserve fresh-per-call semantics.
 
 Detailed decision: `docs/READ_SESSION_INVESTIGATION_05.md`.
 
-## 9. Existing decomposed read-path harness
-
-`rust/src/read_path_bench.rs` measures transaction creation, table open, point lookup/copy, MessagePack validation, payload copy, authenticated decryption, `db_get`, and `db_contains_key`.
-
-`test/read_path_benchmark_test.dart` measures codec decode plus adapter/public point-read paths. `test/read_path_boundary_benchmark_test.dart` isolates generated FRB dispatch from the Future-based adapter.
-
-Machine-readable evidence from the dedicated read-path workflow remains:
-
-```text
-build/read-path/rust-read-path.jsonl
-build/read-path/dart-read-path.jsonl
-build/read-path/dart-boundary.jsonl
-```
-
-The permanent workflow is read-only and uploads evidence/toolchain metadata; temporary PR3 source-generation logic is not retained.
-
-## 10. Query execution
+## 9. Query execution
 
 `Box.query(BoxQuery)` remains one structured query through one asynchronous FRB call:
 
@@ -212,9 +198,28 @@ Box.query
 
 Persisted indexes narrow candidates only; they do not replace predicate re-evaluation and do not satisfy ORDER BY.
 
-## 11. Encryption/profile safety
+## 10. 0.6 encrypted-index boundary
 
-Encrypted point and batch reads preserve full AEAD authentication. Encrypted boxes can use native scan queries but cannot create persisted plaintext-derived secondary indexes.
+Encrypted point, batch, and scan-query reads preserve full AEAD authentication.
+
+Encrypted boxes currently reject persisted secondary-index creation. That remains the safe default until 0.6 accepts a representation with an explicit leakage contract.
+
+The preferred first candidate is equality-only keyed deterministic tokens with domain separation. Even if such an index is introduced, every candidate must still resolve through the authoritative encrypted primary record and complete decrypt/authenticate plus full predicate re-evaluation.
+
+Encrypted range indexing is optional. A documented scan-only decision is acceptable when order leakage or complexity is disproportionate to the product value.
+
+## 11. 0.6 implementation sequence — four PRs
+
+```text
+PR 1 — threat model + safe-default regression guard + milestone/product docs
+PR 2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence
+PR 3 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
+PR 4 — compatibility cleanup + 0.6 closure audit
+```
+
+PR2 intentionally combines the two closely coupled query/index runtime tracks so 0.6 remains compact.
+
+## 12. Native profiles
 
 Profiles remain exactly:
 
@@ -224,11 +229,11 @@ encryption
 full
 ```
 
-Reduced profiles reject indexed boxes they cannot safely maintain.
+Do not add a fourth profile for encrypted indexing or performance tuning.
 
-## 12. Hive CE migration
+## 13. Migration/interoperability
 
-Core `dxtr_box` has no runtime Hive CE dependency.
+Core `dxtr_box` has no runtime Hive CE dependency. Hive CE migration is optional tooling:
 
 ```text
 migrateFromHiveCe
@@ -244,9 +249,9 @@ migrateFromHiveCe
   -> release reservation
 ```
 
-Ordinary opens are excluded while migration owns the destination. Failure cleanup removes migration-owned state and releases its reservation.
+This interoperability path does not define product parity or 1.0 success.
 
-## 13. FRB drift and package gates
+## 14. FRB drift and package gates
 
 Checked-in bindings are generated with FRB 2.8.0. Full CI regenerates them and fails on any diff.
 
@@ -258,7 +263,7 @@ make package-readiness
   -> dart pub publish --dry-run --ignore-warnings
 ```
 
-## 14. Native-size policy
+## 15. Native-size policy
 
 ```text
 allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
@@ -266,11 +271,11 @@ allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
 
 Minimal, encryption, and full are measured independently.
 
-## 15. Staged published consumers
+## 16. Staged published consumers
 
 `tool/validate_published_consumer.dart` validates the consumer-visible package payload on Android, iOS, macOS, Linux, and Windows.
 
-## 16. Change-aware CI
+## 17. Change-aware CI
 
 ```text
 change-detection
@@ -295,18 +300,6 @@ rust-check
 ```
 
 Full validation remains mandatory before merge.
-
-## 17. 0.5 implementation sequence
-
-```text
-PR 1 / #33 — read-path decomposition + corrected baseline      complete / merged
-PR 2 / #35 — sync FRB single-key reads                         complete / merged
-PR 3 / #36 — one-snapshot batch/multi-key reads                complete / merged
-PR 4 / #37 — read-session investigation                        complete / merged; no API added
-PR 5       — comparison matrix + 0.5 closure audit             active / final gate
-```
-
-PR5 adds no new runtime architecture. It reruns the final correctness/performance evidence and closes 0.5 only if the full Merge Gate remains green. See `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
 
 ## 18. Invariants to preserve
 
@@ -348,4 +341,4 @@ make published-consumer-linux
 make published-consumer-windows
 ```
 
-See `docs/PERFORMANCE_READ_PATH_05.md` for the normative 0.5 evidence record and `docs/PROJECT_HANDOFF.md` for current execution state.
+See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative 0.6 plan and `docs/PROJECT_HANDOFF.md` for current execution state.

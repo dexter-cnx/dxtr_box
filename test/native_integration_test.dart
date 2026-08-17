@@ -158,6 +158,62 @@ void main() {
   );
 
   test(
+    'encrypted persisted indexes stay blocked until a leakage contract exists',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'dxtr_box_encrypted_index_guard_',
+      );
+      addTearDown(() async {
+        if (root.existsSync()) {
+          await root.delete(recursive: true);
+        }
+      });
+
+      await DxtrBox.init(path: root.path);
+      final box = await DxtrBox.open(
+        'secure-index-guard',
+        encryptionKey: 'correct horse battery staple',
+      );
+      await box.put('user', <String, dynamic>{
+        'email': 'dexter@example.com',
+        'age': 44,
+      });
+
+      Object? createIndexError;
+      try {
+        await box.createIndex(
+          IndexDefinition(name: 'by-email', field: 'email'),
+        );
+      } on Object catch (error) {
+        createIndexError = error;
+      }
+      expect(createIndexError, isNotNull);
+      expect(
+        createIndexError.toString(),
+        contains('persisted indexes are not yet supported for encrypted boxes'),
+      );
+
+      expect(await box.listIndexes(), isEmpty);
+      expect(
+        await box.query(
+          BoxQuery(
+            where: QueryComparison(
+              field: 'email',
+              operator: QueryOperator.equal,
+              value: 'dexter@example.com',
+            ),
+          ),
+        ),
+        hasLength(1),
+      );
+
+      await box.close();
+    },
+    skip:
+        nativeEnabled ? false : 'Set DXTR_BOX_NATIVE_TEST=1 to run native IO.',
+  );
+
+  test(
     'plaintext box migrates through public Dart API and preserves data',
     () async {
       final root = await Directory.systemTemp.createTemp('dxtr_box_migrate_');
