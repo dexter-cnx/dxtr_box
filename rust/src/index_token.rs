@@ -3,8 +3,7 @@ use std::io::Cursor;
 use blake3::Hasher;
 use rmpv::Value;
 
-const INDEX_KEY_CONTEXT: &str =
-    "dxtr_box 2026-08-17 encrypted equality index subkey v1";
+const INDEX_KEY_CONTEXT: &str = "dxtr_box 2026-08-17 encrypted equality index subkey v1";
 const TOKEN_DOMAIN: &[u8] = b"dxtr_box:index-equality-token:v1";
 
 pub(crate) fn encrypted_equality_token(
@@ -113,8 +112,7 @@ mod tests {
         let scalar = encode(Value::from("active"));
         let first = encrypted_equality_token(&key, "by-status", "status", &scalar).unwrap();
         let repeated = encrypted_equality_token(&key, "by-status", "status", &scalar).unwrap();
-        let other_index =
-            encrypted_equality_token(&key, "by-status-2", "status", &scalar).unwrap();
+        let other_index = encrypted_equality_token(&key, "by-status-2", "status", &scalar).unwrap();
         let other_field =
             encrypted_equality_token(&key, "by-status", "profile.status", &scalar).unwrap();
 
@@ -128,41 +126,19 @@ mod tests {
     #[test]
     fn numeric_tokens_follow_query_numeric_equality_semantics() {
         let key = [0x24; 32];
-        let signed = encrypted_equality_token(
-            &key,
-            "by-value",
-            "value",
-            &encode(Value::from(42_i64)),
-        )
-        .unwrap();
-        let unsigned = encrypted_equality_token(
-            &key,
-            "by-value",
-            "value",
-            &encode(Value::from(42_u64)),
-        )
-        .unwrap();
-        let float = encrypted_equality_token(
-            &key,
-            "by-value",
-            "value",
-            &encode(Value::F64(42.0)),
-        )
-        .unwrap();
-        let negative_zero = encrypted_equality_token(
-            &key,
-            "by-zero",
-            "value",
-            &encode(Value::F64(-0.0)),
-        )
-        .unwrap();
-        let integer_zero = encrypted_equality_token(
-            &key,
-            "by-zero",
-            "value",
-            &encode(Value::from(0_u64)),
-        )
-        .unwrap();
+        let signed =
+            encrypted_equality_token(&key, "by-value", "value", &encode(Value::from(42_i64)))
+                .unwrap();
+        let unsigned =
+            encrypted_equality_token(&key, "by-value", "value", &encode(Value::from(42_u64)))
+                .unwrap();
+        let float =
+            encrypted_equality_token(&key, "by-value", "value", &encode(Value::F64(42.0))).unwrap();
+        let negative_zero =
+            encrypted_equality_token(&key, "by-zero", "value", &encode(Value::F64(-0.0))).unwrap();
+        let integer_zero =
+            encrypted_equality_token(&key, "by-zero", "value", &encode(Value::from(0_u64)))
+                .unwrap();
 
         assert_eq!(signed, unsigned);
         assert_eq!(signed, float);
