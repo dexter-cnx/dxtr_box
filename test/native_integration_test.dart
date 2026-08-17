@@ -182,7 +182,7 @@ void main() {
       Object? createIndexError;
       try {
         await box.createIndex(
-          const IndexDefinition(name: 'by-email', field: 'email'),
+          IndexDefinition(name: 'by-email', field: 'email'),
         );
       } on Object catch (error) {
         createIndexError = error;
