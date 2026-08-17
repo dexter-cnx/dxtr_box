@@ -137,10 +137,7 @@ fn encrypted_range_planner_does_not_depend_on_range_index_entries() {
         ),
     ]));
 
-    assert_eq!(
-        keys("secure-planner", pure_range.clone()),
-        vec!["d", "e"]
-    );
+    assert_eq!(keys("secure-planner", pure_range.clone()), vec!["d", "e"]);
     assert_eq!(
         keys("secure-planner", mixed_and.clone()),
         vec!["b", "d", "e"]
