@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 const _defaultSizes = <int>[100, 1000, 5000];
 const _defaultSamples = 3;
 const _minimumDatasetSize = 19;
+const _benchmarkKey = 'dxtr-box-query-index-benchmark-key';
 
 void main() {
   final enabled = Platform.environment['DXTR_BOX_QUERY_BENCHMARK'] == '1';
@@ -48,18 +49,52 @@ void main() {
             size: size,
             scenario: scenario,
             indexed: false,
+            encrypted: false,
             samples: samples,
           );
           final indexed = await _measure(
             size: size,
             scenario: scenario,
             indexed: true,
+            encrypted: false,
             samples: samples,
           );
           results
-            ..add(_result(size, scenario, 'scan', scan))
-            ..add(_result(size, scenario, 'indexed', indexed));
+            ..add(_result(size, scenario, 'plaintext_scan', scan))
+            ..add(_result(size, scenario, 'plaintext_indexed', indexed));
         }
+
+        final encryptedScan = await _measure(
+          size: size,
+          scenario: _Scenario.equality,
+          indexed: false,
+          encrypted: true,
+          samples: samples,
+        );
+        final encryptedIndexed = await _measure(
+          size: size,
+          scenario: _Scenario.equality,
+          indexed: true,
+          encrypted: true,
+          samples: samples,
+        );
+        results
+          ..add(
+            _result(
+              size,
+              _Scenario.equality,
+              'encrypted_scan',
+              encryptedScan,
+            ),
+          )
+          ..add(
+            _result(
+              size,
+              _Scenario.equality,
+              'encrypted_indexed',
+              encryptedIndexed,
+            ),
+          );
       }
 
       for (final result in results) {
@@ -69,7 +104,10 @@ void main() {
         print('DXTR_BOX_QUERY_BENCHMARK ${jsonEncode(result)}');
       }
 
-      expect(results, hasLength(sizes.length * _Scenario.values.length * 2));
+      expect(
+        results,
+        hasLength(sizes.length * (_Scenario.values.length * 2 + 2)),
+      );
     },
     skip: enabled
         ? false
@@ -95,12 +133,14 @@ Future<List<int>> _measure({
   required int size,
   required _Scenario scenario,
   required bool indexed,
+  required bool encrypted,
   required int samples,
 }) async {
   await _runSample(
     size: size,
     scenario: scenario,
     indexed: indexed,
+    encrypted: encrypted,
     sample: 'warmup',
   );
 
@@ -111,6 +151,7 @@ Future<List<int>> _measure({
         size: size,
         scenario: scenario,
         indexed: indexed,
+        encrypted: encrypted,
         sample: 'sample_$i',
       ),
     );
@@ -122,11 +163,17 @@ Future<int> _runSample({
   required int size,
   required _Scenario scenario,
   required bool indexed,
+  required bool encrypted,
   required String sample,
 }) async {
   final mode = indexed ? 'indexed' : 'scan';
-  final boxName = 'query_bench_${scenario.name}_${size}_${mode}_$sample';
-  final box = await DxtrBox.open(boxName);
+  final storage = encrypted ? 'encrypted' : 'plaintext';
+  final boxName =
+      'query_bench_${scenario.name}_${size}_${storage}_${mode}_$sample';
+  final box = await DxtrBox.open(
+    boxName,
+    encryptionKey: encrypted ? _benchmarkKey : null,
+  );
 
   await box.putAll(<String, dynamic>{
     for (var i = 0; i < size; i++)
@@ -140,32 +187,32 @@ Future<int> _runSample({
     switch (scenario) {
       case _Scenario.equality:
         await box.createIndex(
-          IndexDefinition(name: 'by-status', field: 'status'),
+          const IndexDefinition(name: 'by-status', field: 'status'),
         );
       case _Scenario.range:
       case _Scenario.sortedRange:
         await box.createIndex(
-          IndexDefinition(name: 'by-age', field: 'profile.age'),
+          const IndexDefinition(name: 'by-age', field: 'profile.age'),
         );
       case _Scenario.andIntersection:
         await box.createIndex(
-          IndexDefinition(name: 'by-status', field: 'status'),
+          const IndexDefinition(name: 'by-status', field: 'status'),
         );
         await box.createIndex(
-          IndexDefinition(name: 'by-age', field: 'profile.age'),
+          const IndexDefinition(name: 'by-age', field: 'profile.age'),
         );
     }
   }
 
   final query = switch (scenario) {
-    _Scenario.equality => BoxQuery(
+    _Scenario.equality => const BoxQuery(
         where: QueryComparison(
           field: 'status',
           operator: QueryOperator.equal,
           value: 'active',
         ),
       ),
-    _Scenario.range => BoxQuery(
+    _Scenario.range => const BoxQuery(
         where: QueryComparison(
           field: 'profile.age',
           operator: QueryOperator.between,
@@ -173,7 +220,7 @@ Future<int> _runSample({
           upperValue: 45,
         ),
       ),
-    _Scenario.andIntersection => BoxQuery(
+    _Scenario.andIntersection => const BoxQuery(
         where: QueryGroup.and(<QueryFilter>[
           QueryComparison(
             field: 'status',
@@ -187,7 +234,7 @@ Future<int> _runSample({
           ),
         ]),
       ),
-    _Scenario.sortedRange => BoxQuery(
+    _Scenario.sortedRange => const BoxQuery(
         where: QueryComparison(
           field: 'profile.age',
           operator: QueryOperator.between,
