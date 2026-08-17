@@ -4,64 +4,11 @@
 
 **dxtr_box — Native local database for Flutter, forged in Rust. By Dxtr.**
 
-Target: a simple Flutter-facing local database backed by Rust/redb, with durable storage outside the Dart heap, native query/index execution, first-class encryption, and no application-level model code generation requirement.
+Dxtr_Box is a compact Flutter-facing local database backed by Rust/redb, with durable native storage, declarative query/index execution, first-class authenticated encryption, and simple box-style ergonomics.
 
-Dxtr_Box is no longer positioned as a Hive/Hive CE replacement. Hive CE remains a useful migration source, compatibility reference, and benchmark peer, but it does not define product scope or 1.0 success.
+It is **not** positioned as a Hive/Hive CE replacement. Hive CE remains an optional migration source, compatibility reference, and benchmark peer; it does not define product scope or 1.0 success.
 
-## Product identity / key features
-
-The intended product identity stays compact:
-
-- Rust/redb ACID native storage;
-- simple box-style asynchronous Flutter API;
-- optimized authoritative point reads and one-snapshot multi-key reads;
-- declarative native query engine;
-- persisted secondary indexes;
-- Argon2 + ChaCha20Poly1305 encryption;
-- encrypted equality-index narrowing with keyed tokens under `full`;
-- transactional bulk operations and index maintenance;
-- native cross-handle watch events;
-- crash/reopen durability coverage;
-- explicit plaintext-to-encrypted migration;
-- optional Hive CE migration tooling;
-- Android/iOS/macOS/Linux/Windows native consumers;
-- self-contained publishable Flutter FFI plugin topology.
-
-Avoid expanding the product into an ORM, cloud sync service, or general schema framework unless explicitly reprioritized later.
-
-## Current snapshot
-
-Closed milestones:
-
-- 0.3 query/index/migration complete.
-- 0.4 Production Hardening PH-01 through PH-05 complete.
-- 0.5 Performance / Read-path Optimization complete: decomposed the read path, removed the dominant single-key FRB `NormalTask` overhead, added one-snapshot `Box.getAll`, and rejected a reusable stale read-session API after investigation.
-- PR #34 change-aware Fast CI / selective affected gates / full merge gate.
-
-Current milestone:
-
-# 0.6 — Query / Index + Encryption Hardening
-
-Normative 0.6 document: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
-
-PR state:
-
-```text
-PR 1 — threat model + safe-default regression guard + milestone/product docs: merged (#39)
-PR 2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence: active (#40)
-PR 3 — encrypted range/index decision: next
-PR 4 — core reliability/API closure + 0.6 audit: final
-```
-
-Bounded scope:
-
-1. query/index production polish;
-2. encrypted query/index security and implementation decisions;
-3. core reliability/API/interoperability improvements only when they independently strengthen the product.
-
-Explicitly out of scope unless separately prioritized: ORM/code generation, cloud sync/replication, general schema framework, reactive-query redesign, Hive/Hive CE feature parity, and unrelated product expansion.
-
-## Stable package/runtime contract
+## Stable runtime/package contract
 
 ```text
 Flutter package/plugin: dxtr_box
@@ -74,366 +21,235 @@ durable format:         meta[format_version] = dxtr_box/1
 native profiles:        minimal | encryption | full
 ```
 
-`full` is default. Do not add a fourth native profile for tuning or encrypted indexing.
+`full` remains the default. Do not add a fourth native profile. Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly reprioritized.
 
-Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly pulled forward.
+## Closed milestones
+
+- **0.3 Query / Index / Migration** — complete.
+- **0.4 Production Hardening PH-01..PH-05** — complete.
+- **0.5 Performance / Read-path Optimization** — complete.
+  - decomposed point-read cost;
+  - changed tiny `get` / `contains_key` FRB entrypoints to generated sync dispatch while preserving async public Dart API;
+  - added one-snapshot `Box.getAll`;
+  - rejected reusable long-lived read sessions because redb read transactions are fixed snapshots and can become stale;
+  - final comparison/closure audit merged.
+- **Change-aware Fast CI** — complete; affected expensive gates during Draft, full merge quality bar for Ready/non-draft work.
+
+## Current milestone — 0.6 Query / Index + Encryption Hardening
+
+Normative design/acceptance record: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+
+Current PR sequence:
+
+```text
+PR1 — threat model + safe-default regression guard + milestone/product docs: merged (#39)
+PR2 — encrypted equality index + plaintext planner/range/index polish: merged (#40)
+PR3 — encrypted range/index decision: active (#42)
+PR4 — core reliability/API closure + 0.6 audit: final
+```
+
+PR4 is not a Hive/Hive CE parity pass.
 
 ## Current capabilities
 
-- `DxtrBox`, `Box`, `BoxEvent` Flutter facade.
-- MessagePack dynamic codec.
-- One `{box}.dxtr` redb file per box.
+- Rust/redb ACID storage, one `{box}.dxtr` file per box.
+- MessagePack dynamic values.
 - Transactional CRUD and bulk CRUD.
-- `Box.getAll(Iterable<String>)` one-snapshot authoritative batch reads.
+- Authoritative `get`, `containsKey`, and one-snapshot `getAll` reads.
 - Native cross-handle watch fan-out through FRB streams.
 - Argon2 + ChaCha20Poly1305 persisted encryption.
-- Explicit compact and plaintext-to-encrypted migration.
+- Explicit plaintext-to-encrypted migration.
 - Process crash/reopen durability coverage.
-- Declarative `Box.query(BoxQuery)` with one FRB call per query.
-- Persisted named scalar indexes under `full`.
-- Plaintext equality/range candidate narrowing, nested indexes, AND intersection.
-- Encrypted equality candidate narrowing using deterministic keyed BLAKE2b MAC tokens.
-- Encrypted ordered/range predicates remain authoritative scan-backed.
-- One redb read snapshot per native query.
-- Deterministic semantic sorting before pagination.
-- Optional Hive CE 2.19.3 migration fixtures/tooling.
-- Native-size baseline/stability/cross-commit regression gates.
-- Self-contained publishable Flutter FFI package topology.
-- Four-engine local-database comparison harness.
-- Fresh staged-payload Android/iOS/macOS/Linux/Windows consumer builds.
-- Public export and durable-format compatibility guards.
-- Change-aware Fast CI plus full merge validation.
-- Machine-readable read-path/comparison/query-index benchmark harnesses.
+- Declarative `Box.query(BoxQuery)` with one native query call.
+- Plaintext persisted scalar indexes: equality, range, nested fields, deterministic selection, AND intersection.
+- Encrypted persisted equality indexes under `full` using deterministic keyed BLAKE2b MAC tokens.
+- Encrypted ordered/range predicates remain scan-backed.
+- Deterministic semantic sorting before pagination; indexes currently narrow `where` only and do not satisfy ORDER BY.
+- Self-contained publishable Flutter FFI plugin topology.
+- Android/iOS/macOS/Linux/Windows staged consumer validation.
+- Native-size baseline/stability/cross-commit regression policy.
+- Four-engine local-database comparison harness plus read/query diagnostics.
 
 ## Hard correctness invariants
 
-Primary `data` is authoritative; persisted indexes are derived state. Mutations keep primary and index changes in one redb write transaction and publish watch events only after commit.
+Primary `data` is authoritative. Persisted indexes are derived state.
 
-`Box.get`, `Box.containsKey`, and `Box.getAll` remain authoritative native reads. Do not substitute Dart key metadata, a Dart whole-box cache, or an implicit long-lived read snapshot; those weaken cross-handle/cross-process freshness.
+Mutations keep primary data and index maintenance in the same redb write transaction; watch events publish only after commit.
 
-Encrypted reads retain full AEAD authentication. Every encrypted-index candidate must resolve through the authoritative encrypted primary record and complete decrypt/authenticate plus full predicate re-evaluation before returning to Dart.
+Do not replace authoritative native reads with Dart metadata, a Dart whole-box cache, or an implicit long-lived read snapshot.
 
-Encrypted index entries must not contain raw plaintext scalar bytes. Equality tokens intentionally leak equality classes/frequency and are domain-separated by index name/field; that leakage is documented in `docs/QUERY_INDEX_ENCRYPTION_06.md`.
-
-`dxtr_box/1` remains readable. A storage-format change requires deliberate compatibility/migration evidence, not just a marker update.
-
-## 0.5 read-path result retained by 0.6
-
-Single-key point reads keep the PR #35 call-mode optimization:
+Encrypted reads always retain full AEAD authentication. Every encrypted-index candidate must:
 
 ```text
-Box.get / Box.containsKey
-  -> Future-based Dart API
-  -> FrbNativeDxtrApi
-  -> generated FRB sync dispatch for point read only
-  -> Rust authoritative redb read
-  -> optional decrypt/authenticate
-  -> MessagePack validation / return
+candidate key
+  -> authoritative primary record
+  -> ChaCha20Poly1305 authenticate/decrypt
+  -> full predicate re-evaluation
+  -> sort / offset / limit
+  -> Dart result
 ```
 
-Controlled boundary evidence recorded in 0.5:
+Encrypted index entries must never contain raw plaintext scalar bytes.
+
+`dxtr_box/1` remains readable. Any storage-format change requires deliberate backward-read/migration evidence.
+
+## 0.5 read-path evidence retained
+
+Controlled boundary evidence from 0.5:
 
 ```text
 generated FRB get        ~226 us -> 4.312 us   ~52x faster
 generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 ```
 
-Batch reads remain asynchronous and use one redb snapshot/table open for the requested key set. Hosted 0.5 evidence reached ~8.59x improvement for 1,000 keys versus N independent public `get` calls.
+`Box.getAll` uses one native crossing and one redb read snapshot; hosted evidence reached about 8.59x improvement for 1,000 keys versus independent public `get` calls.
 
 Do not regress these paths opportunistically during 0.6.
 
-## Query/index baseline and PR2 behavior
+## PR2 encrypted equality-index contract
 
-Plaintext indexes provide:
-
-- named scalar index definitions;
-- exact dotted-field matching;
-- equality and ordered/range candidate narrowing;
-- deterministic lexical index-name selection when duplicate-field indexes exist;
-- multi-index AND intersection;
-- authoritative primary re-read and predicate recheck;
-- semantic sort before offset/limit.
-
-Persisted indexes narrow WHERE candidates only. They do not currently satisfy ORDER BY, and raw MessagePack bytes are not treated as semantic numeric order.
-
-PR2 adds encrypted persisted-index support for equality narrowing only:
+Merged PR #40 introduced encrypted equality candidate narrowing:
 
 ```text
 encrypted equality query
-  -> query planner selects matching field index
   -> query scalar canonicalization
-  -> BLAKE2b keyed MAC token, domain-separated by index name + field
+  -> BLAKE2b keyed MAC token
+     domain separated by index name + field
   -> exact token candidate lookup
-  -> authoritative encrypted primary read
-  -> ChaCha20Poly1305 authenticate/decrypt
-  -> full predicate re-evaluation
-  -> sort / offset / limit
+  -> authoritative primary read
+  -> authenticate/decrypt
+  -> full predicate recheck
 ```
 
-Encrypted `>`, `>=`, `<`, `<=`, and `between` predicates do not use keyed tokens as fake ordering. They fall back to authoritative scan.
+Accepted leakage:
 
-Index create/backfill and put/putAll/delete/deleteAll maintenance remain transactional with primary data.
+- index/field names;
+- candidate record identifiers;
+- equality classes/frequency for repeated values;
+- approximate indexed cardinality.
 
-## PR2 validation state
+Not intentionally persisted:
 
-Latest validated implementation head before docs sync:
+- plaintext scalar values;
+- semantic scalar ordering.
+
+An earlier BLAKE3 implementation exceeded native-size policy and was replaced by BLAKE2 reuse already present through Argon2. Final measured full-profile Linux x64 evidence for PR2 was +30,432 bytes / +1.276%, within policy.
+
+## PR3 encrypted range decision
+
+PR3 intentionally **does not** add encrypted persisted range ordering.
+
+Production contract for encrypted boxes:
 
 ```text
-commit: 5346c1176b2753cea9fc248b60055215041815c9
-CI:     32069766813 — success
+Equal                  -> keyed equality index may narrow candidates
+GreaterThan            -> authoritative scan
+GreaterThanOrEqual     -> authoritative scan
+LessThan               -> authoritative scan
+LessThanOrEqual        -> authoritative scan
+Between                -> authoritative scan
 ```
 
-That Draft run passed Fast CI, Dart tests, three Rust profiles, native integration, storage/query regression, FRB drift, minimum SDK, native-size policy, all five platform consumers, benchmark smoke/comparison, and Merge Gate.
+For mixed `AND`, equality terms may narrow candidates; ordered/range terms are evaluated after authoritative decrypt/authenticate.
 
-Native-size evidence after reusing the BLAKE2 implementation already present through Argon2:
+Rejected for 0.6:
 
-```text
-full:       2,385,720 -> 2,416,152 bytes   +30,432 / +1.276%   PASS
-minimal:    marginal change
- encryption: marginal change
-```
+- sorting keyed hash/MAC bytes;
+- plaintext/reversible sortable index bytes;
+- order-preserving/order-revealing encryption;
+- bucketized range tokens.
 
-An earlier BLAKE3 implementation exceeded the native-size budget and was removed. Do not reintroduce a second hash dependency without evidence that the size cost is justified.
+Reason: either incorrect ordering semantics, unacceptable order/distribution leakage, or complexity/storage/versioning cost disproportionate to current product value.
 
-The query/index benchmark harness now includes plaintext scan/index scenarios plus encrypted equality scan/index scenarios. It remains diagnostic-only:
+Decision record: `docs/ENCRYPTED_RANGE_DECISION_06.md`.
 
-```bash
-make benchmark-query-index
-```
+PR3 regression guard: `rust/tests/encrypted_range_decision.rs` covers all five ordered/range operators plus mixed equality+range `AND` before/after encrypted index creation.
 
-Do not invent timing numbers when the harness has not been executed in the current environment.
-
-## 0.6 implementation sequence
-
-```text
-PR 1 — threat model + safe-default regression guard + milestone/product docs
-PR 2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence
-PR 3 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
-PR 4 — core reliability/API closure + 0.6 audit
-```
-
-PR4 is not a Hive/Hive CE parity pass. Compatibility work enters only when independently valuable to Dxtr_Box.
-
-## 0.6 performance policy
+## Benchmark policy
 
 Benchmarks are engineering evidence, not marketing gates.
 
-Measure where relevant:
+Important diagnostic targets:
 
-```text
-plaintext scan vs indexed equality
-plaintext scan vs indexed range
-encrypted scan vs encrypted equality index
-index create/backfill
-mutation overhead with indexes
-reopen/query
+```bash
+make benchmark-comparison
+make benchmark-query-index
+make diagnose-point-read
+make benchmark-read-path
+make benchmark-batch-read
 ```
 
-Use representative dataset sizes where CI/runtime cost permits. Every performance claim must record methodology and correctness validation.
-
-Do not trade security or durability for a benchmark win.
+Hosted-runner timings are non-gating. Do not publish timing claims without the corresponding benchmark run, methodology, dataset size, and correctness validation.
 
 ## CI topology
 
 ```text
-change-detection
+change detection
       |
       v
    Fast CI
       |
-      +--> affected expensive validation during Draft iteration
+      +--> affected expensive gates during Draft iteration
       |
       v
 Merge Gate / full quality bar
 ```
 
-`make preflight` remains the cheap local gate:
+Cheap local preflight:
 
-```text
-format-check
-analyze
-test-fast
-contract-check
-rust-check
+```bash
+make preflight
 ```
 
-Ready-for-review/non-draft work must still satisfy the full merge quality bar.
+Full merge validation must preserve:
 
-## Existing production policies that remain active
+- minimum Flutter/Dart compatibility;
+- Dart/Rust/native tests;
+- exact three native profiles;
+- migration/query/crash-reopen regression;
+- FRB generated-binding reproducibility;
+- native-size policy;
+- package/pub readiness;
+- staged Android/iOS/macOS/Linux/Windows consumers.
 
-Native-size policy:
+## PR4 target
 
-```text
-allowed_growth = max(65,536 bytes, 3% of base artifact)
-```
+After PR3 merges, PR4 should be the final **core reliability/API closure + 0.6 audit**.
 
-Published package must remain self-contained. Fresh staged package payloads must continue to build on Android/iOS/macOS/Linux/Windows.
+Only pull in cleanup that independently strengthens Dxtr_Box itself. Avoid feature expansion.
 
-Public/storage contract remains:
+PR4 should verify the 0.6 acceptance matrix, synchronize public/internal docs, record release evidence, and close the milestone.
 
-```text
-public entrypoint: package:dxtr_box/dxtr_box.dart
-storage key:       format_version
-storage format:    dxtr_box/1
-```
+## Post-0.6 maturity candidates
 
-## 0.6 acceptance criteria
+Datum-inspired ideas retained for later evaluation:
 
-0.6 closes only when:
+1. reusable conformance / storage-contract test kit;
+2. schema/config fingerprint + startup fast path;
+3. optional typed schema/query metadata while keeping the dynamic box API first-class;
+4. capability abstractions only when multiple execution variants justify them;
+5. user-facing benchmark scenarios rather than isolated microbenchmarks only.
 
-1. plaintext query/index behavior is production-polished and regression-covered;
-2. encrypted query/index leakage is explicitly documented;
-3. encrypted equality indexing is implemented securely or rejected with evidence;
-4. encrypted range indexing is implemented under an explicit leakage contract or intentionally remains scan-only;
-5. no plaintext scalar values are silently persisted for encrypted indexes;
-6. authoritative primary decrypt/authenticate + predicate recheck is preserved;
-7. no storage-format change occurs without backward-read/migration evidence;
-8. `dxtr_box/1` remains readable;
-9. exactly `minimal | encryption | full` remain the native profiles;
-10. Dart >=3.4 / Flutter >=3.22 remain supported;
-11. FRB remains pinned/reproducible at 2.8.0;
-12. 0.5 read paths do not regress unexpectedly;
-13. query/index/migration/crash-reopen tests remain green;
-14. native-size policy remains green;
-15. five staged platform consumers remain green;
-16. README/handoff/product messaging consistently describes Dxtr_Box as its own native local database, not as a Hive replacement.
+Explicitly not adopted without a separate product-direction decision:
 
-## Working style
-
-After each merged PR:
-
-- update `docs/PROJECT_HANDOFF.md`;
-- update `docs/CODE_WALKTHROUGH.md` when architecture/execution flow changes;
-- update `README.md` for material public/developer behavior changes;
-- keep `docs/QUERY_INDEX_ENCRYPTION_06.md` as the normative 0.6 design/decision record;
-- remove obsolete merged branches;
-- keep temporary CI/debug tooling out of final branches;
-- use Fast CI / affected gates during iteration and full merge validation before merge.
-
-## Post-0.6 product maturity roadmap — Datum-inspired ideas
-
-The following ideas are intentionally recorded as product-maturity work rather than 0.6 scope. They are inspired by useful architectural patterns seen in Datum, but Dxtr_Box should preserve its identity as a compact native embedded database rather than grow into an offline-sync framework.
-
-Priority order:
-
-### A. Reusable conformance / contract test kit — high priority
-
-Create a reusable storage-contract suite that can certify Dxtr_Box behavior across public facade, native runtime, migration paths, durability scenarios, and future implementation variants.
-
-Candidate coverage:
-
-- CRUD and bulk-operation semantics;
-- query/index semantic equivalence between scan and indexed execution;
-- index maintenance invariants;
-- transaction visibility and rollback behavior;
-- cross-handle watch behavior;
-- crash/reopen durability;
-- plaintext/encrypted parity where semantics are expected to match;
-- migration compatibility;
-- seeded fuzz/property scenarios where practical.
-
-This may initially remain an internal test harness. A public `dxtr_box_test` package should only be created if downstream adapter/plugin authors have a real need for it.
-
-### B. Optional typed schema metadata — 0.7+ candidate
-
-Investigate an optional strongly typed schema layer where one field/schema definition can drive multiple concerns instead of duplicating field metadata across APIs.
-
-Potential uses of one metadata source:
-
-```text
-typed query fields
-      +
-index definitions
-      +
-query validation
-      +
-migration/schema-change detection
-      +
-serializer/planner hints where justified
-```
-
-Constraints:
-
-- keep the existing dynamic box-style API first-class;
-- do not require application-level model code generation;
-- do not turn Dxtr_Box into an ORM;
-- prefer typed field references over stringly typed field names when users opt in;
-- introduce code generation only if later evidence shows that a non-codegen approach is inadequate.
-
-A conceptual future API may resemble `UserFields.age` rather than raw `'age'` strings, but no public syntax is committed yet.
-
-### C. Schema/config fingerprint + startup fast path — high ROI candidate
-
-Evaluate a small persisted fingerprint for schema/index configuration so unchanged definitions can skip unnecessary reconciliation, validation, or migration work at open time.
-
-Requirements before implementation:
-
-- fingerprint inputs must be deterministic and explicitly versioned;
-- a fingerprint match may skip redundant work but must never bypass durable-format compatibility checks or correctness validation that remains required;
-- changed definitions must fall back to authoritative reconciliation;
-- benchmark cold-open/reopen impact before claiming value.
-
-This is expected to be a relatively small optimization and should be considered before building a broader schema framework.
-
-### D. Capability-based internal architecture — investigate when multiple execution variants justify it
-
-Consider explicit internal capabilities such as query/index/transaction/watch support when they materially simplify planner/runtime branching or future test conformance.
-
-Do not add capability abstractions speculatively. Introduce them only when they replace meaningful runtime probing, condition scattering, or duplicated contract logic.
-
-### E. Benchmark scenarios must remain user-facing
-
-Continue evolving benchmarks around real operations and decisions rather than isolated microbenchmarks only.
-
-Prefer scenarios such as:
-
-- point read;
-- multi-key read;
-- scan vs indexed query;
-- encrypted query cost;
-- mutation cost with indexes;
-- reopen/startup cost;
-- migration cost;
-- crash/recovery behavior where measurable.
-
-Every benchmark result should state operation semantics, data size, runtime/platform, correctness checks, and what decision the benchmark is intended to support.
-
-### Explicitly not adopted from Datum
-
-Do not add these to the planned product scope without a separate product-direction decision:
-
-- built-in cloud/offline synchronization engine;
+- built-in cloud/offline synchronization;
 - backend sync adapters;
 - pending-operation replication queues;
 - vector clocks;
 - CRDT collections/text;
 - generic local-first application framework behavior.
 
-Those features operate at a different architectural layer and would materially expand Dxtr_Box beyond its current embedded-database mission.
-
-Recommended sequencing after 0.6:
-
-```text
-1. conformance / contract test kit
-2. schema/config fingerprint + startup fast path
-3. optional typed schema/query metadata investigation
-4. capability abstractions only where runtime complexity proves the need
-```
-
-The first three items should be evaluated as maturity improvements, not as reasons to delay stable core behavior or inflate the 1.0 definition unnecessarily.
-
-## Deferred beyond 0.6 unless explicitly reprioritized
+## Deferred unless explicitly reprioritized
 
 - Dart 3.13 recorded-use/native tree shaking;
 - ORM/model code generation;
 - built-in cloud replication/sync;
 - general schema framework;
-- index-backed ORDER BY unless measured value justifies complexity;
-- LazyBox migration / direct `.hive` parsing;
-- crash-atomic Hive migration staging/promotion and stale-reservation recovery;
+- index-backed ORDER BY unless evidence justifies complexity;
+- LazyBox/direct `.hive` parsing;
 - application bundle/APK/IPA size budgets;
 - Web/IndexedDB strategy.
 
-`docs/HIVE_FUNCTIONAL_PARITY.md` remains historical/reference material and may inform interoperability work, but it is no longer the product identity or mandatory definition of 1.0.
+## Working rule
 
-Do not trade correctness, durability, encryption, cross-process visibility, compatibility, or evidence quality for feature count.
+Correctness, durability, authenticated encryption, cross-process visibility, compatibility, and evidence quality take priority over feature count or benchmark wins.
