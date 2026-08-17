@@ -1,3 +1,12 @@
+## 0.5.0-dev.1
+
+- Optimized authoritative single-key reads by moving only native `get` and `containsKey` FRB entrypoints to synchronous generated dispatch while keeping the public Dart API asynchronous.
+- Added `Box.getAll(Iterable<String>)` for one-crossing, one-redb-snapshot multi-key reads with explicit order, missing-key, duplicate-key, empty-input, and encrypted-authentication semantics.
+- Added decomposed Rust/Dart/FRB read-path diagnostics plus a dedicated 10/100/1000-key batch benchmark.
+- Recorded evidence-backed rejection of a reusable long-lived read-session API for 0.5; ordinary reads continue to open fresh authoritative snapshots instead of introducing stale cross-call semantics.
+- Preserved Dart >=3.4 / Flutter >=3.22, `flutter_rust_bridge` 2.8.0, native library `rust_lib_dxtr_box`, exactly three native profiles, and storage format `dxtr_box/1`.
+- Retained full correctness, migration/query/index, native-size, package, and five-platform staged-consumer validation as merge gates.
+
 ## 0.4.0-dev.1
 
 - Started the 0.4 production-hardening milestone.
