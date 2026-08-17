@@ -526,7 +526,7 @@ pub fn encrypt_box(name: &str, encryption_key: &str) -> Result<(), String> {
                 index::ensure_tables(&db)?;
                 if index::has_definitions(&db)? {
                     return Err(
-                        "cannot encrypt a box with persisted indexes until encrypted index storage is supported"
+                        "cannot encrypt a plaintext box with persisted indexes; drop indexes before migration and recreate them after encryption"
                             .to_string(),
                     );
                 }
@@ -591,7 +591,7 @@ pub fn put(name: &str, key: &str, value: &[u8]) -> Result<(), String> {
             .map_err(|e| e.to_string())?
             .map(|value| value.value().to_vec());
         #[cfg(feature = "full")]
-        index::maintain_put(&write, key, _old.as_deref(), value)?;
+        index::maintain_put(&write, encryption.as_ref(), key, _old.as_deref(), value)?;
         table
             .insert(key, stored.as_slice())
             .map_err(|e| e.to_string())?;
@@ -600,7 +600,7 @@ pub fn put(name: &str, key: &str, value: &[u8]) -> Result<(), String> {
 }
 
 pub fn put_all(name: &str, entries: &[(String, Vec<u8>)]) -> Result<(), String> {
-    let (_, encryption) = database(name)?;
+    let (db, encryption) = database(name)?;
     let mut stored_entries = Vec::with_capacity(entries.len());
     for (key, value) in entries {
         validate_message_pack(value)?;
@@ -611,7 +611,6 @@ pub fn put_all(name: &str, entries: &[(String, Vec<u8>)]) -> Result<(), String> 
         ));
     }
 
-    let (db, _) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
@@ -621,7 +620,13 @@ pub fn put_all(name: &str, entries: &[(String, Vec<u8>)]) -> Result<(), String> 
                 .map_err(|e| e.to_string())?
                 .map(|value| value.value().to_vec());
             #[cfg(feature = "full")]
-            index::maintain_put(&write, key, _old.as_deref(), _plaintext)?;
+            index::maintain_put(
+                &write,
+                encryption.as_ref(),
+                key,
+                _old.as_deref(),
+                _plaintext,
+            )?;
             table
                 .insert(*key, stored.as_slice())
                 .map_err(|e| e.to_string())?;
@@ -717,7 +722,7 @@ pub fn contains_key(name: &str, key: &str) -> Result<bool, String> {
 }
 
 pub fn delete(name: &str, key: &str) -> Result<(), String> {
-    let (db, _) = database(name)?;
+    let (db, encryption) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = write.open_table(DATA).map_err(|e| e.to_string())?;
@@ -727,7 +732,7 @@ pub fn delete(name: &str, key: &str) -> Result<(), String> {
             .map(|value| value.value().to_vec());
         #[cfg(feature = "full")]
         if let Some(_old) = _old.as_deref() {
-            index::maintain_delete(&write, key, _old)?;
+            index::maintain_delete(&write, encryption.as_ref(), key, _old)?;
         }
         table.remove(key).map_err(|e| e.to_string())?;
     }
@@ -735,7 +740,7 @@ pub fn delete(name: &str, key: &str) -> Result<(), String> {
 }
 
 pub fn delete_all(name: &str, keys: &[String]) -> Result<Vec<String>, String> {
-    let (db, _) = database(name)?;
+    let (db, encryption) = database(name)?;
     let write = db.begin_write().map_err(|e| e.to_string())?;
     let mut deleted = Vec::new();
     {
@@ -747,7 +752,7 @@ pub fn delete_all(name: &str, keys: &[String]) -> Result<Vec<String>, String> {
                 .map(|value| value.value().to_vec());
             if let Some(_old) = _old {
                 #[cfg(feature = "full")]
-                index::maintain_delete(&write, key, &_old)?;
+                index::maintain_delete(&write, encryption.as_ref(), key, &_old)?;
                 table.remove(key.as_str()).map_err(|e| e.to_string())?;
                 deleted.push(key.clone());
             }
