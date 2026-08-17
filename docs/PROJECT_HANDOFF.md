@@ -33,31 +33,21 @@ native profiles:        minimal | encryption | full
   - added one-snapshot `Box.getAll`;
   - rejected reusable long-lived read sessions because redb read transactions are fixed snapshots and can become stale;
   - final comparison/closure audit merged.
+- **0.6 Query / Index + Encryption Hardening** — complete after PR #43 merges with the full quality bar green.
+  - PR #39 established the encrypted-index threat model and safe-default guard;
+  - PR #40 added encrypted equality indexing with keyed BLAKE2b tokens plus planner polish;
+  - PR #42 locked encrypted ordered/range predicates to authoritative scan-backed execution;
+  - PR #43 is the final closure/audit publication of the completed milestone state.
 - **Change-aware Fast CI** — complete; affected expensive gates during Draft, full merge quality bar for Ready/non-draft work.
 
-## Current milestone — 0.6 Query / Index + Encryption Hardening
-
-Normative design/acceptance record: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
-Release/closure record: `docs/RELEASE_AUDIT_06.md`.
-
-PR sequence:
-
-```text
-PR1 — threat model + safe-default regression guard + milestone/product docs: merged (#39)
-PR2 — encrypted equality index + plaintext planner/range/index polish: merged (#40)
-PR3 — encrypted range/index decision: merged (#42)
-PR4 — core reliability/API closure + 0.6 audit: active/final
-```
-
-PR4 is intentionally a closure/audit PR, not a Hive/Hive CE parity pass and not a feature-expansion pass.
-
-When PR4 passes `CI / Merge Gate / full quality bar` and merges, **0.6 is complete**.
+Normative 0.6 design record: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+Closure record: `docs/RELEASE_AUDIT_06.md`.
 
 ## Next milestone — 0.7 Query Ergonomics
 
 Planned design record: `docs/QUERY_ERGONOMICS_07.md`.
 
-After 0.6 closes, the preferred next milestone is **0.7 Query Ergonomics**: improve the Dart query experience without replacing the existing query engine or changing durable storage.
+The preferred next milestone is **0.7 Query Ergonomics**: improve the Dart query experience without replacing the existing query engine or changing durable storage.
 
 Target public style:
 
@@ -152,7 +142,7 @@ generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 
 `Box.getAll` uses one native crossing and one redb read snapshot; hosted evidence reached about 8.59x improvement for 1,000 keys versus independent public `get` calls.
 
-Do not regress these paths opportunistically during 0.6 or later work.
+Do not regress these paths opportunistically during later work.
 
 ## Encrypted equality-index contract
 
@@ -217,7 +207,7 @@ Regression guards include `rust/tests/encrypted_range_decision.rs` and `rust/tes
 
 The final acceptance matrix lives in `docs/RELEASE_AUDIT_06.md`.
 
-PR4 must not claim milestone completion from documentation alone. Closure requires the PR head to pass the repository's full merge quality bar, including:
+PR #43 is the closure publication commit. Its merge is permitted only when the repository full quality bar is green, including:
 
 - public API/storage contract checks;
 - Dart/Rust/native tests;
@@ -230,7 +220,7 @@ PR4 must not claim milestone completion from documentation alone. Closure requir
 - benchmark correctness/smoke;
 - staged Android/iOS/macOS/Linux/Windows consumers.
 
-No new runtime/public API/storage feature is required for closure unless the audit exposes a concrete correctness gap.
+The state represented by the merged closure commit is **0.6 complete**. Documentation does not bypass the quality bar; the quality bar is the condition for merging that state.
 
 ## Benchmark policy
 
