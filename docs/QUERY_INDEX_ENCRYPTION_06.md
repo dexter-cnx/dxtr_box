@@ -2,13 +2,15 @@
 
 ## Scope
 
-0.6 combines the previously separate query/index polish and encryption hardening work into one milestone. The goal is to make the existing query/index feature set production-ready for 1.0 without expanding Dxtr_Box into an ORM, sync engine, or schema framework.
+0.6 combines query/index polish and encryption hardening into one focused milestone. The goal is to make the existing query/index feature set production-ready for 1.0 without expanding Dxtr_Box into an ORM, sync engine, or schema framework.
+
+Dxtr_Box is its own native local database for Flutter. Hive/Hive CE is not the product target; it remains an optional migration source, compatibility reference, and benchmark peer.
 
 The milestone has three bounded tracks:
 
 1. query / index polish;
 2. encrypted query / index hardening;
-3. only the Hive/Hive CE parity gaps that are necessary for practical replacement.
+3. compatibility/migration improvements only when they materially improve adoption.
 
 ## Stable constraints
 
@@ -77,7 +79,8 @@ Primary encrypted records remain ChaCha20Poly1305 authenticated ciphertext. Ever
 - evaluate equality-only keyed tokens versus order-preserving/range-capable designs;
 - reject designs whose leakage is disproportionate to the product benefit;
 - add contract tests that keep encrypted index creation blocked until an accepted representation exists;
-- define upgrade/storage implications before changing `dxtr_box/1` derived index state.
+- define upgrade/storage implications before changing `dxtr_box/1` derived index state;
+- align README/handoff/product positioning with Dxtr_Box as its own native local database.
 
 Default preference: support less functionality securely rather than exposing plaintext-compatible scalar bytes.
 
@@ -117,9 +120,9 @@ If no design provides acceptable leakage, complexity, and maintenance cost, 0.6 
 
 A documented rejection is an acceptable outcome.
 
-### PR 5 — required Hive parity + closure audit
+### PR 5 — compatibility cleanup + closure audit
 
-Close only the parity gaps that block practical Hive/Hive CE replacement and are consistent with the existing product direction.
+Close only compatibility/migration gaps that materially improve adoption and remain consistent with the native-database product direction.
 
 Do not pull in:
 
@@ -128,7 +131,7 @@ Do not pull in:
 - general schema framework;
 - reactive query engine redesign;
 - Web/IndexedDB unless separately prioritized;
-- LazyBox direct file parsing unless it becomes a 1.0 blocker.
+- LazyBox direct file parsing unless separately justified.
 
 ## Benchmark evidence
 
@@ -165,12 +168,14 @@ Every performance claim must include methodology, runner/toolchain metadata, and
 13. query/index/migration/crash-reopen tests remain green;
 14. native-size policy remains green;
 15. staged Android/iOS/macOS/Linux/Windows consumers remain green;
-16. only necessary Hive/Hive CE parity gaps are pulled into scope.
+16. public docs consistently position Dxtr_Box as a native local database, not as a Hive/Hive CE replacement.
 
 ## Product boundary
 
 The intended product identity remains compact:
 
-> Hive-like Flutter local storage, backed by Rust/redb, with native durability, query/index support, and first-class encryption.
+> A native local database for Flutter, backed by Rust/redb, with durable storage, declarative query/index support, first-class encryption, and simple box-style ergonomics.
+
+Hive/Hive CE migration remains useful interoperability tooling, not the defining product direction.
 
 0.6 strengthens those existing differentiators rather than adding a new product category.
