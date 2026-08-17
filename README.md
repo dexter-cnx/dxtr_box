@@ -2,11 +2,29 @@
 
 [![CI](https://github.com/dexter-cnx/dxtr_box/actions/workflows/ci.yml/badge.svg)](https://github.com/dexter-cnx/dxtr_box/actions/workflows/ci.yml)
 
-**The Hive replacement, forged in Rust. By Dxtr.**
+**Native local database for Flutter, forged in Rust. By Dxtr.**
 
-A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
+A fast, ACID, encrypted, Rust/redb-powered NoSQL box database for Flutter with native query/index support and no model code generation.
 
-> Status: **0.6 Query / Index + Encryption Hardening has started** on top of the completed 0.5 production read-path work. 0.6 is deliberately narrow: polish the existing query/index engine, define and enforce a non-misleading security contract for encrypted indexes, and close only Hive/Hive CE parity gaps that are necessary for practical replacement. The package remains pre-1.0; public API and storage format are not declared stable.
+> Status: **0.6 Query / Index + Encryption Hardening has started** on top of the completed 0.5 production read-path work. 0.6 is deliberately narrow: polish the existing query/index engine, define and enforce a non-misleading security contract for encrypted indexes, and close only compatibility gaps that materially improve real-world adoption. The package remains pre-1.0; public API and storage format are not declared stable.
+
+## Key Features
+
+- **Rust/redb native storage** — durable ACID persistence outside the Dart heap.
+- **Simple box API** — lightweight Flutter-facing CRUD without model `build_runner` requirements.
+- **Fast native read path** — optimized single-key reads plus one-snapshot `getAll` batching.
+- **Declarative query engine** — nested fields, comparisons, AND/OR, range predicates, sorting, offset, and limit.
+- **Persisted secondary indexes** — deterministic candidate narrowing and multi-index intersection for plaintext boxes.
+- **First-class encryption** — Argon2-derived keys + ChaCha20Poly1305 authenticated encryption.
+- **Encrypted query support** — authenticated native scan queries today, with 0.6 hardening the persisted-index security model rather than leaking plaintext index values.
+- **Transactional bulk operations** — primary data and derived index state commit together.
+- **Native watch events** — cross-handle change fan-out through Flutter Rust Bridge streams.
+- **Crash/reopen durability** — acknowledged commits are covered by process-crash persistence tests.
+- **Migration tooling** — explicit plaintext-to-encrypted conversion and an optional Hive CE migration path.
+- **Five native platforms** — Android, iOS, macOS, Linux, and Windows consumer validation.
+- **Publish-ready plugin topology** — self-contained Rust/Cargokit/platform payload with pub dry-run and public/storage contract guards.
+
+`dxtr_box` is **not positioned as a Hive/Hive CE replacement**. Hive CE remains useful as a migration source and benchmark/reference point, while dxtr_box focuses on its own native-storage, query/index, encryption, durability, and cross-runtime design.
 
 ## Compatibility
 
@@ -37,17 +55,17 @@ The Flutter package/plugin identity is `dxtr_box`; the Rust crate/library intent
 
 ## Why
 
-`dxtr_box` targets Hive-like ergonomics while moving persistence, transactions, encryption, maintenance, query execution, and native event fan-out into Rust. Values are not retained wholesale in the Dart heap just to imitate Hive's synchronous read model.
+`dxtr_box` is designed as a native-backed local database for Flutter applications that need stronger storage semantics and richer native-side capabilities than a Dart-only in-memory-first box architecture provides.
 
 Design goals include:
 
-- Hive-simple asynchronous API;
-- functional replacement for practical Hive/Hive CE local-database workloads by 1.0;
+- simple asynchronous Flutter ergonomics;
 - `redb` ACID storage, one `{box}.dxtr` file per box;
 - Flutter Rust Bridge v2 boundary;
 - MessagePack dynamic values;
 - Argon2 + ChaCha20Poly1305 encryption;
-- explicit plaintext-to-encrypted and Hive CE migration;
+- explicit plaintext-to-encrypted migration;
+- optional Hive CE migration tooling without a runtime Hive dependency;
 - native cross-handle `watch()` fan-out;
 - declarative native queries and persisted indexes;
 - Android, iOS, macOS, Linux, Windows first; Web later;
@@ -92,7 +110,7 @@ Encrypted boxes require the same key on reopen. Plaintext-to-encrypted conversio
 
 ## Hive CE migration
 
-Core `dxtr_box` has no runtime dependency on Hive CE. Applications open the source using Hive CE itself and wrap it:
+Hive CE support is a migration/interoperability path, not the product direction. Core `dxtr_box` has no runtime dependency on Hive CE. Applications open the source using Hive CE itself and wrap it:
 
 ```dart
 final source = HiveCeMigrationSource(
@@ -336,8 +354,8 @@ make example-windows
 - `docs/LOCAL_DATABASE_COMPARISON_04.md` — PH-03 correctness + diagnostic comparison contract.
 - `docs/QUERY_INDEX_03.md` — query/index semantics and planner constraints.
 - `docs/HIVE_CE_MIGRATION_03.md` — Hive CE migration contract and failure behavior.
-- `docs/HIVE_FUNCTIONAL_PARITY.md` — 1.0 Hive/Hive CE functional-parity release gate.
+- `docs/HIVE_FUNCTIONAL_PARITY.md` — legacy parity/reference checklist; no longer the product identity or 1.0 positioning.
 
 ## 1.0 direction
 
-A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. 0.6 intentionally strengthens the existing product identity — Hive-like ergonomics, Rust/redb durability, query/index support, and first-class encryption — instead of adding ORM, cloud sync, or a general schema framework.
+A 1.0 release should represent a stable, well-documented native local database contract for Flutter: durable Rust/redb storage, practical query/index behavior, first-class encryption, strong migration/reopen guarantees, reproducible native packaging, and platform validation. Hive/Hive CE compatibility can improve migration and adoption, but it is no longer the definition of 1.0 success.
