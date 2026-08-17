@@ -1,6 +1,6 @@
 #![cfg(feature = "full")]
 
-use std::{io::Cursor, sync::Mutex};
+use std::sync::Mutex;
 
 use redb::{Database, ReadableTable, TableDefinition};
 use rmpv::Value;
