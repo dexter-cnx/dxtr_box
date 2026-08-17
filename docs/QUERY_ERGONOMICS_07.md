@@ -24,11 +24,31 @@ existing Rust planner + indexes + authoritative record checks
 ## Milestone sequence
 
 ```text
-PR1 — fluent where/comparison/AND/OR/grouping builder
+PR1 — fluent queryWhere/comparison/AND/OR/grouping builder
 PR2 — orderBy/offset/limit/find ergonomics; efficient native-backed convenience terminals only
 PR3 — optional DxtrField<T> typed field metadata; no mandatory schema/codegen
 PR4 — README/examples/API equivalence/compatibility closure
 ```
+
+## Entry-point compatibility decision
+
+`Box` already exposes the legacy compatibility method:
+
+```dart
+Future<List<MapEntry<String, dynamic>>> where(
+  bool Function(dynamic) test,
+)
+```
+
+Dart does not support method overloading, and an instance method shadows an extension method with the same name. Therefore adding `box.where('field')` would either break the existing public surface or require a dynamically typed dispatch API.
+
+0.7 keeps the legacy method intact and uses the collision-free fluent entry point:
+
+```dart
+box.queryWhere('field')
+```
+
+This preserves source typing and avoids weakening the public API merely to save five characters. A future breaking 1.0 API cleanup may reconsider naming separately; 0.7 does not.
 
 ## PR1 accepted public surface
 
@@ -36,7 +56,7 @@ PR1 adds a fluent AST builder covering every existing comparison operator while 
 
 ```dart
 final query = box
-    .where('status').equals('active')
+    .queryWhere('status').equals('active')
     .and('profile.age').gte(18)
     .build();
 
@@ -124,7 +144,7 @@ PR2 owns the final common-query shape:
 
 ```dart
 final users = await box
-    .where('status').equals('active')
+    .queryWhere('status').equals('active')
     .and('age').gte(18)
     .orderBy('name')
     .limit(20)
@@ -170,6 +190,7 @@ Do not add in 0.7 without a separate product decision:
 
 0.7 query ergonomics must preserve:
 
+- legacy `Box.where(bool Function(dynamic))` compatibility behavior;
 - `Box.query(BoxQuery)` as the canonical advanced query API;
 - the existing native query execution path;
 - one native query crossing per executed query;
@@ -186,14 +207,15 @@ Do not add in 0.7 without a separate product decision:
 
 PR1 specifically requires:
 
-1. fluent filtering can start with `box.where(...)` or `BoxQueryBuilder.where(...)`;
+1. fluent filtering can start with `box.queryWhere(...)` or `BoxQueryBuilder.where(...)`;
 2. every existing comparison operator has a fluent equivalent;
 3. AND/OR chaining has documented deterministic precedence;
 4. explicit nested grouping is supported;
 5. fluent queries compile to the existing `BoxQuery` AST;
 6. direct `Box.query(BoxQuery)` remains supported;
-7. nested field validation remains unchanged;
-8. AST-equivalence tests cover fluent versus direct construction;
-9. no Rust/FRB/storage-format/native-profile change is introduced.
+7. legacy `Box.where(predicate)` remains source-compatible;
+8. nested field validation remains unchanged;
+9. AST-equivalence tests cover fluent versus direct construction;
+10. no Rust/FRB/storage-format/native-profile change is introduced.
 
 The intended 0.7 outcome is a compact native local database with easier box-style query ergonomics, not a larger ORM or application framework.
