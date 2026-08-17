@@ -7,6 +7,8 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. */
 #[cfg(feature = "full")]
 mod index;
 #[cfg(feature = "full")]
+mod index_token;
+#[cfg(feature = "full")]
 mod query;
 #[cfg(test)]
 mod read_path_bench;
