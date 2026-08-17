@@ -2,14 +2,14 @@
 
 ## Status
 
-0.5 is active.
+0.5 is in final closure audit.
 
 ```text
 PR 1 / #33 — read-path decomposition + corrected baseline      complete / merged
 PR 2 / #35 — single-key FRB boundary optimization              complete / merged
 PR 3 / #36 — one-snapshot batch/multi-key read path            complete / merged
-PR 4 / #37 — read-session investigation                        decision complete / validation
-PR 5       — comparison matrix + 0.5 closure audit             next
+PR 4 / #37 — read-session investigation                        complete / merged
+PR 5       — comparison matrix + 0.5 closure audit             active / final gate
 ```
 
 This document distinguishes measured fact, inference, implemented optimization, and rejected/deferred ideas. Hosted-runner timings are diagnostic, not release-performance guarantees.
@@ -199,8 +199,6 @@ Encrypted hits still carry mandatory authenticated-decryption cost and must not 
 
 Detailed record: `docs/READ_SESSION_INVESTIGATION_05.md`.
 
-### redb semantics
-
 A redb `ReadTransaction` captures the database snapshot at `begin_read()`. Data committed later is not visible through that transaction. Read transactions may coexist with writes.
 
 Therefore a reusable session has unavoidable semantics:
@@ -214,48 +212,42 @@ session reads again at T2
 
 That is coherent snapshot behavior, but it is intentionally stale relative to post-T0 commits. It cannot transparently replace ordinary `get`, `containsKey`, or `getAll` without weakening their established fresh-per-call behavior.
 
-### incremental performance case
-
 The representative PR1 native cost that a reusable transaction could avoid was approximately:
 
 ```text
 transaction + table open   0.567 us
 ```
 
-After PR2, generated FRB point reads are already low-single-digit microseconds, while the Future-based adapter path remains higher. A session spanning multiple Dart calls would still pay repeated Dart/FRB call overhead unless it changes the API shape to batch work.
+After PR2, generated FRB point reads are already low-single-digit microseconds, while the Future-based adapter path remains higher. A session spanning multiple Dart calls would still pay repeated Dart/FRB call overhead unless it changes the API shape to batch work. For known batches, PR3 already uses one public call, one FRB call, and one redb snapshot.
 
-For known batches, PR3 already uses the optimal shape available to the current API contract: one public call, one FRB call, one redb snapshot, N reads.
+A production session API would also add explicit semantics for close/dispose, leaks, box close, compact, migration, multiple handles/isolates, native session identity, stale IDs, and encrypted authentication on every read.
 
-**Inference:** snapshot reuse across separate calls has little demonstrated performance value unless the caller specifically needs coherent multi-call snapshot semantics. No such product requirement exists in the current milestone.
+The project remains pinned to redb 2.1.0; upstream 2.1.1 specifically fixed a panic when `compact()` is called while a read transaction is in progress. PR4 did not upgrade redb because dependency upgrades are an independent compatibility decision.
 
-### lifecycle/resource case
+**PR4 decision: rejected for 0.5.** No public API, FRB binding, native profile, dependency, or storage-format change was introduced. Reconsider only for a concrete product requirement for coherent multi-call snapshot semantics with an explicitly stale-within-session contract and new lifecycle/benchmark evidence.
 
-A production session API would add explicit semantics for:
+PR #37 merged as `6cd8ecd78032cdd635da5e915c569067b22f6dc4` after full validation.
 
-- session close/dispose and leaks;
-- box close while sessions exist;
-- compact while sessions exist;
-- plaintext-to-encrypted migration while sessions exist;
-- multiple Dart handles and isolates;
-- native session identity/registry ownership;
-- stale session IDs after teardown;
-- encrypted value authentication on every session read.
+## PR5 — final comparison and closure audit
 
-This is meaningful lifecycle/API surface, not a transparent optimization.
+PR5 intentionally adds no further optimization. The final audit is recorded in `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
 
-### pinned redb 2.1.0 consideration
+The four-engine matrix continues to compare only equivalent contracts across dxtr_box, Hive CE, Sembast, and SQLite:
 
-The project intentionally remains pinned to redb 2.1.0. The upstream redb 2.1.1 changelog specifically lists a fix for a panic when `compact()` is called while a read transaction is in progress.
+```text
+sequential_put
+batch_put
+point_get
+contains
+delete_all
+reopen_read
+```
 
-That known version-adjacent maintenance interaction is additional evidence against deliberately introducing long-lived read transactions while staying on 2.1.0. PR4 does **not** upgrade redb; dependency upgrades remain an independent compatibility/regression decision.
+`Box.getAll` is not inserted into that matrix through synthetic adapter behavior because doing so would compare non-equivalent product contracts. Its dedicated dxtr_box batch benchmark remains the correct evidence for multi-key reads.
 
-### PR4 decision
+PR5 requires the full Merge Gate to rerun comparison correctness/timing, benchmark smoke, minimum SDK, Dart full tests, native integration, Rust profiles/platforms, query/index/migration regressions, FRB drift, package/pub readiness, native-size policy, and all five staged consumers.
 
-**Rejected for 0.5:** production reusable read-session API.
-
-No public API, FRB binding, native profile, dependency, or storage-format change is introduced.
-
-Reconsider only if a future consumer has a concrete need for one coherent snapshot across multiple logically separate operations and accepts an explicitly documented stale-within-session contract. Any reconsideration must bring new workload benchmarks plus close/leak/compact/migration lifecycle tests.
+If that final Merge Gate succeeds, **0.5 is complete**. Further performance work should begin as a new milestone from a newly measured bottleneck.
 
 ## Deferred/rejected shortcuts
 
@@ -269,12 +261,6 @@ Do not use:
 - long-lived implicit stale read snapshots;
 - hidden periodically refreshed snapshots;
 - public synchronous API changes solely for microbenchmark results.
-
-## Next — PR5 closure audit
-
-PR5 should rerun the comparison matrix with the final 0.5 APIs where appropriate, verify all hard compatibility/correctness gates, and decide whether 0.5 can close.
-
-The read-session decision should remain closed unless new evidence materially changes PR4's conclusion.
 
 ## Performance evidence policy
 
