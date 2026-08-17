@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed 0.4 hardening, change-aware CI, and 0.5 read-path work through PR3.
+This walkthrough describes the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed 0.4 hardening, change-aware CI, and 0.5 read-path work through the final closure audit.
 
 ## 1. Package boundary
 
@@ -161,7 +161,22 @@ These hosted-runner medians are diagnostic. The important architectural result i
 
 Native integration additionally verifies encrypted batch reads while preserving order, duplicate behavior, and missing-key behavior.
 
-## 8. Existing decomposed read-path harness
+## 8. Read-session boundary after PR #37
+
+PR4 investigated carrying a redb `ReadTransaction` across multiple Dart calls and deliberately did not add that API.
+
+```text
+ordinary read call
+  -> fresh redb ReadTransaction
+  -> authoritative snapshot for that call
+  -> transaction ends with the call
+```
+
+A reusable transaction would be a fixed snapshot and therefore stale relative to commits made after session creation. Because `getAll` already handles known multi-key work in one call, and transaction/table-open cost was not the dominant bottleneck, 0.5 preserves fresh-per-call ordinary read semantics instead of introducing a session registry and cross-call lifecycle rules.
+
+Detailed decision: `docs/READ_SESSION_INVESTIGATION_05.md`.
+
+## 9. Existing decomposed read-path harness
 
 `rust/src/read_path_bench.rs` measures transaction creation, table open, point lookup/copy, MessagePack validation, payload copy, authenticated decryption, `db_get`, and `db_contains_key`.
 
@@ -177,7 +192,7 @@ build/read-path/dart-boundary.jsonl
 
 The permanent workflow is read-only and uploads evidence/toolchain metadata; temporary PR3 source-generation logic is not retained.
 
-## 9. Query execution
+## 10. Query execution
 
 `Box.query(BoxQuery)` remains one structured query through one asynchronous FRB call:
 
@@ -197,7 +212,7 @@ Box.query
 
 Persisted indexes narrow candidates only; they do not replace predicate re-evaluation and do not satisfy ORDER BY.
 
-## 10. Encryption/profile safety
+## 11. Encryption/profile safety
 
 Encrypted point and batch reads preserve full AEAD authentication. Encrypted boxes can use native scan queries but cannot create persisted plaintext-derived secondary indexes.
 
@@ -211,7 +226,7 @@ full
 
 Reduced profiles reject indexed boxes they cannot safely maintain.
 
-## 11. Hive CE migration
+## 12. Hive CE migration
 
 Core `dxtr_box` has no runtime Hive CE dependency.
 
@@ -231,7 +246,7 @@ migrateFromHiveCe
 
 Ordinary opens are excluded while migration owns the destination. Failure cleanup removes migration-owned state and releases its reservation.
 
-## 12. FRB drift and package gates
+## 13. FRB drift and package gates
 
 Checked-in bindings are generated with FRB 2.8.0. Full CI regenerates them and fails on any diff.
 
@@ -243,7 +258,7 @@ make package-readiness
   -> dart pub publish --dry-run --ignore-warnings
 ```
 
-## 13. Native-size policy
+## 14. Native-size policy
 
 ```text
 allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
@@ -251,11 +266,11 @@ allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
 
 Minimal, encryption, and full are measured independently.
 
-## 14. Staged published consumers
+## 15. Staged published consumers
 
 `tool/validate_published_consumer.dart` validates the consumer-visible package payload on Android, iOS, macOS, Linux, and Windows.
 
-## 15. Change-aware CI
+## 16. Change-aware CI
 
 ```text
 change-detection
@@ -281,19 +296,19 @@ rust-check
 
 Full validation remains mandatory before merge.
 
-## 16. 0.5 implementation sequence
+## 17. 0.5 implementation sequence
 
 ```text
-PR 1 / #33 — read-path decomposition + corrected baseline      complete
+PR 1 / #33 — read-path decomposition + corrected baseline      complete / merged
 PR 2 / #35 — sync FRB single-key reads                         complete / merged
-PR 3 / #36 — one-snapshot batch/multi-key reads                complete / final validation
-PR 4       — read-session investigation                        next
-PR 5       — expanded comparison + 0.5 closure audit          planned
+PR 3 / #36 — one-snapshot batch/multi-key reads                complete / merged
+PR 4 / #37 — read-session investigation                        complete / merged; no API added
+PR 5       — comparison matrix + 0.5 closure audit             active / final gate
 ```
 
-PR4 should evaluate whether explicit reusable read sessions provide enough benefit after `getAll` to justify stale-snapshot/resource/lifecycle complexity. Ordinary `get` must not silently move to a long-lived snapshot.
+PR5 adds no new runtime architecture. It reruns the final correctness/performance evidence and closes 0.5 only if the full Merge Gate remains green. See `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
 
-## 17. Invariants to preserve
+## 18. Invariants to preserve
 
 - Dart >=3.4 / Flutter >=3.22.
 - FRB exactly 2.8.0.
@@ -303,6 +318,7 @@ PR4 should evaluate whether explicit reusable read sessions provide enough benef
 - Primary data authoritative over indexes.
 - `get`, `containsKey`, and `getAll` remain authoritative native reads.
 - No Dart whole-box cache.
+- No implicit long-lived stale snapshot.
 - Full encrypted authentication.
 - Query/index/migration correctness.
 - Native-size regression policy.
@@ -321,6 +337,7 @@ make hive-ce-migration-test
 make query-index-test
 make query-sort-test
 make benchmark-comparison-correctness
+make benchmark-comparison
 make benchmark-read-path
 make benchmark-batch-read
 make native-size-regression
