@@ -2,11 +2,31 @@
 
 ## Product
 
-**dxtr_box — The Hive replacement, forged in Rust. By Dxtr.**
+**dxtr_box — Native local database for Flutter, forged in Rust. By Dxtr.**
 
-Target: Hive-simple Flutter ergonomics backed by redb, with durable storage outside the Dart heap and no application-level model code generation.
+Target: a simple Flutter-facing local database backed by Rust/redb, with durable storage outside the Dart heap, native query/index execution, first-class encryption, and no application-level model code generation requirement.
 
-The 1.0 goal is practical Hive/Hive CE local-database replacement, not source-level API compatibility. `docs/HIVE_FUNCTIONAL_PARITY.md` remains a release gate.
+Dxtr_Box is no longer positioned as a Hive/Hive CE replacement. Hive CE remains a useful migration source, compatibility reference, and benchmark peer, but it does not define product scope or 1.0 success.
+
+## Product identity / key features
+
+The intended product identity stays compact:
+
+- Rust/redb ACID native storage;
+- simple box-style asynchronous Flutter API;
+- optimized authoritative point reads and one-snapshot multi-key reads;
+- declarative native query engine;
+- persisted secondary indexes;
+- Argon2 + ChaCha20Poly1305 encryption;
+- transactional bulk operations and index maintenance;
+- native cross-handle watch events;
+- crash/reopen durability coverage;
+- explicit plaintext-to-encrypted migration;
+- optional Hive CE migration tooling;
+- Android/iOS/macOS/Linux/Windows native consumers;
+- self-contained publishable Flutter FFI plugin topology.
+
+Avoid expanding the product into an ORM, cloud sync service, or general schema framework unless explicitly reprioritized later.
 
 ## Current snapshot
 
@@ -29,7 +49,7 @@ Bounded scope:
 
 1. query/index production polish;
 2. encrypted query/index security and implementation decisions;
-3. only Hive/Hive CE parity gaps necessary for practical replacement.
+3. compatibility/migration improvements only when they materially improve adoption without changing the product direction.
 
 Explicitly out of scope unless separately prioritized: ORM/code generation, cloud sync/replication, general schema framework, reactive-query redesign, and unrelated product expansion.
 
@@ -66,7 +86,7 @@ Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly pu
 - Equality/range candidate narrowing, nested indexes, AND intersection.
 - One redb read snapshot per native query.
 - Deterministic semantic sorting before pagination.
-- Explicit Hive CE 2.19.3 migration fixtures.
+- Optional Hive CE 2.19.3 migration fixtures/tooling.
 - Native-size baseline/stability/cross-commit regression gates.
 - Self-contained publishable Flutter FFI package topology.
 - Four-engine local-database comparison harness.
@@ -149,16 +169,16 @@ Preferred first production target, if justified: equality-only keyed determinist
 
 Encrypted range indexing is optional. If an acceptable representation requires excessive order leakage or complexity, encrypted range queries remain scan-only in 0.6.
 
-A native integration regression guard now requires encrypted index creation to stay blocked until that contract changes intentionally, while encrypted scan queries remain functional.
+A native integration regression guard requires encrypted index creation to stay blocked until that contract changes intentionally, while encrypted scan queries remain functional.
 
 ## 0.6 implementation sequence
 
 ```text
-PR 1 — threat model + safe-default regression guard + milestone docs
+PR 1 — threat model + safe-default regression guard + milestone/product docs
 PR 2 — encrypted equality index implementation, only if representation is accepted
 PR 3 — plaintext planner/range/index polish + measured benchmark evidence
 PR 4 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
-PR 5 — required Hive parity + 0.6 closure audit
+PR 5 — compatibility cleanup + 0.6 closure audit
 ```
 
 Small focused PRs are preferred. Do not combine all runtime changes into one review surface.
@@ -245,7 +265,7 @@ storage format:    dxtr_box/1
 13. query/index/migration/crash-reopen tests remain green;
 14. native-size policy remains green;
 15. five staged platform consumers remain green;
-16. only necessary Hive/Hive CE parity gaps are pulled into scope.
+16. README/handoff/product messaging consistently describes Dxtr_Box as its own native local database, not as a Hive replacement.
 
 ## Working style
 
@@ -270,5 +290,7 @@ After each merged PR:
 - crash-atomic Hive migration staging/promotion and stale-reservation recovery;
 - application bundle/APK/IPA size budgets;
 - Web/IndexedDB strategy.
+
+`docs/HIVE_FUNCTIONAL_PARITY.md` remains historical/reference material and may inform interoperability work, but it is no longer the product identity or mandatory definition of 1.0.
 
 Do not trade correctness, durability, encryption, cross-process visibility, compatibility, or evidence quality for feature count.
