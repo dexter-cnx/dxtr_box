@@ -38,17 +38,20 @@ native profiles:        minimal | encryption | full
 ## Current milestone — 0.6 Query / Index + Encryption Hardening
 
 Normative design/acceptance record: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+Release/closure record: `docs/RELEASE_AUDIT_06.md`.
 
-Current PR sequence:
+PR sequence:
 
 ```text
 PR1 — threat model + safe-default regression guard + milestone/product docs: merged (#39)
 PR2 — encrypted equality index + plaintext planner/range/index polish: merged (#40)
-PR3 — encrypted range/index decision: active (#42)
-PR4 — core reliability/API closure + 0.6 audit: final
+PR3 — encrypted range/index decision: merged (#42)
+PR4 — core reliability/API closure + 0.6 audit: active/final
 ```
 
-PR4 is not a Hive/Hive CE parity pass.
+PR4 is intentionally a closure/audit PR, not a Hive/Hive CE parity pass and not a feature-expansion pass.
+
+When PR4 passes `CI / Merge Gate / full quality bar` and merges, **0.6 is complete**.
 
 ## Current capabilities
 
@@ -104,9 +107,9 @@ generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 
 `Box.getAll` uses one native crossing and one redb read snapshot; hosted evidence reached about 8.59x improvement for 1,000 keys versus independent public `get` calls.
 
-Do not regress these paths opportunistically during 0.6.
+Do not regress these paths opportunistically during 0.6 or later work.
 
-## PR2 encrypted equality-index contract
+## Encrypted equality-index contract
 
 Merged PR #40 introduced encrypted equality candidate narrowing:
 
@@ -135,9 +138,9 @@ Not intentionally persisted:
 
 An earlier BLAKE3 implementation exceeded native-size policy and was replaced by BLAKE2 reuse already present through Argon2. Final measured full-profile Linux x64 evidence for PR2 was +30,432 bytes / +1.276%, within policy.
 
-## PR3 encrypted range decision
+## Encrypted range decision
 
-PR3 intentionally **does not** add encrypted persisted range ordering.
+Merged PR #42 intentionally **does not** add encrypted persisted range ordering.
 
 Production contract for encrypted boxes:
 
@@ -163,7 +166,26 @@ Reason: either incorrect ordering semantics, unacceptable order/distribution lea
 
 Decision record: `docs/ENCRYPTED_RANGE_DECISION_06.md`.
 
-PR3 regression guard: `rust/tests/encrypted_range_decision.rs` covers all five ordered/range operators plus mixed equality+range `AND` before/after encrypted index creation.
+Regression guards include `rust/tests/encrypted_range_decision.rs` and `rust/tests/encrypted_range_planner_guard.rs`.
+
+## 0.6 closure audit
+
+The final acceptance matrix lives in `docs/RELEASE_AUDIT_06.md`.
+
+PR4 must not claim milestone completion from documentation alone. Closure requires the PR head to pass the repository's full merge quality bar, including:
+
+- public API/storage contract checks;
+- Dart/Rust/native tests;
+- query/index/encryption regression coverage;
+- migration and process crash/reopen coverage;
+- FRB generated-binding reproducibility;
+- exact three native profiles;
+- native-size regression policy;
+- package/pub readiness;
+- benchmark correctness/smoke;
+- staged Android/iOS/macOS/Linux/Windows consumers.
+
+No new runtime/public API/storage feature is required for closure unless the audit exposes a concrete correctness gap.
 
 ## Benchmark policy
 
@@ -211,14 +233,6 @@ Full merge validation must preserve:
 - native-size policy;
 - package/pub readiness;
 - staged Android/iOS/macOS/Linux/Windows consumers.
-
-## PR4 target
-
-After PR3 merges, PR4 should be the final **core reliability/API closure + 0.6 audit**.
-
-Only pull in cleanup that independently strengthens Dxtr_Box itself. Avoid feature expansion.
-
-PR4 should verify the 0.6 acceptance matrix, synchronize public/internal docs, record release evidence, and close the milestone.
 
 ## Post-0.6 maturity candidates
 
