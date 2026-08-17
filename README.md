@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
 
-> Status: **0.4 Production Hardening complete**. PH-01 native-size policy, PH-02 package hardening, PH-03 broader local-database comparison, PH-04 staged published-payload consumer validation, and PH-05 public API + durable storage contract guarding are complete. The package preview is `0.4.0-dev.1`; no pub.dev release is performed by the hardening PRs. Public API and storage format are still pre-1.0 and not declared stable. Next work returns to the Hive/Hive CE functional-parity release gate.
+> Status: **0.5 Performance / Read-path Optimization is at final closure audit**. 0.4 Production Hardening remains complete. 0.5 optimized authoritative single-key reads, added one-snapshot `Box.getAll` multi-key reads, and rejected long-lived read sessions after an evidence-backed freshness/lifecycle investigation. The package remains pre-1.0; public API and storage format are not declared stable. PR5 closes 0.5 only after the full merge quality bar remains green.
 
 ## Compatibility
 
@@ -65,12 +65,16 @@ final box = await DxtrBox.open('settings');
 await box.put('theme', 'dark');
 final theme = await box.get('theme');
 
+final selected = await box.getAll(['theme', 'missing', 'theme']);
+// Hits preserve requested order, missing keys are omitted,
+// and duplicate requested keys produce duplicate result entries.
+
 await box.deleteAll(['theme', 'legacy']);
 await box.compact();
 await box.close();
 ```
 
-Native reads are asynchronous because they may perform real storage I/O.
+Native reads remain asynchronous at the public Dart API. Internally, only the tiny single-key Rust `get` and `contains_key` FRB entrypoints use synchronous generated dispatch; batch reads, queries, mutations, scans, and migrations remain asynchronous. `getAll` uses one native crossing and one short-lived redb read snapshot for the requested key set.
 
 ## Encryption
 
@@ -84,7 +88,7 @@ await secure.put('token', 'secret');
 await secure.close();
 ```
 
-Encrypted boxes require the same key on reopen. Plaintext-to-encrypted conversion is explicit and transactional.
+Encrypted boxes require the same key on reopen. Plaintext-to-encrypted conversion is explicit and transactional. Encrypted point and batch reads retain full AEAD authentication.
 
 ## Hive CE migration
 
@@ -200,7 +204,7 @@ This runs public API documentation generation and `dart pub publish --dry-run --
 
 `flutter_rust_bridge` remains pinned to 2.8.0 because checked-in generated bindings and native runtime must remain on the same FRB version; the pub dry-run therefore ignores the advisory broad-dependency warning while still failing validation errors.
 
-No package is automatically published by CI or by the hardening milestones. See `docs/PACKAGE_RELEASE_04.md`.
+No package is automatically published by CI or by the hardening/performance milestones. See `docs/PACKAGE_RELEASE_04.md`.
 
 ## Published-payload consumer validation
 
@@ -248,7 +252,9 @@ make benchmark-comparison
 
 The correctness gate verifies a shared CRUD/overwrite/delete/close/reopen workload converges to the same persisted snapshot across all four engines. The diagnostic matrix measures sequential put, batch put, point get, contains, delete-all, and reopen-read, but **does not assert that any engine must be faster than another**.
 
-CI uploads machine-readable JSONL evidence as the `local-database-comparison` artifact. Hosted-runner timing is diagnostic only and must not be presented as stable product performance. See `docs/LOCAL_DATABASE_COMPARISON_04.md`.
+`Box.getAll` is intentionally not forced into that four-engine matrix because the other adapters do not expose an equivalent contract with identical order/missing/duplicate semantics. Its evidence comes from the dedicated dxtr_box batch benchmark instead.
+
+CI uploads machine-readable JSONL evidence as the `local-database-comparison` artifact. Hosted-runner timing is diagnostic only and must not be presented as stable product performance. See `docs/LOCAL_DATABASE_COMPARISON_04.md` and `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
 
 ## Fast local preflight
 
@@ -293,6 +299,8 @@ make benchmark-comparison-correctness
 make benchmark-comparison
 make benchmark-query-index
 make diagnose-point-read
+make benchmark-read-path
+make benchmark-batch-read
 make rust-check
 make native-size-baseline
 make native-size-stability
@@ -314,6 +322,9 @@ make example-windows
 
 - `docs/PROJECT_HANDOFF.md` — current milestone state and sequencing.
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture and CI DAG.
+- `docs/PERFORMANCE_READ_PATH_05.md` — 0.5 read-path measurements and production decisions.
+- `docs/READ_SESSION_INVESTIGATION_05.md` — evidence-backed read-session decision.
+- `docs/PERFORMANCE_05_CLOSURE_AUDIT.md` — final 0.5 acceptance audit.
 - `docs/CI_STRATEGY.md` — Fast CI, affected CI, full merge validation, and trigger policy.
 - `docs/PACKAGE_RELEASE_04.md` — self-contained plugin and publication-readiness contract.
 - `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md` — PH-04 staged publication-boundary consumer build contract.
@@ -326,4 +337,4 @@ make example-windows
 
 ## 1.0 direction
 
-A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. The completed 0.4 work is production/package hardening, not a stable-API claim.
+A 1.0 release requires practical Hive/Hive CE functional parity, a stable storage/API contract, and a completed Web/IndexedDB strategy. Completed 0.4 hardening and the closing 0.5 read-path milestone strengthen the implementation and evidence base; neither is a stable-API claim.
