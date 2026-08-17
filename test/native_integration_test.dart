@@ -10,7 +10,9 @@ void main() {
   test(
     'native getAll preserves order, duplicates, misses, and encryption',
     () async {
-      final dir = await Directory.systemTemp.createTemp('dxtr_box_batch_native_');
+      final dir = await Directory.systemTemp.createTemp(
+        'dxtr_box_batch_native_',
+      );
       addTearDown(() => dir.delete(recursive: true));
 
       await DxtrBox.init(path: dir.path);
