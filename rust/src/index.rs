@@ -162,12 +162,7 @@ fn lookup_candidate(
         if !matches!(candidate.op, query::CompareOp::Equal) {
             return Err("encrypted persisted indexes support equality narrowing only".to_string());
         }
-        let scalar = persisted_scalar(
-            encryption,
-            index_name,
-            &candidate.field,
-            &candidate.value,
-        )?;
+        let scalar = persisted_scalar(encryption, index_name, &candidate.field, &candidate.value)?;
         return lookup_exact_scalar(read, index_name, &scalar);
     }
 
@@ -196,8 +191,9 @@ fn lookup_exact_scalar(
     scalar: &[u8],
 ) -> Result<Vec<String>, String> {
     let prefix = index_scalar_prefix(index_name, scalar);
-    let upper = prefix_successor(&prefix)
-        .ok_or_else(|| "persisted index scalar prefix has no lexicographic successor".to_string())?;
+    let upper = prefix_successor(&prefix).ok_or_else(|| {
+        "persisted index scalar prefix has no lexicographic successor".to_string()
+    })?;
     let entries = read.open_table(INDEX_ENTRIES).map_err(|e| e.to_string())?;
     entries
         .range(prefix.as_slice()..upper.as_slice())
