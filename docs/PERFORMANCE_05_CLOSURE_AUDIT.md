@@ -18,7 +18,7 @@ PR 5       — comparison matrix + closure audit                 this PR
 
 ### Single-key reads
 
-Only Rust `get` and `contains_key` use `#[frb(sync)]`. Public Dart APIs remain `Future` based. Query, batch, mutation, migration, scan, and other heavier paths remain asynchronous.
+PR #35 changed the Rust `get` and `contains_key` point-read entrypoints to use `#[frb(sync)]` while keeping the public Dart APIs `Future` based. This statement is specific to the 0.5 point-read optimization; it is not an inventory of every synchronous FRB entrypoint in the package. Existing lifecycle/maintenance entrypoints may also use synchronous FRB dispatch. Query and batch-read entrypoints remain asynchronous.
 
 Controlled boundary evidence from PR #35:
 
