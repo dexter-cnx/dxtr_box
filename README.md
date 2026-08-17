@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered local database for Flutter. No model code generation.
 
-> Status: **0.6 Query / Index + Encryption Hardening is in progress** on top of the completed 0.5 production read-path work. PR1 established the encrypted-index threat model; PR2 adds encrypted persisted indexes for equality narrowing while keeping encrypted range predicates scan-backed. Dxtr_Box is not positioned as a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer. The package remains pre-1.0; public API and storage format are not declared stable.
+> Status: **0.6 Query / Index + Encryption Hardening is complete when PR #43 merges with the full quality bar green.** The milestone established an explicit encrypted-index threat model, added persisted encrypted equality indexes using domain-separated keyed BLAKE2b tokens, and intentionally retained authoritative scan-backed execution for encrypted ordered/range predicates. The next planned milestone is **0.7 Query Ergonomics**, an additive fluent Dart API over the existing `BoxQuery` AST. Dxtr_Box is not positioned as a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer. The package remains pre-1.0; public API and storage format are not declared stable.
 
 ## Key Features
 
@@ -174,6 +174,8 @@ Current query guarantees:
 - authoritative primary-record re-read and full predicate re-evaluation.
 
 Persisted indexes narrow `where` candidates only; they do not currently satisfy ORDER BY. Raw MessagePack bytes are not treated as numeric order.
+
+The planned 0.7 Query Ergonomics milestone will add fluent Dart syntax that compiles into this same `BoxQuery` AST rather than introducing a second query engine. See `docs/QUERY_ERGONOMICS_07.md`.
 
 ## Persisted indexes
 
@@ -358,7 +360,10 @@ make example-windows
 
 - `docs/PROJECT_HANDOFF.md` — current milestone state and sequencing.
 - `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture and CI DAG.
-- `docs/QUERY_INDEX_ENCRYPTION_06.md` — 0.6 scope, encrypted-index threat model, accepted equality-token contract, sequencing, and acceptance criteria.
+- `docs/QUERY_INDEX_ENCRYPTION_06.md` — completed 0.6 encrypted-index threat model and runtime/security contract.
+- `docs/ENCRYPTED_RANGE_DECISION_06.md` — rationale for scan-backed encrypted ordered/range predicates.
+- `docs/RELEASE_AUDIT_06.md` — final 0.6 acceptance/closure matrix.
+- `docs/QUERY_ERGONOMICS_07.md` — planned additive fluent-query milestone over the existing `BoxQuery` AST.
 - `docs/PERFORMANCE_READ_PATH_05.md` — 0.5 read-path measurements and production decisions.
 - `docs/READ_SESSION_INVESTIGATION_05.md` — evidence-backed read-session decision.
 - `docs/PERFORMANCE_05_CLOSURE_AUDIT.md` — final 0.5 acceptance audit.
@@ -370,7 +375,7 @@ make example-windows
 - `docs/LOCAL_DATABASE_COMPARISON_04.md` — PH-03 correctness + diagnostic comparison contract.
 - `docs/QUERY_INDEX_03.md` — query/index semantics and planner constraints.
 - `docs/HIVE_CE_MIGRATION_03.md` — optional Hive CE migration contract and failure behavior.
-- `docs/HIVE_FUNCTIONAL_PARITY.md` — historical/reference parity material, not the product direction.
+- `docs/HIVE_FUNCTIONAL_PARITY.md` — historical compatibility inventory only; not the product direction or a 1.0 release gate.
 
 ## 1.0 direction
 
