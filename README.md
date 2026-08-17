@@ -6,7 +6,7 @@
 
 A fast, ACID, encrypted, Rust-powered local database for Flutter. No model code generation.
 
-> Status: **0.6 Query / Index + Encryption Hardening is complete when PR #43 merges with the full quality bar green.** The milestone established an explicit encrypted-index threat model, added persisted encrypted equality indexes using domain-separated keyed BLAKE2b tokens, and intentionally retained authoritative scan-backed execution for encrypted ordered/range predicates. The next planned milestone is **0.7 Query Ergonomics**, an additive fluent Dart API over the existing `BoxQuery` AST. Dxtr_Box is not positioned as a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer. The package remains pre-1.0; public API and storage format are not declared stable.
+> Status: **0.6 Query / Index + Encryption Hardening is complete.** The active milestone is **0.7 Query Ergonomics**. PR #44 adds the first fluent Dart authoring layer over the existing `BoxQuery` AST through `BoxQueryBuilder.where(...)` and collision-free `box.queryWhere(...)`, while preserving legacy `Box.where(predicate)`. Dxtr_Box is not positioned as a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer. The package remains pre-1.0; public API and storage format are not declared stable.
 
 ## Key Features
 
@@ -14,6 +14,7 @@ A fast, ACID, encrypted, Rust-powered local database for Flutter. No model code 
 - **Simple box-style Flutter API** — asynchronous CRUD without application model code generation.
 - **Fast authoritative reads** — optimized point reads plus one-snapshot `getAll` multi-key reads.
 - **Declarative native queries** — nested field comparisons, boolean groups, pagination, and deterministic sorting.
+- **Fluent query authoring** — 0.7 PR1 adds `queryWhere(...)`, comparisons, boolean chaining, and explicit grouping over the existing query AST.
 - **Persisted secondary indexes** — equality/range candidate narrowing for plaintext boxes plus equality-only encrypted narrowing under `full`.
 - **First-class encryption** — Argon2 key derivation + ChaCha20Poly1305 authenticated encryption.
 - **Encrypted equality tokens** — domain-separated deterministic keyed BLAKE2b MAC tokens; plaintext scalar bytes are not persisted in encrypted index entries.
@@ -128,7 +129,41 @@ Migration preflights converted values, detects converted-key collisions, preserv
 
 Real Hive CE 2.19.3 fixtures are isolated under `tool/hive_ce_migration_fixture/` so they do not raise the root Dart/Flutter minimum. See `docs/HIVE_CE_MIGRATION_03.md`.
 
-## Declarative queries
+## Queries
+
+### Fluent authoring — 0.7 PR1
+
+PR #44 adds a fluent authoring layer that compiles to the same existing `BoxQuery` AST:
+
+```dart
+final query = box
+    .queryWhere('status').equals('active')
+    .and('profile.age').gte(18)
+    .build();
+
+final rows = await box.query(query);
+```
+
+Standalone composition is also available:
+
+```dart
+final query = BoxQueryBuilder
+    .where('price').between(100, 500)
+    .and('category').equals('camera')
+    .build();
+```
+
+PR1 supports `equals`, `notEquals`, `gt`, `gte`, `lt`, `lte`, `between`, `isNull`, `isNotNull`, `and`, `or`, `andGroup`, and `orGroup`.
+
+Mixed `AND` / `OR` chains are left-associative. Use explicit groups when precedence matters.
+
+`Box` already exposes the legacy `where(bool Function(dynamic))` predicate-scan method. Dart cannot overload methods, so the fluent box entry point intentionally uses `queryWhere(...)` rather than breaking or dynamically weakening `Box.where(predicate)`.
+
+PR1 intentionally stops at `build()` plus existing `box.query(query)` execution. `orderBy`, `offset`, `limit`, and terminal `find()` ergonomics belong to PR2.
+
+### Direct declarative queries
+
+The direct AST API remains first-class:
 
 ```dart
 final rows = await box.query(
@@ -159,7 +194,7 @@ final rows = await box.query(
 
 Current query guarantees:
 
-- one FRB call per declarative query;
+- one FRB call per executed declarative query;
 - dotted nested fields;
 - equality/inequality, ordered comparisons, `between`, null checks, AND/OR;
 - exact signed/unsigned integer semantics;
@@ -175,7 +210,7 @@ Current query guarantees:
 
 Persisted indexes narrow `where` candidates only; they do not currently satisfy ORDER BY. Raw MessagePack bytes are not treated as numeric order.
 
-The planned 0.7 Query Ergonomics milestone will add fluent Dart syntax that compiles into this same `BoxQuery` AST rather than introducing a second query engine. See `docs/QUERY_ERGONOMICS_07.md`.
+The fluent 0.7 layer is additive and does not introduce a second query engine, second wire AST, or Dart-side post-filtering. See `docs/QUERY_ERGONOMICS_07.md`.
 
 ## Persisted indexes
 
@@ -316,6 +351,20 @@ make ci-fast
 
 Expensive migration/native-size/FRB/publication/platform/benchmark validation remains change-aware during Draft iteration and becomes mandatory full validation when a pull request is Ready for review. See `docs/CI_STRATEGY.md`.
 
+### Pre-push formatting guard
+
+PR #44 includes a lightweight Git hook to keep formatting-only failures local while retaining CI as the source of truth.
+
+Install once per clone:
+
+```bash
+bash tool/install_git_hooks.sh
+```
+
+The installer sets `core.hooksPath` to `.githooks`. The tracked `.githooks/pre-push` file is executable (`100755`). On push it requires a clean worktree/index, runs `make format`, and stops the push if formatting changes tracked files so those changes can be reviewed and committed first.
+
+The hook never auto-adds, auto-commits, or discards changes. CI `format-check` remains mandatory because hooks can be bypassed.
+
 ## Developer workflow
 
 Common root targets:
@@ -363,7 +412,7 @@ make example-windows
 - `docs/QUERY_INDEX_ENCRYPTION_06.md` — completed 0.6 encrypted-index threat model and runtime/security contract.
 - `docs/ENCRYPTED_RANGE_DECISION_06.md` — rationale for scan-backed encrypted ordered/range predicates.
 - `docs/RELEASE_AUDIT_06.md` — final 0.6 acceptance/closure matrix.
-- `docs/QUERY_ERGONOMICS_07.md` — planned additive fluent-query milestone over the existing `BoxQuery` AST.
+- `docs/QUERY_ERGONOMICS_07.md` — active additive fluent-query milestone over the existing `BoxQuery` AST.
 - `docs/PERFORMANCE_READ_PATH_05.md` — 0.5 read-path measurements and production decisions.
 - `docs/READ_SESSION_INVESTIGATION_05.md` — evidence-backed read-session decision.
 - `docs/PERFORMANCE_05_CLOSURE_AUDIT.md` — final 0.5 acceptance audit.

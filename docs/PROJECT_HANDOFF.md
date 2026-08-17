@@ -33,54 +33,91 @@ native profiles:        minimal | encryption | full
   - added one-snapshot `Box.getAll`;
   - rejected reusable long-lived read sessions because redb read transactions are fixed snapshots and can become stale;
   - final comparison/closure audit merged.
-- **0.6 Query / Index + Encryption Hardening** — complete after PR #43 merges with the full quality bar green.
+- **0.6 Query / Index + Encryption Hardening** — complete.
   - PR #39 established the encrypted-index threat model and safe-default guard;
   - PR #40 added encrypted equality indexing with keyed BLAKE2b tokens plus planner polish;
   - PR #42 locked encrypted ordered/range predicates to authoritative scan-backed execution;
-  - PR #43 is the final closure/audit publication of the completed milestone state.
+  - PR #43 merged the final closure/audit publication for the completed milestone state.
 - **Change-aware Fast CI** — complete; affected expensive gates during Draft, full merge quality bar for Ready/non-draft work.
 
 Normative 0.6 design record: `docs/QUERY_INDEX_ENCRYPTION_06.md`.
 Closure record: `docs/RELEASE_AUDIT_06.md`.
 
-## Next milestone — 0.7 Query Ergonomics
+## Active milestone — 0.7 Query Ergonomics
 
-Planned design record: `docs/QUERY_ERGONOMICS_07.md`.
+Design record: `docs/QUERY_ERGONOMICS_07.md`.
 
-The preferred next milestone is **0.7 Query Ergonomics**: improve the Dart query experience without replacing the existing query engine or changing durable storage.
+0.7 improves Dart query authoring without replacing the existing query engine or changing durable storage.
 
-Target public style:
+### PR1 — fluent predicate builder
+
+PR #44 implements the first 0.7 slice as a Dart-only authoring layer over the existing `BoxQuery` / `QueryFilter` AST.
+
+Accepted public entry points:
 
 ```dart
-final users = await box
-    .where('status').equals('active')
+final query = box
+    .queryWhere('status').equals('active')
     .and('age').gte(18)
-    .orderBy('name')
-    .limit(20)
-    .find();
+    .build();
+
+final users = await box.query(query);
 ```
 
-Architectural rule:
+Standalone composition is also supported:
+
+```dart
+final query = BoxQueryBuilder
+    .where('score').between(50, 100)
+    .build();
+```
+
+`Box` already has the legacy compatibility method:
+
+```dart
+Future<List<MapEntry<String, dynamic>>> where(
+  bool Function(dynamic) test,
+)
+```
+
+Dart does not support method overloading and instance members shadow same-named extensions, so 0.7 deliberately uses **`box.queryWhere(...)`** rather than breaking or dynamically weakening legacy `Box.where(predicate)`.
+
+PR1 supports:
+
+```text
+equals / notEquals
+gt / gte / lt / lte
+between
+isNull / isNotNull
+and / or
+andGroup / orGroup
+build
+```
+
+Mixed `AND` / `OR` chains are explicitly left-associative. Use `andGroup` / `orGroup` when grouping must be explicit.
+
+Architecture remains:
 
 ```text
 Fluent Dart API
       |
       v
-existing BoxQuery AST
+existing BoxQuery / QueryFilter AST
       |
       v
 existing serialization / FRB
       |
       v
-existing Rust planner + indexes
+existing Rust planner + indexes + authoritative record checks
 ```
 
 `Box.query(BoxQuery)` remains first-class for advanced/dynamic composition. The fluent API is additive, not a parallel query model.
 
-Recommended 0.7 sequence:
+PR1 intentionally stops at `build()` plus existing `box.query(query)` execution. It does **not** add Dart-side filtering/sorting, a second AST or wire representation, FRB changes, Rust execution changes, storage changes, native-profile changes, or dependencies.
+
+Remaining 0.7 sequence:
 
 ```text
-PR1 — fluent where/comparison/AND/OR/grouping builder
 PR2 — orderBy/offset/limit/find ergonomics; native-backed convenience operations only where efficient
 PR3 — optional DxtrField<T> typed field metadata; no mandatory codegen/schema
 PR4 — README/examples/API equivalence/compatibility closure
@@ -99,6 +136,7 @@ Do not turn 0.7 into an ORM, SQL parser, schema framework, or Dart-side post-fil
 - Explicit plaintext-to-encrypted migration.
 - Process crash/reopen durability coverage.
 - Declarative `Box.query(BoxQuery)` with one native query call.
+- Fluent 0.7 PR1 query authoring via `BoxQueryBuilder.where(...)` and collision-free `box.queryWhere(...)`.
 - Plaintext persisted scalar indexes: equality, range, nested fields, deterministic selection, AND intersection.
 - Encrypted persisted equality indexes under `full` using deterministic keyed BLAKE2b MAC tokens.
 - Encrypted ordered/range predicates remain scan-backed.
@@ -207,7 +245,7 @@ Regression guards include `rust/tests/encrypted_range_decision.rs` and `rust/tes
 
 The final acceptance matrix lives in `docs/RELEASE_AUDIT_06.md`.
 
-PR #43 is the closure publication commit. Its merge is permitted only when the repository full quality bar is green, including:
+PR #43 merged after the repository full quality bar was green, including:
 
 - public API/storage contract checks;
 - Dart/Rust/native tests;
@@ -220,7 +258,7 @@ PR #43 is the closure publication commit. Its merge is permitted only when the r
 - benchmark correctness/smoke;
 - staged Android/iOS/macOS/Linux/Windows consumers.
 
-The state represented by the merged closure commit is **0.6 complete**. Documentation does not bypass the quality bar; the quality bar is the condition for merging that state.
+The merged state is **0.6 complete**.
 
 ## Benchmark policy
 
@@ -257,6 +295,26 @@ Cheap local preflight:
 ```bash
 make preflight
 ```
+
+### Local pre-push formatting guard
+
+PR #44 adds a lightweight repository hook to prevent formatting-only CI failures from reaching GitHub.
+
+One-time setup per clone:
+
+```bash
+bash tool/install_git_hooks.sh
+```
+
+This configures:
+
+```text
+core.hooksPath = .githooks
+```
+
+`.githooks/pre-push` is tracked as executable (`100755`). On push it requires a clean tree/index, runs the repository's canonical `make format`, and stops the push if formatting changed tracked files so the developer can review and commit those changes. It never auto-adds, auto-commits, or discards changes.
+
+The hook is convenience only; CI `format-check` remains mandatory because hooks can be bypassed.
 
 Full merge validation must preserve:
 

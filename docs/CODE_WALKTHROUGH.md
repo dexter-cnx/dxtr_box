@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough covers the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution paths, completed 0.4/0.5/0.6 work, and the next planned 0.7 Query Ergonomics direction.
+This walkthrough covers the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution paths, completed 0.4/0.5/0.6 work, and the active 0.7 Query Ergonomics implementation.
 
 ## 1. Package boundary
 
@@ -38,7 +38,7 @@ Flutter app
   -> redb
 ```
 
-Dart owns public ergonomics, MessagePack encoding/decoding, lifecycle guards, query objects, and optional migration preflight.
+Dart owns public ergonomics, MessagePack encoding/decoding, lifecycle guards, query objects/builders, and optional migration preflight.
 
 Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted indexes, maintenance, and plaintext-to-encrypted migration.
 
@@ -146,7 +146,74 @@ Box.query(BoxQuery)
 
 Persisted indexes narrow candidates only. They do not replace predicate re-evaluation and do not currently satisfy ORDER BY.
 
-## 8. Plaintext index execution
+## 8. 0.7 PR1 fluent query authoring
+
+PR #44 adds `lib/src/query_builder.dart` and exports it from the package entry point. This is an authoring layer only; execution remains the existing `Box.query(BoxQuery)` path.
+
+Bound-looking convenience entry point:
+
+```dart
+final query = box
+    .queryWhere('status').equals('active')
+    .and('profile.age').gte(18)
+    .build();
+
+final rows = await box.query(query);
+```
+
+Standalone builder:
+
+```dart
+final query = BoxQueryBuilder
+    .where('score').between(50, 100)
+    .build();
+```
+
+The flow is:
+
+```text
+box.queryWhere(field) / BoxQueryBuilder.where(field)
+  -> QueryFieldBuilder
+  -> equals/notEquals/gt/gte/lt/lte/between/isNull/isNotNull
+  -> BoxQueryBuilder
+  -> and/or/andGroup/orGroup
+  -> build()
+  -> existing BoxQuery(where: QueryFilter)
+```
+
+There is no second AST, no new serialization, and no native query call until the resulting `BoxQuery` is passed to `Box.query`.
+
+### Why `queryWhere` instead of `where`
+
+`Box` already exposes the legacy compatibility API:
+
+```dart
+Future<List<MapEntry<String, dynamic>>> where(
+  bool Function(dynamic) test,
+)
+```
+
+Dart cannot overload methods, and an instance method shadows a same-named extension. A fluent `box.where('field')` would therefore break source typing or require dynamic dispatch. PR1 preserves the legacy API and uses the collision-free `box.queryWhere('field')` name.
+
+### Boolean semantics
+
+Mixed `AND` / `OR` chaining is left-associative:
+
+```text
+a AND b OR c
+```
+
+builds:
+
+```text
+(a AND b) OR c
+```
+
+Use `andGroup` / `orGroup` for explicit nested `QueryGroup` structure. Existing `QueryComparison` validation still owns field-path validation, so malformed dotted paths fail exactly as they do with manual AST construction.
+
+PR1 intentionally stops at `build()`. PR2 owns `orderBy`, `offset`, `limit`, and terminal `find()` ergonomics.
+
+## 9. Plaintext index execution
 
 Plaintext indexes persist sortable scalar representations and may narrow:
 
@@ -163,7 +230,7 @@ Planner behavior includes deterministic index selection and multi-index intersec
 
 Even after index narrowing, primary records are re-read and the full predicate is evaluated.
 
-## 9. Encrypted equality index after PR2
+## 10. Encrypted equality index after 0.6 PR2
 
 PR #40 introduced encrypted equality narrowing under the `full` profile.
 
@@ -183,7 +250,7 @@ The token is deterministic so repeated equal values intentionally reveal equalit
 
 Index create/backfill and mutation/delete maintenance stay in the same redb write transaction as primary data.
 
-## 10. Encrypted range execution after PR3
+## 11. Encrypted range execution after 0.6 PR3
 
 PR #42 made the range policy explicit: encrypted ordered/range predicates remain scan-backed.
 
@@ -223,7 +290,7 @@ Decision record: `docs/ENCRYPTED_RANGE_DECISION_06.md`.
 
 Regression guards: `rust/tests/encrypted_range_decision.rs` validates all five ordered/range operators and mixed equality+range AND semantics before/after encrypted index creation; `rust/tests/encrypted_range_planner_guard.rs` locks the equality-only encrypted planner rule.
 
-## 11. Why encrypted range indexing is rejected for 0.6
+## 12. Why encrypted range indexing is rejected for 0.6
 
 Rejected designs:
 
@@ -234,7 +301,7 @@ Rejected designs:
 
 A future milestone may revisit range indexing only with an explicit leakage budget and demonstrated production bottleneck.
 
-## 12. Native profiles
+## 13. Native profiles
 
 Exactly three profiles remain:
 
@@ -251,7 +318,7 @@ full
 
 Do not add a fourth profile for encrypted indexes or tuning.
 
-## 13. Migration/interoperability
+## 14. Migration/interoperability
 
 Core `dxtr_box` has no runtime Hive CE dependency.
 
@@ -269,7 +336,7 @@ source enumeration/preflight
 
 This path does not define product parity or 1.0 success.
 
-## 14. FRB/package/native-size gates
+## 15. FRB/package/native-size gates
 
 Checked-in bindings are reproducible with FRB 2.8.0.
 
@@ -287,9 +354,9 @@ allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
 
 Minimal, encryption, and full are measured independently.
 
-PR2's accepted BLAKE2 implementation kept full-profile Linux x64 growth inside policy at +30,432 bytes / +1.276%.
+0.6 PR2's accepted BLAKE2 implementation kept full-profile Linux x64 growth inside policy at +30,432 bytes / +1.276%.
 
-## 15. Staged consumers
+## 16. Staged consumers
 
 `tool/validate_published_consumer.dart` validates the consumer-visible package payload on:
 
@@ -301,7 +368,7 @@ Linux
 Windows
 ```
 
-## 16. CI topology
+## 17. CI topology and local pre-push guard
 
 ```text
 change-detection
@@ -321,35 +388,51 @@ Local cheap gate:
 make preflight
 ```
 
+PR #44 also adds a repository-managed pre-push formatting guard.
+
+One-time per clone:
+
+```bash
+bash tool/install_git_hooks.sh
+```
+
+The installer sets:
+
+```text
+core.hooksPath = .githooks
+```
+
+The tracked `.githooks/pre-push` file is executable (`100755`). It requires a clean worktree/index, runs `make format`, and blocks the push if formatting changes tracked files so those changes can be reviewed and committed first. It does not auto-add, auto-commit, or discard changes.
+
+CI `format-check` remains mandatory because Git hooks can be bypassed.
+
 Ready/non-draft work must satisfy full merge validation.
 
-## 17. 0.6 sequence and closure
+## 18. 0.6 sequence and closure
 
 ```text
 PR1 — threat model + safe-default guard + docs: merged (#39)
 PR2 — encrypted equality index + planner polish: merged (#40)
 PR3 — encrypted range decision / scan-only guard: merged (#42)
-PR4 — core reliability/API closure + 0.6 audit: complete in #43 when this closure commit merges
+PR4 — core reliability/API closure + 0.6 audit: merged (#43)
 ```
 
 The merged PR #43 state represents **0.6 complete**. It is a closure/audit publication, not a Hive/Hive CE parity pass, and introduces no feature-expansion requirement.
 
 Closure record: `docs/RELEASE_AUDIT_06.md`.
 
-## 18. Next planned query layer
-
-0.7 Query Ergonomics is planned as an additive Dart API over the same AST:
+## 19. Active 0.7 sequence
 
 ```text
-Fluent Dart API
-  -> existing BoxQuery AST
-  -> existing serialization / FRB
-  -> existing Rust planner + indexes
+PR1 — queryWhere/comparison/AND/OR/grouping builder: PR #44
+PR2 — orderBy/offset/limit/find ergonomics
+PR3 — optional DxtrField<T> typed field metadata
+PR4 — README/examples/API equivalence/compatibility closure
 ```
 
-The existing `Box.query(BoxQuery)` remains first-class. 0.7 must not introduce a parallel query engine, ORM, SQL parser, mandatory schema/code generation, or Dart-side result filtering. See `docs/QUERY_ERGONOMICS_07.md`.
+PR1 compiles fluent syntax into the existing `BoxQuery` AST. It must not introduce a parallel query engine, ORM, SQL parser, mandatory schema/code generation, Dart-side result filtering, FRB changes, or durable-storage changes. See `docs/QUERY_ERGONOMICS_07.md`.
 
-## 19. Invariants to preserve
+## 20. Invariants to preserve
 
 - Dart >=3.4 / Flutter >=3.22.
 - FRB exactly 2.8.0.
@@ -363,6 +446,8 @@ The existing `Box.query(BoxQuery)` remains first-class. 0.7 must not introduce a
 - Full encrypted authentication.
 - No raw plaintext scalar values in encrypted index entries.
 - Encrypted equality tokens are not range/order representations.
+- Legacy `Box.where(predicate)` remains source-compatible during 0.7.
+- Fluent queries compile to the existing query AST and execution path.
 - Query/index/migration correctness.
 - Native-size regression policy.
 - Five-platform staged consumer builds.
@@ -385,4 +470,4 @@ make benchmark-batch-read
 make native-size-regression
 ```
 
-See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative 0.6 contract, `docs/ENCRYPTED_RANGE_DECISION_06.md` for the encrypted range decision, `docs/RELEASE_AUDIT_06.md` for the final closure matrix, `docs/QUERY_ERGONOMICS_07.md` for the next query-API direction, and `docs/PROJECT_HANDOFF.md` for execution state.
+See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative 0.6 contract, `docs/ENCRYPTED_RANGE_DECISION_06.md` for the encrypted range decision, `docs/RELEASE_AUDIT_06.md` for the final 0.6 closure matrix, `docs/QUERY_ERGONOMICS_07.md` for the active 0.7 query API, and `docs/PROJECT_HANDOFF.md` for execution state.

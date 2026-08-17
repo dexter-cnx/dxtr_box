@@ -6,6 +6,7 @@ const _expectedExports = <String>{
   "export 'src/dxtr_box.dart' show DxtrBox;",
   "export 'src/hive_ce_migration.dart';",
   "export 'src/query.dart';",
+  "export 'src/query_builder.dart';",
 };
 
 const _storageFormatMarker = 'dxtr_box/1';

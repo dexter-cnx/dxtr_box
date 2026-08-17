@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "pre-push: working tree/index must be clean before validation" >&2
+  echo "pre-push: commit or stash local changes, then push again" >&2
+  exit 1
+fi
+
+echo "pre-push: formatting Dart and Rust sources"
+make format
+
+if ! git diff --quiet; then
+  echo "pre-push: formatter changed files; push stopped" >&2
+  echo "pre-push: review and commit these formatted files:" >&2
+  git diff --name-only >&2
+  exit 1
+fi
+
+echo "pre-push: format clean"
