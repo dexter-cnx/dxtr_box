@@ -1,9 +1,14 @@
 use std::io::Cursor;
 
-use blake3::Hasher;
+use blake2::{
+    digest::{consts::U32, Mac},
+    Blake2bMac,
+};
 use rmpv::Value;
 
-const INDEX_KEY_CONTEXT: &str = "dxtr_box 2026-08-17 encrypted equality index subkey v1";
+type Blake2bMac256 = Blake2bMac<U32>;
+
+const INDEX_KEY_CONTEXT: &[u8] = b"dxtr_box 2026-08-17 encrypted equality index subkey v1";
 const TOKEN_DOMAIN: &[u8] = b"dxtr_box:index-equality-token:v1";
 
 pub(crate) fn encrypted_equality_token(
@@ -13,13 +18,14 @@ pub(crate) fn encrypted_equality_token(
     scalar_messagepack: &[u8],
 ) -> Result<Vec<u8>, String> {
     let canonical = canonical_equality_scalar(scalar_messagepack)?;
-    let index_key = blake3::derive_key(INDEX_KEY_CONTEXT, master_key);
-    let mut hasher = Hasher::new_keyed(&index_key);
-    update_component(&mut hasher, TOKEN_DOMAIN);
-    update_component(&mut hasher, index_name.as_bytes());
-    update_component(&mut hasher, field.as_bytes());
-    update_component(&mut hasher, &canonical);
-    Ok(hasher.finalize().as_bytes().to_vec())
+    let mut mac = <Blake2bMac256 as Mac>::new_from_slice(master_key)
+        .map_err(|_| "invalid encrypted index token key length".to_string())?;
+    update_component(&mut mac, INDEX_KEY_CONTEXT);
+    update_component(&mut mac, TOKEN_DOMAIN);
+    update_component(&mut mac, index_name.as_bytes());
+    update_component(&mut mac, field.as_bytes());
+    update_component(&mut mac, &canonical);
+    Ok(mac.finalize().into_bytes().to_vec())
 }
 
 fn canonical_equality_scalar(bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -91,9 +97,9 @@ fn push_float(output: &mut Vec<u8>, value: f64) {
     output.extend_from_slice(&value.to_bits().to_be_bytes());
 }
 
-fn update_component(hasher: &mut Hasher, value: &[u8]) {
-    hasher.update(&(value.len() as u64).to_be_bytes());
-    hasher.update(value);
+fn update_component(mac: &mut Blake2bMac256, value: &[u8]) {
+    Mac::update(mac, &(value.len() as u64).to_be_bytes());
+    Mac::update(mac, value);
 }
 
 #[cfg(test)]
