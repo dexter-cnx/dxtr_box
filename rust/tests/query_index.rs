@@ -285,27 +285,63 @@ fn and_group_intersects_multiple_persisted_indexes() {
 }
 
 #[test]
-fn encrypted_box_uses_scan_but_rejects_persisted_index_creation() {
+fn encrypted_box_uses_keyed_equality_index_and_scan_range_fallback() {
     let _guard = TEST_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     init_db(dir.path().to_string_lossy().to_string()).unwrap();
     open_box("secure".to_string(), Some("secret".to_string())).unwrap();
-    put(
-        "secure".to_string(),
-        "one".to_string(),
-        person("active", 30),
-    )
-    .unwrap();
+    for (key, status, age) in [
+        ("one", "active", 30),
+        ("two", "inactive", 40),
+        ("three", "active", 50),
+    ] {
+        put(
+            "secure".to_string(),
+            key.to_string(),
+            person(status, age),
+        )
+        .unwrap();
+    }
 
-    let results = scan_query("secure".to_string(), query_payload()).unwrap();
-    assert_eq!(results.len(), 1);
-    assert!(create_index(
+    let equality = comparison_query("status", "equal", Value::from("active"), Value::Nil);
+    let range = comparison_query(
+        "profile.age",
+        "greaterThanOrEqual",
+        Value::from(40_i64),
+        Value::Nil,
+    );
+    let scan_equality = result_keys("secure", equality.clone());
+    let scan_range = result_keys("secure", range.clone());
+
+    create_index(
         "secure".to_string(),
         "by-status".to_string(),
         "status".to_string(),
     )
-    .is_err());
+    .unwrap();
+    create_index(
+        "secure".to_string(),
+        "by-age".to_string(),
+        "profile.age".to_string(),
+    )
+    .unwrap();
+    assert_eq!(list_indexes("secure".to_string()).unwrap().len(), 2);
+    assert_eq!(result_keys("secure", equality.clone()), scan_equality);
+    assert_eq!(result_keys("secure", range.clone()), scan_range);
 
+    put(
+        "secure".to_string(),
+        "one".to_string(),
+        person("inactive", 31),
+    )
+    .unwrap();
+    assert_eq!(result_keys("secure", equality.clone()), vec!["three"]);
+
+    close_box("secure".to_string()).unwrap();
+    open_box("secure".to_string(), Some("secret".to_string())).unwrap();
+    assert_eq!(list_indexes("secure".to_string()).unwrap().len(), 2);
+    assert_eq!(result_keys("secure", equality), vec!["three"]);
+    assert_eq!(result_keys("secure", range), scan_range);
     close_box("secure".to_string()).unwrap();
 }
 
