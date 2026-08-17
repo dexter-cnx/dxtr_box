@@ -179,17 +179,18 @@ void main() {
         'age': 44,
       });
 
-      await expectLater(
-        box.createIndex(
+      Object? createIndexError;
+      try {
+        await box.createIndex(
           const IndexDefinition(name: 'by-email', field: 'email'),
-        ),
-        throwsA(
-          predicate<Object>(
-            (error) => error.toString().contains(
-              'persisted indexes are not yet supported for encrypted boxes',
-            ),
-          ),
-        ),
+        );
+      } on Object catch (error) {
+        createIndexError = error;
+      }
+      expect(createIndexError, isNotNull);
+      expect(
+        createIndexError.toString(),
+        contains('persisted indexes are not yet supported for encrypted boxes'),
       );
 
       expect(await box.listIndexes(), isEmpty);
