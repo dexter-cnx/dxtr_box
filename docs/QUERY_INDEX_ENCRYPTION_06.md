@@ -30,7 +30,7 @@ Do not add a fourth native profile. Do not introduce a Dart whole-box cache. Do 
 
 Dart 3.13 recorded-use/native tree shaking remains outside 0.6 unless explicitly pulled forward.
 
-## Current baseline
+## Baseline entering PR2
 
 Plaintext persisted indexes already provide:
 
@@ -43,74 +43,84 @@ Plaintext persisted indexes already provide:
 - one redb read snapshot per query;
 - deterministic semantic sorting before pagination.
 
-Persisted indexes currently narrow `where` candidates only. They do not satisfy ORDER BY.
+Persisted indexes narrow `where` candidates only. They do not satisfy ORDER BY.
 
-Encrypted boxes currently support native scan queries, but `createIndex` rejects encrypted boxes with the explicit error:
+PR1 kept encrypted persisted-index creation blocked while the leakage contract and representation were being selected. PR2 intentionally changes that safe default only for equality narrowing.
 
-```text
-persisted indexes are not yet supported for encrypted boxes; native scan queries remain available
+## Accepted encrypted equality-index contract
+
+PR2 accepts persisted encrypted indexes for equality narrowing only.
+
+The persisted scalar representation is a deterministic 256-bit BLAKE2b keyed MAC derived from authenticated box key material and domain-separated by index name and field. The implementation reuses the BLAKE2 implementation already present through Argon2 rather than adding a second hash family solely for index tokens.
+
+Required properties:
+
+- no raw plaintext scalar bytes in encrypted index entries;
+- deterministic matching only where equality semantics require it;
+- domain separation by index name and field;
+- numeric canonicalization aligned with query equality semantics;
+- primary encrypted records remain ChaCha20Poly1305 authenticated ciphertext;
+- every index candidate is resolved through the authoritative primary record;
+- every candidate is authenticated/decrypted and the full predicate is re-evaluated before returning to Dart;
+- create/backfill/mutation/delete maintenance remains in the same redb transactional correctness model as primary data;
+- plaintext persisted scalar representation remains unchanged;
+- ordered/range predicates on encrypted boxes do not use the equality-token representation and fall back to authoritative scan.
+
+The token is not encryption and is not described as hiding equality relationships. Deterministic equality indexes intentionally leak equality classes/frequency for repeated indexed values. Persisted index definitions also expose index names and indexed field names, while candidate entries expose record identifiers and approximate indexed cardinality. These are accepted, documented tradeoffs for equality narrowing; plaintext scalar values and value ordering are not intentionally persisted.
+
+## Threat model / leakage
+
+An attacker who obtains the database file may infer from encrypted derived index state:
+
+- index names and indexed field names;
+- record identifiers present in an index;
+- equality classes for repeated values through repeated deterministic tokens;
+- approximate frequency/cardinality;
+- presence or absence of index entries for null/missing/non-indexable values according to index semantics.
+
+The equality-token representation does not provide meaningful value ordering. Do not extend it to `>`, `>=`, `<`, `<=`, or `between` by treating keyed hashes as order-preserving.
+
+Mutation correctness must prevent stale derived entries from surviving committed writes. Crash/reopen and lifecycle tests remain part of the hard quality bar.
+
+## PR2 implementation state
+
+PR2 implements:
+
+- encrypted `createIndex` and transactional backfill;
+- deterministic equality tokens using BLAKE2b keyed MAC (256-bit);
+- encrypted index maintenance for `put`, `putAll`, `delete`, and `deleteAll`;
+- equality-only candidate lookup for encrypted boxes;
+- encrypted range/ordered predicate scan fallback;
+- authoritative decrypt/authenticate + full predicate recheck for every candidate;
+- reopen/lifecycle coverage for encrypted indexes;
+- plaintext planner behavior without changing plaintext persisted scalar representation;
+- diagnostic query/index benchmark coverage for plaintext scan/index scenarios and encrypted equality scan/index scenarios.
+
+Native-size policy is preserved. After replacing a larger BLAKE3 dependency with the BLAKE2 implementation already present through Argon2, the measured full-profile Linux x64 artifact moved from 2,385,720 to 2,416,152 bytes: +30,432 bytes / +1.276%, within policy. Minimal and encryption profiles changed only marginally.
+
+CI run `32069766813` on commit `5346c1176b2753cea9fc248b60055215041815c9` passed the Draft validation set including Fast CI, Dart tests, all three Rust profiles, native integration, storage/query regression, FRB drift, minimum SDK, native-size policy, all five platform consumers, benchmark smoke/comparison, and Merge Gate.
+
+The dedicated query/index timing harness is diagnostic only. Run it with:
+
+```bash
+make benchmark-query-index
 ```
 
-That rejection is intentional and remains the safe default until 0.6 proves a representation and leakage contract.
-
-## Security contract for encrypted indexes
-
-An encrypted index must not silently expose plaintext field values merely to recover plaintext-index performance.
-
-The 0.6 design must explicitly document what an attacker who obtains the database file can infer from index state. At minimum, evaluate leakage of:
-
-- indexed field names;
-- record identifiers;
-- equality classes / repeated values;
-- value ordering;
-- approximate cardinality / frequency;
-- null / missing state;
-- mutation history if stale derived entries can survive failure.
-
-The implementation must not call an encrypted index "secure" if it intentionally preserves ordering or equality information without documenting that leakage.
-
-Primary encrypted records remain ChaCha20Poly1305 authenticated ciphertext. Every candidate returned by an encrypted index must still be resolved through the authoritative primary record, authenticated/decrypted, and fully re-evaluated against the predicate before it can be returned to Dart.
+Shared-runner timing must not become a pass/fail performance threshold. Correctness, authoritative recheck, durability, and the security contract remain the hard gates.
 
 ## 0.6 implementation sequence
 
 ### PR 1 — encrypted-index threat model + representation decision
 
-- freeze the leakage/threat model;
-- evaluate equality-only keyed tokens versus order-preserving/range-capable designs;
-- reject designs whose leakage is disproportionate to the product benefit;
-- add contract tests that keep encrypted index creation blocked until an accepted representation exists;
-- define upgrade/storage implications before changing `dxtr_box/1` derived index state;
-- align README/handoff/product positioning with Dxtr_Box as its own native local database.
-
-Default preference: support less functionality securely rather than exposing plaintext-compatible scalar bytes.
+Completed. PR1 froze the threat model, documented the safe default, and aligned product positioning before changing durable derived index state.
 
 ### PR 2 — encrypted equality index + plaintext query/index polish
 
-This PR intentionally combines the former encrypted-equality and plaintext-planner PRs because they share the same index representation, planner, maintenance, and benchmark surfaces.
+Current runtime PR.
 
-Preferred encrypted target is equality indexing only, using keyed deterministic tokens derived from authenticated box key material and index context.
+The accepted target is equality indexing only using keyed deterministic tokens derived from authenticated box key material and index context.
 
-Encrypted requirements:
-
-- no raw plaintext scalar in index entries;
-- domain separation per index/field;
-- deterministic equality matching only;
-- candidate record keys remain derived state, never authoritative;
-- full primary decrypt/authenticate + predicate recheck;
-- index create/backfill/mutation/delete in the same transactional correctness model as plaintext indexes;
-- reopen, wrong-key, tamper, crash/reopen, migration, drop/recreate tests;
-- explicit documentation that equality frequency can still be observable if deterministic tokens are persisted.
-
-Plaintext/planner requirements:
-
-- verify equality/range/AND planner behavior remains deterministic;
-- benchmark plaintext index narrowing after 0.5 read-path changes;
-- inspect scalar encoding and range scan cost;
-- evaluate whether scalar-level redb range seeks materially outperform the current candidate decoding/filtering path;
-- keep full predicate re-evaluation mandatory;
-- do not add index-backed ORDER BY unless measurements and implementation simplicity justify it.
-
-Do not extend encrypted equality tokens to range operators by pretending keyed hashes are order-preserving.
+PR2 closes only after implementation, regression coverage, diagnostic benchmark harness/evidence, documentation sync, and final full merge validation are complete.
 
 ### PR 3 — encrypted range/index decision
 
@@ -120,9 +130,11 @@ If no design provides acceptable leakage, complexity, and maintenance cost, 0.6 
 
 A documented rejection is an acceptable outcome.
 
-### PR 4 — compatibility cleanup + closure audit
+### PR 4 — core reliability/API closure + 0.6 audit
 
-Close only compatibility/migration gaps that materially improve adoption and remain consistent with the native-database product direction, then run the 0.6 closure audit and full merge quality bar.
+Close only reliability/API/interoperability gaps that independently strengthen Dxtr_Box as a native local database, then run the 0.6 closure audit and full merge quality bar.
+
+Do not turn this into a Hive/Hive CE parity pass.
 
 Do not pull in:
 
@@ -133,21 +145,21 @@ Do not pull in:
 - Web/IndexedDB unless separately prioritized;
 - LazyBox direct file parsing unless separately justified.
 
-## Benchmark evidence
+## Benchmark evidence policy
 
-0.6 should retain diagnostic timing rather than speed assertions.
+0.6 retains diagnostic timing rather than speed assertions.
 
-Add/extend evidence for:
+Evidence surfaces include:
 
 - plaintext scan vs persisted-index equality;
 - plaintext scan vs persisted-index range;
-- encrypted scan vs encrypted equality index if implemented;
-- index create/backfill cost;
-- mutation overhead with indexes enabled;
-- reopen/query behavior;
-- representative 100 / 1,000 / 10,000 record datasets where CI cost remains reasonable.
+- encrypted scan vs encrypted equality index;
+- index create/backfill cost where specifically measured;
+- mutation overhead with indexes where specifically measured;
+- reopen/query correctness;
+- representative dataset sizes that keep CI/runtime cost reasonable.
 
-Every performance claim must include methodology, runner/toolchain metadata, and correctness validation.
+Every published performance claim must include methodology and correctness validation. Do not manufacture or infer timing numbers from a correctness-only CI run.
 
 ## Acceptance criteria
 
