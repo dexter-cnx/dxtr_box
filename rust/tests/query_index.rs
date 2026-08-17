@@ -295,12 +295,7 @@ fn encrypted_box_uses_keyed_equality_index_and_scan_range_fallback() {
         ("two", "inactive", 40),
         ("three", "active", 50),
     ] {
-        put(
-            "secure".to_string(),
-            key.to_string(),
-            person(status, age),
-        )
-        .unwrap();
+        put("secure".to_string(), key.to_string(), person(status, age)).unwrap();
     }
 
     let equality = comparison_query("status", "equal", Value::from("active"), Value::Nil);
