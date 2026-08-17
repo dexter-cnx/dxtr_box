@@ -23,6 +23,7 @@ Closed milestones:
 - PR #33 0.5 PR1 read-path decomposition and corrected benchmark baseline.
 - PR #35 0.5 PR2 single-key cross-runtime read optimization merged.
 - PR #36 0.5 PR3 one-snapshot batch/multi-key reads merged.
+- PR #37 0.5 PR4 read-session investigation merged with an evidence-backed rejection of a reusable session API.
 
 Current 0.5 sequence:
 
@@ -30,12 +31,13 @@ Current 0.5 sequence:
 PR 1 / #33 — read-path decomposition + corrected evidence baseline   complete / merged
 PR 2 / #35 — sync FRB point-read boundary for get / containsKey      complete / merged
 PR 3 / #36 — one-snapshot batch / multi-key reads                     complete / merged
-PR 4 / #37 — read-session investigation                               decision complete / validation
-PR 5       — comparison matrix + 0.5 closure audit                    next
+PR 4 / #37 — read-session investigation                               complete / merged
+PR 5       — comparison matrix + 0.5 closure audit                    active / final gate
 ```
 
 Normative performance document: `docs/PERFORMANCE_READ_PATH_05.md`.
 Normative read-session decision: `docs/READ_SESSION_INVESTIGATION_05.md`.
+Normative closure audit: `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
 Normative CI document: `docs/CI_STRATEGY.md`.
 
 ## Stable package/runtime contract
@@ -202,22 +204,25 @@ rust-check
 
 Ready-for-review/non-draft work must still satisfy the full merge quality bar.
 
-## Next — PR5 comparison matrix + 0.5 closure audit
+## PR5 — final comparison + closure audit
 
-PR5 should:
+PR5 does not add another optimization. It closes 0.5 only after the final full Merge Gate proves the current codebase still satisfies:
 
-- rerun the final comparison matrix with current 0.5 APIs where applicable;
-- preserve correctness-first interpretation of benchmark results;
-- verify Dart >=3.4 / Flutter >=3.22;
-- verify FRB 2.8.0 drift protection;
-- verify exactly three native profiles;
-- verify `dxtr_box/1` readability;
-- verify query/index/migration regressions;
-- verify native-size policy;
-- verify staged published consumers on Android/iOS/macOS/Linux/Windows;
-- close 0.5 only if all hard gates remain green.
+- four-engine comparison correctness plus diagnostic timing;
+- benchmark smoke;
+- Dart full tests;
+- native integration;
+- Rust `minimal`, `encryption`, and `full` checks;
+- query/index/migration regressions;
+- FRB 2.8.0 generated-binding drift protection;
+- native-size policy;
+- package/docs + pub dry-run;
+- Android/iOS/macOS/Linux/Windows staged consumers;
+- minimum Flutter 3.22.0 / Dart 3.4.0 compatibility.
 
-Do not reopen read-session implementation inside PR5 unless new evidence changes the PR4 decision.
+The four-engine matrix remains limited to operations with equivalent contracts across dxtr_box, Hive CE, Sembast, and SQLite. `Box.getAll` keeps its dedicated dxtr_box batch benchmark rather than introducing a synthetic cross-engine comparison with mismatched semantics.
+
+See `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
 
 ## Existing 0.4 policies that remain active
 
@@ -239,7 +244,7 @@ storage format:    dxtr_box/1
 
 ## 0.5 acceptance criteria
 
-0.5 is not complete yet. Before closure require:
+0.5 closes when PR5's final full Merge Gate succeeds.
 
 1. Evidence-backed bottleneck decomposition — satisfied.
 2. At least one production read-path optimization — satisfied by PR #35.
@@ -252,11 +257,13 @@ storage format:    dxtr_box/1
 9. Exactly three native profiles remain — preserved.
 10. Dart >=3.4 / Flutter >=3.22 remain supported — preserved.
 11. FRB remains pinned/reproducible at 2.8.0 — preserved.
-12. Query/index/migration stays green — required at final merge gate.
-13. Native-size gate stays green — required at final merge gate.
-14. Five-platform staged consumers stay green — required at final merge gate.
-15. Read-session decision — satisfied by PR #37 rejection record, pending PR merge.
-16. Comparison/closure audit — pending PR5.
+12. Query/index/migration stays green — final PR5 gate.
+13. Native-size gate stays green — final PR5 gate.
+14. Five-platform staged consumers stay green — final PR5 gate.
+15. Read-session decision — satisfied by merged PR #37.
+16. Comparison/closure audit — active in PR5; satisfied when Merge Gate passes.
+
+After PR5 merge, further performance work should start under a new milestone based on a newly measured bottleneck rather than extending 0.5 opportunistically.
 
 ## Working style
 
