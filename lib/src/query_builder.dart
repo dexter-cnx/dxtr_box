@@ -161,8 +161,10 @@ final class QueryFieldBuilder {
 
 /// Convenience entry point for the fluent authoring surface.
 ///
+/// `Box.where` is already a legacy Dart predicate-scan API, so the fluent
+/// query entry point uses the collision-free [queryWhere] name.
 /// Execution remains [Box.query] in 0.7 PR1; PR2 adds terminal query
 /// ergonomics without introducing a second query engine.
 extension BoxFluentQuery on Box {
-  QueryFieldBuilder where(String field) => BoxQueryBuilder.where(field);
+  QueryFieldBuilder queryWhere(String field) => BoxQueryBuilder.where(field);
 }
