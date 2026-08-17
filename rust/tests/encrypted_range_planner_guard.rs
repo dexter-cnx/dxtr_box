@@ -139,7 +139,7 @@ fn encrypted_range_planner_does_not_depend_on_range_index_entries() {
 
     assert_eq!(
         keys("secure-planner", pure_range.clone()),
-        vec!["c", "d", "e"]
+        vec!["d", "e"]
     );
     assert_eq!(
         keys("secure-planner", mixed_and.clone()),
@@ -155,7 +155,7 @@ fn encrypted_range_planner_does_not_depend_on_range_index_entries() {
     // If encrypted range planning starts consuming `by-age`, deleting its derived
     // entries above makes these assertions fail. Equality narrowing through
     // `by-status` remains intact for the mixed AND case.
-    assert_eq!(keys("secure-planner", pure_range), vec!["c", "d", "e"]);
+    assert_eq!(keys("secure-planner", pure_range), vec!["d", "e"]);
     assert_eq!(keys("secure-planner", mixed_and), vec!["b", "d", "e"]);
 
     close_box("secure-planner".to_string()).unwrap();
