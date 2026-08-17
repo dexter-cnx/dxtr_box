@@ -1,8 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the self-contained Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed read-path hardening, and the active 0.6 Query / Index + Encryption Hardening milestone.
-
-Dxtr_Box is positioned as its own native local database for Flutter. Hive/Hive CE is retained only as migration/interoperability tooling and a benchmark/reference peer.
+This walkthrough describes the publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution path, completed 0.4 hardening, completed 0.5 read-path work, and the current 0.6 Query / Index + Encryption Hardening milestone.
 
 ## 1. Package boundary
 
@@ -44,11 +42,29 @@ Flutter app
   -> redb
 ```
 
-Dart owns public ergonomics, MessagePack encoding/decoding, lightweight metadata, lifecycle guards, query objects, and optional Hive CE migration preflight.
+Dart owns public ergonomics, MessagePack encoding/decoding, lightweight metadata, lifecycle guards, query objects, and optional migration preflight.
 
 Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted indexes, maintenance, and plaintext-to-encrypted migration.
 
-## 3. Storage identity
+## 3. Product identity
+
+Dxtr_Box is a native local database for Flutter. It is not defined as a Hive/Hive CE replacement.
+
+Core differentiators:
+
+- Rust/redb ACID storage;
+- simple box-style asynchronous Flutter API;
+- optimized authoritative reads;
+- declarative native queries;
+- persisted secondary indexes;
+- first-class authenticated encryption;
+- native watch fan-out;
+- crash/reopen durability validation;
+- Android/iOS/macOS/Linux/Windows package consumers.
+
+Hive CE remains useful as an optional migration source and benchmark/reference peer only.
+
+## 4. Storage identity
 
 Each box maps to `{base_path}/{box_name}.dxtr`.
 
@@ -60,7 +76,7 @@ meta[format_version] = dxtr_box/1
 
 Core tables are `data` and `meta`; `full` additionally maintains persisted index definitions and entries.
 
-## 4. Mutation atomicity
+## 5. Mutation atomicity
 
 ```text
 Box.put / putAll / delete / deleteAll / clear
@@ -76,7 +92,7 @@ Box.put / putAll / delete / deleteAll / clear
 
 Primary data is authoritative. Persisted indexes are derived state.
 
-## 5. Production point-read path
+## 6. Production point-read path after 0.5
 
 Public Dart API remains asynchronous:
 
@@ -107,7 +123,7 @@ generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 
 No Dart whole-box cache, metadata-backed authoritative shortcut, or long-lived stale read snapshot was introduced.
 
-## 6. Production batch-read path
+## 7. Production batch-read path
 
 Public API:
 
@@ -130,24 +146,48 @@ Box.getAll
   -> N authoritative key lookups
   -> decrypt/authenticate every encrypted hit
   -> validate MessagePack every hit
-  -> one response
+  -> one Vec<NativeBatchRecord> response
   -> Dart DxtrCodec.decode per hit
 ```
 
-Hits preserve input order, misses are omitted, duplicate requested keys remain duplicate result entries, and empty input avoids a native crossing.
+Semantics:
 
-The batch entrypoint intentionally stays asynchronous so large batches do not synchronously occupy the Dart/UI isolate.
+```text
+input order for hits: preserved
+missing keys:         omitted
+duplicate input keys: duplicate result entries
+empty input:          empty result without native crossing
+```
 
-## 7. Query execution
+The batch entrypoint intentionally stays asynchronous. A large key set must not inherit the single-key `#[frb(sync)]` policy and synchronously occupy the Dart/UI isolate.
 
-`Box.query(BoxQuery)` is one structured asynchronous FRB call:
+0.5 hosted evidence reached ~8.59x improvement for 1,000 keys versus N independent public `get` calls.
+
+## 8. Read-session boundary
+
+0.5 investigated carrying a redb `ReadTransaction` across multiple Dart calls and deliberately did not add that API.
+
+```text
+ordinary read call
+  -> fresh redb ReadTransaction
+  -> authoritative snapshot for that call
+  -> transaction ends with the call
+```
+
+A reusable transaction would be a fixed snapshot and therefore stale relative to commits made after session creation. Because `getAll` already handles known multi-key work in one call, ordinary reads preserve fresh-per-call semantics.
+
+Detailed decision: `docs/READ_SESSION_INVESTIGATION_05.md`.
+
+## 9. Query execution
+
+`Box.query(BoxQuery)` remains one structured query through one asynchronous FRB call:
 
 ```text
 Box.query
   -> serialize query AST
   -> one FRB call
   -> one redb ReadTransaction snapshot
-  -> optional persisted-index candidate narrowing
+  -> optional index candidate narrowing
   -> authoritative primary reads
   -> optional decrypt/authenticate
   -> full predicate re-evaluation
@@ -156,94 +196,30 @@ Box.query
   -> one response
 ```
 
-The planner may narrow work through derived indexes, but a candidate is never trusted as the final answer. Primary records are authoritative and predicates are re-evaluated.
+Persisted indexes narrow candidates only; they do not replace predicate re-evaluation and do not satisfy ORDER BY.
 
-## 8. Plaintext persisted-index path
+## 10. 0.6 encrypted-index boundary
 
-`rust/src/index.rs` owns persisted index definitions and entry maintenance.
+Encrypted point, batch, and scan-query reads preserve full AEAD authentication.
 
-```text
-createIndex
-  -> validate name/field
-  -> one redb write transaction
-  -> scan primary DATA for backfill
-  -> derive scalar entries
-  -> persist definition + entries
-  -> commit
-```
+Encrypted boxes currently reject persisted secondary-index creation. That remains the safe default until 0.6 accepts a representation with an explicit leakage contract.
 
-Normal mutations update primary data and derived index entries in the same write transaction.
+The preferred first candidate is equality-only keyed deterministic tokens with domain separation. Even if such an index is introduced, every candidate must still resolve through the authoritative encrypted primary record and complete decrypt/authenticate plus full predicate re-evaluation.
 
-Current index behavior:
+Encrypted range indexing is optional. A documented scan-only decision is acceptable when order leakage or complexity is disproportionate to the product value.
 
-- exact dotted-field matching;
-- equality and ordered/range candidate narrowing;
-- deterministic index selection;
-- AND intersection across usable indexes;
-- record-key candidates only;
-- full authoritative predicate recheck;
-- no index-backed ORDER BY yet.
-
-## 9. Encrypted query/index boundary entering 0.6
-
-Encrypted primary records remain authenticated ciphertext. Native scan queries work because Rust decrypts/authenticates each authoritative record before evaluating the predicate.
-
-Persisted index creation is intentionally blocked for encrypted boxes in `rust/src/index.rs`:
+## 11. 0.6 implementation sequence — four PRs
 
 ```text
-persisted indexes are not yet supported for encrypted boxes; native scan queries remain available
+PR 1 — threat model + safe-default regression guard + milestone/product docs
+PR 2 — encrypted equality index + plaintext planner/range/index polish + benchmark evidence
+PR 3 — encrypted range/index decision; implementation optional, evidence-backed rejection acceptable
+PR 4 — compatibility cleanup + 0.6 closure audit
 ```
 
-That guard exists because the plaintext index representation stores scalar-derived bytes suitable for equality/range matching. Reusing it unchanged for encrypted boxes would leak indexed values/order outside the authenticated ciphertext.
+PR2 intentionally combines the two closely coupled query/index runtime tracks so 0.6 remains compact.
 
-0.6 starts from this rule:
-
-> Do not remove the encrypted-index guard until the persisted representation and leakage contract are accepted explicitly.
-
-The native integration regression guard verifies both sides:
-
-```text
-encrypted createIndex -> rejected
-encrypted query scan  -> still works
-listIndexes            -> remains empty
-```
-
-This makes a future encrypted-index change deliberate and review-visible rather than an accidental weakening.
-
-## 10. Preferred encrypted equality-index shape
-
-If 0.6 accepts encrypted equality indexing, the preferred direction is keyed deterministic equality tokens rather than plaintext scalar bytes.
-
-Conceptually:
-
-```text
-plaintext scalar
-  -> canonical query/index scalar encoding
-  -> keyed/domain-separated token(box key, index identity, scalar)
-  -> persisted token + derived record-key candidate
-```
-
-A query equality operand derives the same token, locates candidates, then performs the normal authoritative primary decrypt/authenticate + full predicate recheck.
-
-Security notes:
-
-- equality/frequency classes can still leak when deterministic tokens repeat;
-- raw scalar plaintext must not appear in the index;
-- index/field context must be domain-separated;
-- tokens cannot be treated as order-preserving;
-- equality-token design does not justify encrypted range indexing.
-
-The exact construction is not approved merely by this walkthrough; `docs/QUERY_INDEX_ENCRYPTION_06.md` is the normative 0.6 decision record.
-
-## 11. Encrypted range-index decision
-
-Range indexing for encrypted fields is optional in 0.6.
-
-A design that preserves ordering necessarily exposes more information than equality-only tokens. If the leakage/complexity tradeoff is not compelling, encrypted `>`, `>=`, `<`, `<=`, and `between` remain scan-backed while plaintext boxes retain persisted range indexes.
-
-An evidence-backed rejection is an acceptable milestone result.
-
-## 12. Encryption/profile safety
+## 12. Native profiles
 
 Profiles remain exactly:
 
@@ -253,13 +229,11 @@ encryption
 full
 ```
 
-`full` contains query/index implementation and encryption capability. Do not add an `encrypted-index` profile.
+Do not add a fourth profile for encrypted indexing or performance tuning.
 
-Every encrypted result path retains ChaCha20Poly1305 authentication. A persisted index, if added, is derived acceleration state only and never an authorization/authenticity substitute.
+## 13. Migration/interoperability
 
-## 13. Optional Hive CE migration path
-
-Core `dxtr_box` has no runtime Hive CE dependency.
+Core `dxtr_box` has no runtime Hive CE dependency. Hive CE migration is optional tooling:
 
 ```text
 migrateFromHiveCe
@@ -275,36 +249,11 @@ migrateFromHiveCe
   -> release reservation
 ```
 
-This remains interoperability tooling, not the product architecture target. Ordinary opens are excluded while migration owns the destination. Failure cleanup removes migration-owned state and releases its reservation.
+This interoperability path does not define product parity or 1.0 success.
 
-## 14. Read-session decision retained from 0.5
+## 14. FRB drift and package gates
 
-Ordinary read operations continue to create fresh authoritative redb snapshots per call. A reusable long-lived read transaction was rejected because it would expose intentionally stale snapshot semantics while avoiding only a small measured transaction/table-open cost.
-
-Known multi-key workloads use `getAll` instead.
-
-## 15. Benchmarks
-
-Existing evidence remains diagnostic, not a speed gate.
-
-0.6 extends query/index evidence where useful:
-
-```text
-plaintext scan vs indexed equality
-plaintext scan vs indexed range
-encrypted scan vs encrypted equality index (if implemented)
-index create/backfill cost
-mutation overhead with indexes
-reopen/query
-```
-
-Representative 100 / 1,000 / 10,000 record datasets should be used where CI cost is reasonable.
-
-Hive CE, Sembast, and SQLite remain comparison peers; none defines the product architecture or success criteria.
-
-## 16. FRB drift and package gates
-
-Checked-in bindings are generated with FRB 2.8.0. Full CI regenerates them and fails on diff.
+Checked-in bindings are generated with FRB 2.8.0. Full CI regenerates them and fails on any diff.
 
 Package readiness remains:
 
@@ -314,7 +263,7 @@ make package-readiness
   -> dart pub publish --dry-run --ignore-warnings
 ```
 
-## 17. Native-size policy
+## 15. Native-size policy
 
 ```text
 allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
@@ -322,11 +271,11 @@ allowed_growth = max(65,536 bytes, ceil(base_bytes * 3 / 100))
 
 Minimal, encryption, and full are measured independently.
 
-## 18. Staged published consumers
+## 16. Staged published consumers
 
 `tool/validate_published_consumer.dart` validates the consumer-visible package payload on Android, iOS, macOS, Linux, and Windows.
 
-## 19. Change-aware CI
+## 17. Change-aware CI
 
 ```text
 change-detection
@@ -352,19 +301,7 @@ rust-check
 
 Full validation remains mandatory before merge.
 
-## 20. 0.6 implementation sequence
-
-```text
-PR 1 — threat model + safe-default regression guard + product/milestone docs
-PR 2 — encrypted equality index, only if representation is accepted
-PR 3 — plaintext planner/range/index polish + measured evidence
-PR 4 — encrypted range/index decision
-PR 5 — compatibility cleanup + closure audit
-```
-
-0.6 deliberately does not grow into ORM, sync, or schema-framework work.
-
-## 21. Invariants to preserve
+## 18. Invariants to preserve
 
 - Dart >=3.4 / Flutter >=3.22.
 - FRB exactly 2.8.0.
@@ -376,12 +313,10 @@ PR 5 — compatibility cleanup + closure audit
 - No Dart whole-box cache.
 - No implicit long-lived stale snapshot.
 - Full encrypted authentication.
-- No plaintext scalar leakage from encrypted indexes by accident.
 - Query/index/migration correctness.
 - Native-size regression policy.
 - Five-platform staged consumer builds.
 - Change-aware CI never weakens the final merge quality bar.
-- Product docs describe Dxtr_Box as its own native local database, not as a Hive replacement.
 - Dart 3.13 recorded-use/native tree shaking remains deferred.
 
 Important targets:
@@ -396,7 +331,6 @@ make query-index-test
 make query-sort-test
 make benchmark-comparison-correctness
 make benchmark-comparison
-make benchmark-query-index
 make benchmark-read-path
 make benchmark-batch-read
 make native-size-regression
@@ -407,4 +341,4 @@ make published-consumer-linux
 make published-consumer-windows
 ```
 
-See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative 0.6 design/decision record and `docs/PROJECT_HANDOFF.md` for current execution state.
+See `docs/QUERY_INDEX_ENCRYPTION_06.md` for the normative 0.6 plan and `docs/PROJECT_HANDOFF.md` for current execution state.
