@@ -77,11 +77,11 @@ fn push_float(output: &mut Vec<u8>, value: f64) {
     const TWO_POW_64: f64 = 18_446_744_073_709_551_616.0;
 
     if value.is_finite() && value == value.trunc() {
-        if value >= 0.0 && value < TWO_POW_64 {
+        if (0.0..TWO_POW_64).contains(&value) {
             push_unsigned(output, value as u64);
             return;
         }
-        if value < 0.0 && value >= -TWO_POW_63 {
+        if (-TWO_POW_63..0.0).contains(&value) {
             push_integer(output, value as i64);
             return;
         }
