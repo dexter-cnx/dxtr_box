@@ -56,6 +56,38 @@ void main() {
       );
     });
 
+    test('compiles orderBy offset and limit to the existing BoxQuery AST', () {
+      final query = BoxQueryBuilder.where('status')
+          .equals('active')
+          .orderBy('name')
+          .orderBy(
+            'profile.age',
+            descending: true,
+            nulls: QueryNullOrder.first,
+          )
+          .offset(10)
+          .limit(20)
+          .build();
+
+      expect(query.sortBy, hasLength(2));
+      expect(query.sortBy[0].field, 'name');
+      expect(query.sortBy[0].direction, QuerySortDirection.ascending);
+      expect(query.sortBy[0].nulls, QueryNullOrder.last);
+      expect(query.sortBy[1].field, 'profile.age');
+      expect(query.sortBy[1].direction, QuerySortDirection.descending);
+      expect(query.sortBy[1].nulls, QueryNullOrder.first);
+      expect(query.offset, 10);
+      expect(query.limit, 20);
+    });
+
+    test('rejects invalid fluent offset and limit eagerly', () {
+      final builder = BoxQueryBuilder.where('status').equals('active');
+
+      expect(() => builder.offset(-1), throwsArgumentError);
+      expect(() => builder.limit(0), throwsArgumentError);
+      expect(() => builder.limit(-1), throwsArgumentError);
+    });
+
     test('mixed AND/OR chains are left-associative', () {
       var builder = BoxQueryBuilder.where('a').equals(1);
       builder = builder.and('b').equals(2);
@@ -70,6 +102,21 @@ void main() {
       expect(left.operator, QueryLogicalOperator.and);
       expect(left.filters, hasLength(2));
       expect((outer.filters.last as QueryComparison).field, 'c');
+    });
+
+    test('preserves result options while adding later predicates', () {
+      var builder = BoxQueryBuilder.where('status')
+          .equals('active')
+          .orderBy('name')
+          .offset(5)
+          .limit(10);
+      builder = builder.and('age').gte(18);
+      final query = builder.build();
+
+      expect(query.sortBy.single.field, 'name');
+      expect(query.offset, 5);
+      expect(query.limit, 10);
+      expect((query.where as QueryGroup).filters, hasLength(2));
     });
 
     test('supports explicit nested groups', () {
@@ -91,17 +138,62 @@ void main() {
       expect((nested.filters.last as QueryComparison).field, 'role');
     });
 
+    test('rejects result modifiers inside explicit groups', () {
+      final builder = BoxQueryBuilder.where('status').equals('active');
+
+      expect(
+        () => builder.andGroup(
+          (group) => group.where('age').gte(18).orderBy('age'),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => builder.andGroup(
+          (group) => group.where('age').gte(18).offset(1),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => builder.orGroup(
+          (group) => group.where('role').equals('admin').limit(1),
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('keeps existing field validation behavior', () {
       expect(
         () => BoxQueryBuilder.where('profile..age').gte(18),
         throwsArgumentError,
       );
+      expect(
+        () => BoxQueryBuilder.where('status').equals('active').orderBy('x..y'),
+        throwsArgumentError,
+      );
+    });
+
+    test('box-bound path exposes terminal find with typed result', () {
+      Future<List<MapEntry<String, dynamic>>> execute(Box box) {
+        return box
+            .queryWhere('status')
+            .equals('active')
+            .orderBy('name')
+            .offset(2)
+            .limit(5)
+            .find();
+      }
+
+      expect(execute, isNotNull);
     });
 
     test('fluent and manual forms are structurally equivalent', () {
       var fluentBuilder = BoxQueryBuilder.where('status').equals('active');
       fluentBuilder = fluentBuilder.and('age').gte(18);
-      final fluent = fluentBuilder.build();
+      final fluent = fluentBuilder
+          .orderBy('name', descending: true)
+          .offset(3)
+          .limit(7)
+          .build();
 
       final manual = BoxQuery(
         where: QueryGroup.and(<QueryFilter>[
@@ -116,6 +208,14 @@ void main() {
             value: 18,
           ),
         ]),
+        sortBy: <QuerySort>[
+          QuerySort(
+            field: 'name',
+            direction: QuerySortDirection.descending,
+          ),
+        ],
+        offset: 3,
+        limit: 7,
       );
 
       final fluentRoot = fluent.where as QueryGroup;
@@ -131,6 +231,14 @@ void main() {
         expect(actual.value, expected.value);
         expect(actual.upperValue, expected.upperValue);
       }
+
+      expect(fluent.sortBy.single.field, manual.sortBy.single.field);
+      expect(
+        fluent.sortBy.single.direction,
+        manual.sortBy.single.direction,
+      );
+      expect(fluent.offset, manual.offset);
+      expect(fluent.limit, manual.limit);
     });
   });
 }

@@ -24,8 +24,8 @@ existing Rust planner + indexes + authoritative record checks
 ## Milestone sequence
 
 ```text
-PR1 — fluent queryWhere/comparison/AND/OR/grouping builder
-PR2 — orderBy/offset/limit/find ergonomics; efficient native-backed convenience terminals only
+PR1 — fluent queryWhere/comparison/AND/OR/grouping builder: merged (#44)
+PR2 — orderBy/offset/limit/find ergonomics: active
 PR3 — optional DxtrField<T> typed field metadata; no mandatory schema/codegen
 PR4 — README/examples/API equivalence/compatibility closure
 ```
@@ -52,7 +52,7 @@ This preserves source typing and avoids weakening the public API merely to save 
 
 ## PR1 accepted public surface
 
-PR1 adds a fluent AST builder covering every existing comparison operator while keeping execution on the existing `Box.query` path:
+PR #44 added a fluent AST builder covering every existing comparison operator while retaining direct `Box.query` execution:
 
 ```dart
 final query = box
@@ -63,7 +63,7 @@ final query = box
 final users = await box.query(query);
 ```
 
-The standalone entry point is also available when a box instance is not needed while composing the AST:
+Standalone AST composition remains available:
 
 ```dart
 final query = BoxQueryBuilder
@@ -71,7 +71,7 @@ final query = BoxQueryBuilder
     .build();
 ```
 
-Supported PR1 comparison methods map one-to-one onto the existing `QueryOperator` contract:
+Supported comparison methods map one-to-one onto the existing `QueryOperator` contract:
 
 ```text
 equals        -> equal
@@ -102,45 +102,11 @@ means:
 (a == 1 AND b == 2) OR c == 3
 ```
 
-No hidden SQL-style precedence is introduced.
+No hidden SQL-style precedence is introduced. Use `andGroup` / `orGroup` when grouping matters.
 
-When grouping matters, use `andGroup` / `orGroup` explicitly:
+## PR2 — result, sort, pagination, and execution ergonomics
 
-```dart
-final query = BoxQueryBuilder
-    .where('status').equals('active')
-    .andGroup(
-      (group) => group
-          .where('profile.age').gte(18)
-          .or('role').equals('admin'),
-    )
-    .build();
-```
-
-This compiles to the existing nested `QueryGroup` AST.
-
-## PR1 correctness contract
-
-PR1 is Dart-only query authoring ergonomics. It must not:
-
-- add Dart-side filtering or sorting;
-- duplicate Rust planner logic;
-- add a second query AST or wire representation;
-- change query serialization;
-- change index selection semantics;
-- change encrypted equality-index behavior;
-- change encrypted ordered/range scan-backed behavior;
-- change `dxtr_box/1`;
-- change native profiles or FRB bindings;
-- weaken authoritative primary-record predicate rechecks.
-
-Field validation remains inherited from `QueryComparison`, so malformed dotted paths fail under the same contract as direct manual AST construction.
-
-## PR2 target
-
-PR1 intentionally stops at `build()` plus existing `Box.query(...)` execution.
-
-PR2 owns the final common-query shape:
+PR2 extends the same Dart builder with result options that compile directly into existing `BoxQuery` fields:
 
 ```dart
 final users = await box
@@ -151,13 +117,74 @@ final users = await box
     .find();
 ```
 
-PR2 scope:
+Supported result options:
 
-- `orderBy`, including descending and null-placement options compatible with `QuerySort`;
-- `offset`;
-- `limit`;
-- terminal `find()` bound to the originating `Box`;
-- evaluate `findFirst`, `exists`, and `count` only when backed by efficient native operations rather than full-result materialization across FRB.
+```text
+orderBy(field, descending: false, nulls: QueryNullOrder.last)
+offset(n)
+limit(n)
+```
+
+Multiple `orderBy` calls preserve declaration order and map one-to-one to `BoxQuery.sortBy`. `offset` and `limit` retain the existing validation and native sort-before-pagination semantics.
+
+### Bound versus standalone builders
+
+PR2 intentionally keeps standalone composition pure:
+
+```dart
+final query = BoxQueryBuilder
+    .where('status').equals('active')
+    .orderBy('name')
+    .offset(10)
+    .limit(20)
+    .build();
+```
+
+Standalone `BoxQueryBuilder` does **not** expose `find()` because it has no execution context.
+
+The `box.queryWhere(...)` path retains the originating `Box` through dedicated bound builder stages:
+
+```text
+Box
+  -> BoundQueryFieldBuilder
+  -> BoundBoxQueryBuilder
+  -> build() or find()
+```
+
+This avoids nullable-box state and avoids a runtime "missing execution context" failure mode. `find()` is available only when a `Box` is present by construction.
+
+Terminal execution remains exactly:
+
+```text
+find()
+  -> build()
+  -> Box.query(BoxQuery)
+  -> existing serialization / FRB
+  -> existing Rust planner/index execution
+```
+
+No second execution path is introduced.
+
+### Convenience terminals intentionally not added
+
+`findFirst`, `exists`, and `count` are not added in PR2. They should become public only when backed by efficient native operations rather than materializing full result sets across FRB and then truncating/counting in Dart.
+
+## Correctness contract
+
+0.7 query ergonomics must not:
+
+- add Dart-side filtering or sorting;
+- duplicate Rust planner logic;
+- add a second query AST or wire representation;
+- change query serialization semantics;
+- change index selection semantics;
+- change encrypted equality-index behavior;
+- change encrypted ordered/range scan-backed behavior;
+- change `dxtr_box/1`;
+- change native profiles or FRB bindings;
+- weaken authoritative primary-record predicate rechecks.
+
+Field validation remains inherited from `QueryComparison` / `QuerySort`, so malformed dotted paths fail under the same contract as direct manual AST construction.
 
 ## PR3 optional typed fields
 
@@ -203,19 +230,19 @@ Do not add in 0.7 without a separate product decision:
 
 ## Acceptance criteria
 
-0.7 succeeds when common queries are shorter and more readable while preserving one query model internally.
+PR1 is complete in merged PR #44.
 
-PR1 specifically requires:
+PR2 requires:
 
-1. fluent filtering can start with `box.queryWhere(...)` or `BoxQueryBuilder.where(...)`;
-2. every existing comparison operator has a fluent equivalent;
-3. AND/OR chaining has documented deterministic precedence;
-4. explicit nested grouping is supported;
-5. fluent queries compile to the existing `BoxQuery` AST;
-6. direct `Box.query(BoxQuery)` remains supported;
-7. legacy `Box.where(predicate)` remains source-compatible;
-8. nested field validation remains unchanged;
-9. AST-equivalence tests cover fluent versus direct construction;
+1. `orderBy`, `offset`, and `limit` compile into the existing `BoxQuery` fields;
+2. ascending/descending and null placement preserve `QuerySort` semantics;
+3. multiple sorts preserve declaration order;
+4. invalid offset/limit values fail before execution;
+5. standalone `BoxQueryBuilder` remains a pure AST builder;
+6. `find()` exists only on a builder bound to an originating `Box`;
+7. `find()` delegates to the existing `Box.query` path rather than creating a new execution path;
+8. fluent/manual AST equivalence remains covered by tests;
+9. no `findFirst`/`exists`/`count` materialization shortcuts are introduced;
 10. no Rust/FRB/storage-format/native-profile change is introduced.
 
 The intended 0.7 outcome is a compact native local database with easier box-style query ergonomics, not a larger ORM or application framework.
