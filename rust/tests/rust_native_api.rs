@@ -73,6 +73,7 @@ fn rust_native_crud_reopen_query_index_and_pagination() {
     assert!(assets.drop_index("workplace").unwrap());
     assets.delete("other").unwrap();
     assert_eq!(assets.len().unwrap(), 3);
+    assets.close().unwrap();
 }
 
 #[test]
@@ -84,4 +85,5 @@ fn rust_native_errors_are_structured() {
 
     let error = box_handle.put("", Vec::new()).unwrap_err();
     assert!(matches!(error, DxtrBoxError::InvalidInput { .. }));
+    box_handle.close().unwrap();
 }
