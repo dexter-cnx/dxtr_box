@@ -42,7 +42,8 @@ fn rust_native_same_box_mutations_are_safe_across_threads() {
             std::thread::spawn(move || {
                 for offset in 0u8..16 {
                     let key = format!("worker-{worker}-{offset}");
-                    items.put(key, vec![worker, offset]).unwrap();
+                    let value = vec![0x92, worker, offset];
+                    items.put(key, value).unwrap();
                 }
             })
         })
@@ -53,7 +54,10 @@ fn rust_native_same_box_mutations_are_safe_across_threads() {
     }
 
     assert_eq!(items.len().unwrap(), 128);
-    assert_eq!(items.get("worker-7-15").unwrap(), Some(vec![7, 15]));
+    assert_eq!(
+        items.get("worker-7-15").unwrap(),
+        Some(vec![0x92, 7, 15])
+    );
 
     drop(items);
 }
@@ -86,14 +90,18 @@ fn encryption_profile_supports_native_encrypted_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let db = DxtrBox::open(dir.path()).unwrap();
 
-    let secure = db.box_with_key("secure", Some("correct horse battery staple")).unwrap();
+    let secure = db
+        .box_with_key("secure", Some("correct horse battery staple"))
+        .unwrap();
     secure.put("secret", vec![42]).unwrap();
     secure.close().unwrap();
 
     let wrong = db.box_with_key("secure", Some("wrong key")).unwrap_err();
-    assert!(matches!(wrong, DxtrBoxError::Storage { .. }));
+    assert!(matches!(wrong, DxtrBoxError::Engine { .. }));
 
-    let secure = db.box_with_key("secure", Some("correct horse battery staple")).unwrap();
+    let secure = db
+        .box_with_key("secure", Some("correct horse battery staple"))
+        .unwrap();
     assert_eq!(secure.get("secret").unwrap(), Some(vec![42]));
     secure.close().unwrap();
 }
@@ -108,9 +116,12 @@ fn reduced_profiles_report_full_only_capabilities_as_unsupported() {
 
     assert!(matches!(
         items.create_index("by_value", "value"),
-        Err(DxtrBoxError::Unsupported { .. })
+        Err(DxtrBoxError::UnsupportedFeature { .. })
     ));
-    assert!(matches!(items.query(), Err(DxtrBoxError::Unsupported { .. })));
+    assert!(matches!(
+        items.query(),
+        Err(DxtrBoxError::UnsupportedFeature { .. })
+    ));
 
     items.close().unwrap();
 }
