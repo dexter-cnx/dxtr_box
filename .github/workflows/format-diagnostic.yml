@@ -17,6 +17,8 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Resolve package language version
+        run: flutter pub get
       - name: Apply canonical Dart format
         shell: bash
         run: |
