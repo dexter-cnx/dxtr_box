@@ -49,9 +49,7 @@ fn rust_native_crud_reopen_query_index_and_pagination() {
     assert!(assets.contains_key("a").unwrap());
     assert!(assets.get("missing").unwrap().is_none());
 
-    assets
-        .create_index("workplace", "workplace_id")
-        .unwrap();
+    assets.create_index("workplace", "workplace_id").unwrap();
     assert_eq!(assets.list_indexes().unwrap().len(), 1);
 
     let rows = assets
@@ -64,7 +62,10 @@ fn rust_native_crud_reopen_query_index_and_pagination() {
         .unwrap()
         .find()
         .unwrap();
-    assert_eq!(rows.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(), vec!["c", "a"]);
+    assert_eq!(
+        rows.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
+        vec!["c", "a"]
+    );
 
     assets.close().unwrap();
     let assets = db.box_("assets").unwrap();
