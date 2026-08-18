@@ -80,10 +80,6 @@ pub fn close_box(name: &str) -> Result<(), String> {
     })
 }
 
-pub fn delete_box(name: &str) -> Result<(), String> {
-    delete_box_with(name, || {})
-}
-
 pub fn delete_box_with(name: &str, after_delete: impl FnOnce()) -> Result<(), String> {
     with_box_mutation_lock(name, || {
         db::delete_box(name)?;
@@ -112,10 +108,6 @@ pub fn box_exists(name: &str) -> Result<bool, String> {
     db::box_exists(name)
 }
 
-pub fn put(box_name: &str, key: String, value: Vec<u8>) -> Result<(), String> {
-    put_with(box_name, key, value, |_| {})
-}
-
 pub fn put_with(
     box_name: &str,
     key: String,
@@ -132,10 +124,6 @@ pub fn put_with(
         });
         Ok(())
     })
-}
-
-pub fn put_all(box_name: &str, entries: Vec<(String, Vec<u8>)>) -> Result<(), String> {
-    put_all_with(box_name, entries, |_| {})
 }
 
 pub fn put_all_with(
@@ -174,10 +162,6 @@ pub fn get_all(box_name: &str, keys: &[String]) -> Result<Vec<BatchRecord>, Stri
     })
 }
 
-pub fn delete(box_name: &str, key: String) -> Result<(), String> {
-    delete_with(box_name, key, |_| {})
-}
-
 pub fn delete_with(
     box_name: &str,
     key: String,
@@ -193,10 +177,6 @@ pub fn delete_with(
         });
         Ok(())
     })
-}
-
-pub fn delete_all(box_name: &str, keys: &[String]) -> Result<Vec<String>, String> {
-    delete_all_with(box_name, keys, |_| {})
 }
 
 pub fn delete_all_with(
@@ -218,14 +198,7 @@ pub fn delete_all_with(
     })
 }
 
-pub fn clear(box_name: &str) -> Result<(), String> {
-    clear_with(box_name, |_| {})
-}
-
-pub fn clear_with(
-    box_name: &str,
-    mut on_event: impl FnMut(BoxEvent),
-) -> Result<(), String> {
+pub fn clear_with(box_name: &str, mut on_event: impl FnMut(BoxEvent)) -> Result<(), String> {
     with_box_mutation_lock(box_name, || {
         db::clear(box_name)?;
         on_event(BoxEvent {
