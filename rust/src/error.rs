@@ -2,9 +2,16 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DxtrBoxError {
-    InvalidInput { message: String },
-    UnsupportedFeature { feature: &'static str, message: String },
-    Engine { message: String },
+    InvalidInput {
+        message: String,
+    },
+    UnsupportedFeature {
+        feature: &'static str,
+        message: String,
+    },
+    Engine {
+        message: String,
+    },
 }
 
 impl DxtrBoxError {
