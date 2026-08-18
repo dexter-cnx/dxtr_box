@@ -149,6 +149,19 @@ void main() {
       );
     });
 
+    test('box-bound path exposes terminal find with typed result', () {
+      final Future<List<MapEntry<String, dynamic>>> Function(Box) execute =
+          (box) => box
+              .queryWhere('status')
+              .equals('active')
+              .orderBy('name')
+              .offset(2)
+              .limit(5)
+              .find();
+
+      expect(execute, isNotNull);
+    });
+
     test('fluent and manual forms are structurally equivalent', () {
       var fluentBuilder = BoxQueryBuilder.where('status').equals('active');
       fluentBuilder = fluentBuilder.and('age').gte(18);
