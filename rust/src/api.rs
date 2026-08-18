@@ -1,12 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 
-use crate::{db, frb_generated::StreamSink};
 #[cfg(feature = "full")]
-use crate::{index, query};
+use crate::query;
+use crate::{core, frb_generated::StreamSink};
 
 #[derive(Clone)]
 pub enum NativeBoxEventType {
@@ -38,23 +38,51 @@ pub struct NativeIndexDefinition {
     pub field: String,
 }
 
+impl From<core::BoxEvent> for NativeBoxEvent {
+    fn from(event: core::BoxEvent) -> Self {
+        Self {
+            box_name: event.box_name,
+            event_type: match event.event_type {
+                core::BoxEventType::Put => NativeBoxEventType::Put,
+                core::BoxEventType::Delete => NativeBoxEventType::Delete,
+                core::BoxEventType::Clear => NativeBoxEventType::Clear,
+            },
+            key: event.key,
+            value: event.value,
+        }
+    }
+}
+
+impl From<core::QueryRecord> for NativeQueryRecord {
+    fn from(record: core::QueryRecord) -> Self {
+        Self {
+            key: record.key,
+            value: record.value,
+        }
+    }
+}
+
+impl From<core::BatchRecord> for NativeBatchRecord {
+    fn from(record: core::BatchRecord) -> Self {
+        Self {
+            key: record.key,
+            value: record.value,
+        }
+    }
+}
+
+impl From<core::IndexDefinition> for NativeIndexDefinition {
+    fn from(definition: core::IndexDefinition) -> Self {
+        Self {
+            name: definition.name,
+            field: definition.field,
+        }
+    }
+}
+
 type Watchers = HashMap<String, HashMap<String, StreamSink<NativeBoxEvent>>>;
-type MutationLocks = HashMap<String, Arc<Mutex<()>>>;
 
 static WATCHERS: Lazy<RwLock<Watchers>> = Lazy::new(|| RwLock::new(HashMap::new()));
-static MUTATION_LOCKS: Lazy<RwLock<MutationLocks>> = Lazy::new(|| RwLock::new(HashMap::new()));
-
-fn mutation_lock(box_name: &str) -> Arc<Mutex<()>> {
-    if let Some(lock) = MUTATION_LOCKS.read().get(box_name).cloned() {
-        return lock;
-    }
-
-    MUTATION_LOCKS
-        .write()
-        .entry(box_name.to_string())
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone()
-}
 
 fn emit_event(event: NativeBoxEvent) {
     let subscribers = WATCHERS
@@ -93,55 +121,34 @@ fn emit_event(event: NativeBoxEvent) {
 
 #[frb(sync)]
 pub fn init_db(path: String) -> Result<(), String> {
-    db::init(&path)
+    core::init(std::path::Path::new(&path))
 }
 
 #[frb(sync)]
 pub fn open_box(name: String, encryption_key: Option<String>) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&name);
-    let _mutation_guard = mutation_lock.lock();
-    db::open(&name, encryption_key.as_deref())
+    core::open_box(&name, encryption_key.as_deref())
 }
 
 #[frb(sync)]
 pub fn close_box(name: String) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&name);
-    let _mutation_guard = mutation_lock.lock();
-    db::close(&name);
-    Ok(())
+    core::close_box(&name)
 }
 
 #[frb(sync)]
 pub fn delete_box(name: String) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&name);
-    let _mutation_guard = mutation_lock.lock();
-    db::delete_box(&name)?;
-    WATCHERS.write().remove(&name);
-    Ok(())
+    core::delete_box_with(&name, || {
+        WATCHERS.write().remove(&name);
+    })
 }
 
 #[frb(sync)]
 pub fn encrypt_box(name: String, encryption_key: String) -> Result<(), String> {
-    #[cfg(all(feature = "encryption", feature = "maintenance"))]
-    {
-        let mutation_lock = mutation_lock(&name);
-        let _mutation_guard = mutation_lock.lock();
-        db::encrypt_box(&name, &encryption_key)
-    }
-
-    #[cfg(not(all(feature = "encryption", feature = "maintenance")))]
-    {
-        let _ = (name, encryption_key);
-        Err(
-            "plaintext encryption migration requires native features 'encryption' and 'maintenance'"
-                .to_string(),
-        )
-    }
+    core::encrypt_box(&name, &encryption_key)
 }
 
 #[frb(sync)]
 pub fn box_exists(name: String) -> Result<bool, String> {
-    db::box_exists(&name)
+    core::box_exists(&name)
 }
 
 #[frb(stream_dart_await)]
@@ -154,135 +161,70 @@ pub fn watch_box(
         return Err("watcher id cannot be empty".to_string());
     }
 
-    let mutation_lock = mutation_lock(&box_name);
-    let _mutation_guard = mutation_lock.lock();
-    db::len(&box_name)?;
-    WATCHERS
-        .write()
-        .entry(box_name)
-        .or_default()
-        .insert(watcher_id, sink);
-    Ok(())
+    core::with_box_mutation_lock(&box_name, || {
+        core::len(&box_name)?;
+        WATCHERS
+            .write()
+            .entry(box_name.clone())
+            .or_default()
+            .insert(watcher_id, sink);
+        Ok(())
+    })
 }
 
 #[frb(sync)]
 pub fn unwatch_box(box_name: String, watcher_id: String) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&box_name);
-    let _mutation_guard = mutation_lock.lock();
-    let mut all_watchers = WATCHERS.write();
-    let remove_box = if let Some(watchers) = all_watchers.get_mut(&box_name) {
-        watchers.remove(&watcher_id);
-        watchers.is_empty()
-    } else {
-        false
-    };
-    if remove_box {
-        all_watchers.remove(&box_name);
-    }
-    Ok(())
+    core::with_box_mutation_lock(&box_name, || {
+        let mut all_watchers = WATCHERS.write();
+        let remove_box = if let Some(watchers) = all_watchers.get_mut(&box_name) {
+            watchers.remove(&watcher_id);
+            watchers.is_empty()
+        } else {
+            false
+        };
+        if remove_box {
+            all_watchers.remove(&box_name);
+        }
+        Ok(())
+    })
 }
 
 pub fn put(box_name: String, key: String, value: Vec<u8>) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&box_name);
-    let _mutation_guard = mutation_lock.lock();
-    db::put(&box_name, &key, &value)?;
-    emit_event(NativeBoxEvent {
-        box_name,
-        event_type: NativeBoxEventType::Put,
-        key: Some(key),
-        value: Some(value),
-    });
-    Ok(())
+    core::put_with(&box_name, key, value, |event| emit_event(event.into()))
 }
 
 pub fn put_all(box_name: String, entries: Vec<(String, Vec<u8>)>) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&box_name);
-    let _mutation_guard = mutation_lock.lock();
-    db::put_all(&box_name, &entries)?;
-    for (key, value) in entries {
-        emit_event(NativeBoxEvent {
-            box_name: box_name.clone(),
-            event_type: NativeBoxEventType::Put,
-            key: Some(key),
-            value: Some(value),
-        });
-    }
-    Ok(())
+    core::put_all_with(&box_name, entries, |event| emit_event(event.into()))
 }
 
 #[frb(sync)]
 pub fn get(box_name: String, key: String) -> Result<Option<Vec<u8>>, String> {
-    db::get(&box_name, &key)
+    core::get(&box_name, &key)
 }
 
 #[frb(sync)]
 pub fn contains_key(box_name: String, key: String) -> Result<bool, String> {
-    db::contains_key(&box_name, &key)
+    core::contains_key(&box_name, &key)
 }
 
 pub fn get_all(box_name: String, keys: Vec<String>) -> Result<Vec<NativeBatchRecord>, String> {
-    db::get_all(&box_name, &keys).map(|records| {
-        records
-            .into_iter()
-            .map(|(key, value)| NativeBatchRecord { key, value })
-            .collect()
-    })
+    core::get_all(&box_name, &keys).map(|records| records.into_iter().map(Into::into).collect())
 }
 
 pub fn delete(box_name: String, key: String) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&box_name);
-    let _mutation_guard = mutation_lock.lock();
-    db::delete(&box_name, &key)?;
-    emit_event(NativeBoxEvent {
-        box_name,
-        event_type: NativeBoxEventType::Delete,
-        key: Some(key),
-        value: None,
-    });
-    Ok(())
+    core::delete_with(&box_name, key, |event| emit_event(event.into()))
 }
 
 pub fn delete_all(box_name: String, keys: Vec<String>) -> Result<Vec<String>, String> {
-    let mutation_lock = mutation_lock(&box_name);
-    let _mutation_guard = mutation_lock.lock();
-    let deleted = db::delete_all(&box_name, &keys)?;
-    for key in &deleted {
-        emit_event(NativeBoxEvent {
-            box_name: box_name.clone(),
-            event_type: NativeBoxEventType::Delete,
-            key: Some(key.clone()),
-            value: None,
-        });
-    }
-    Ok(deleted)
+    core::delete_all_with(&box_name, &keys, |event| emit_event(event.into()))
 }
 
 pub fn clear(box_name: String) -> Result<(), String> {
-    let mutation_lock = mutation_lock(&box_name);
-    let _mutation_guard = mutation_lock.lock();
-    db::clear(&box_name)?;
-    emit_event(NativeBoxEvent {
-        box_name,
-        event_type: NativeBoxEventType::Clear,
-        key: None,
-        value: None,
-    });
-    Ok(())
+    core::clear_with(&box_name, |event| emit_event(event.into()))
 }
 
 pub fn compact(box_name: String) -> Result<bool, String> {
-    #[cfg(feature = "maintenance")]
-    {
-        let mutation_lock = mutation_lock(&box_name);
-        let _mutation_guard = mutation_lock.lock();
-        db::compact(&box_name)
-    }
-
-    #[cfg(not(feature = "maintenance"))]
-    {
-        let _ = box_name;
-        Err("compaction requires native feature 'maintenance'".to_string())
-    }
+    core::compact(&box_name)
 }
 
 pub fn scan_query(
@@ -292,66 +234,7 @@ pub fn scan_query(
     #[cfg(feature = "full")]
     {
         let spec = query::decode_query(&query_payload)?;
-        let (database, encryption) = db::database(&box_name)?;
-        let read = database.begin_read().map_err(|e| e.to_string())?;
-        let mut keys = match index::candidate_keys(&read, encryption.as_ref(), &spec.filter)? {
-            Some(keys) => keys,
-            None => db::query_all_keys(&read)?,
-        };
-        keys.sort();
-        keys.dedup();
-
-        if spec.sort_by.is_empty() {
-            let mut matched = 0usize;
-            let mut results = Vec::new();
-            for key in keys {
-                let Some(value) = db::query_get(&read, &encryption, &key)? else {
-                    continue;
-                };
-                if !query::matches_record(&value, &spec.filter)? {
-                    continue;
-                }
-                if matched < spec.offset {
-                    matched += 1;
-                    continue;
-                }
-                results.push(NativeQueryRecord { key, value });
-                matched += 1;
-                if spec.limit.is_some_and(|limit| results.len() >= limit) {
-                    break;
-                }
-            }
-            return Ok(results);
-        }
-
-        let mut sortable = Vec::new();
-        for key in keys {
-            let Some(value) = db::query_get(&read, &encryption, &key)? else {
-                continue;
-            };
-            if !query::matches_record(&value, &spec.filter)? {
-                continue;
-            }
-            let sort_values = query::sort_values(&value, &spec.sort_by)?;
-            sortable.push((key, value, sort_values));
-        }
-
-        let sort_rows = sortable
-            .iter()
-            .map(|(_, _, values)| values.clone())
-            .collect::<Vec<_>>();
-        query::validate_sort_rows(&sort_rows, &spec.sort_by)?;
-        sortable.sort_by(|left, right| {
-            query::compare_sort_rows(&left.2, &left.0, &right.2, &right.0, &spec.sort_by)
-        });
-
-        let limit = spec.limit.unwrap_or(usize::MAX);
-        Ok(sortable
-            .into_iter()
-            .skip(spec.offset)
-            .take(limit)
-            .map(|(key, value, _)| NativeQueryRecord { key, value })
-            .collect())
+        core::query(&box_name, &spec).map(|records| records.into_iter().map(Into::into).collect())
     }
 
     #[cfg(not(feature = "full"))]
@@ -362,60 +245,22 @@ pub fn scan_query(
 }
 
 pub fn create_index(box_name: String, name: String, field: String) -> Result<(), String> {
-    #[cfg(feature = "full")]
-    {
-        let mutation_lock = mutation_lock(&box_name);
-        let _mutation_guard = mutation_lock.lock();
-        let (db, encryption) = db::database(&box_name)?;
-        index::create(&db, &encryption, &name, &field)
-    }
-
-    #[cfg(not(feature = "full"))]
-    {
-        let _ = (box_name, name, field);
-        Err("persisted indexes require the full profile".to_string())
-    }
+    core::create_index(&box_name, &name, &field)
 }
 
 pub fn list_indexes(box_name: String) -> Result<Vec<NativeIndexDefinition>, String> {
-    #[cfg(feature = "full")]
-    {
-        let (db, _) = db::database(&box_name)?;
-        index::list(&db).map(|definitions| {
-            definitions
-                .into_iter()
-                .map(|(name, field)| NativeIndexDefinition { name, field })
-                .collect()
-        })
-    }
-
-    #[cfg(not(feature = "full"))]
-    {
-        let _ = box_name;
-        Err("persisted indexes require the full profile".to_string())
-    }
+    core::list_indexes(&box_name)
+        .map(|definitions| definitions.into_iter().map(Into::into).collect())
 }
 
 pub fn drop_index(box_name: String, name: String) -> Result<bool, String> {
-    #[cfg(feature = "full")]
-    {
-        let mutation_lock = mutation_lock(&box_name);
-        let _mutation_guard = mutation_lock.lock();
-        let (db, _) = db::database(&box_name)?;
-        index::drop_index(&db, &name)
-    }
-
-    #[cfg(not(feature = "full"))]
-    {
-        let _ = (box_name, name);
-        Err("persisted indexes require the full profile".to_string())
-    }
+    core::drop_index(&box_name, &name)
 }
 
 pub fn get_all_keys(box_name: String) -> Result<Vec<String>, String> {
-    db::all_keys(&box_name)
+    core::all_keys(&box_name)
 }
 
 pub fn length(box_name: String) -> Result<u64, String> {
-    db::len(&box_name)
+    core::len(&box_name)
 }
