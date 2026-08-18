@@ -5,8 +5,11 @@ on:
     branches:
       - agent/0.7-pr3-typed-field-metadata
 
+permissions:
+  contents: write
+
 jobs:
-  dart-format-diff:
+  apply-dart-format:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -14,9 +17,21 @@ jobs:
         with:
           channel: stable
           cache: true
-      - name: Show formatter canonical diff
+      - name: Apply canonical Dart format
         shell: bash
         run: |
           dart --version
           dart format lib/src/dxtr_box.dart
           git --no-pager diff -- lib/src/dxtr_box.dart
+      - name: Commit formatter output when needed
+        shell: bash
+        run: |
+          if git diff --quiet -- lib/src/dxtr_box.dart; then
+            echo 'No formatter changes required.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/src/dxtr_box.dart
+          git commit -m 'style: apply CI Dart formatter output'
+          git push
