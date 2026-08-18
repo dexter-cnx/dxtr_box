@@ -108,6 +108,9 @@ abstract final class BoxStore {
 
     await _api.openBox(name, encryptionKey: encryptionKey);
 
+    // Close the race where a normal open started just before migration acquired
+    // the reservation. If migration won destination creation, this handle must
+    // not escape to application code and mutate the migration target.
     if (!allowMigrationReservation && await migrationReservation.exists()) {
       await _api.closeBox(name);
       throw StateError(
@@ -156,6 +159,12 @@ abstract final class BoxStore {
     _metadataByName.remove(name);
   }
 
+  /// Explicitly converts an existing plaintext box to encrypted storage.
+  ///
+  /// All handles for [name] must be closed before migration. The native engine
+  /// performs the value rewrite and encryption metadata transition in one redb
+  /// write transaction, so callers observe either the original plaintext state
+  /// or the fully encrypted state after a successful return.
   static Future<void> encryptBox(
     String name, {
     required String encryptionKey,
@@ -249,6 +258,8 @@ abstract final class BoxStoreMigrationInternals {
     }
 
     try {
+      // Re-check after acquiring the reservation to close the race with an
+      // ordinary open that may have created the destination just beforehand.
       if (await path.exists()) {
         throw StateError('Destination dxtr_box "$name" already exists.');
       }
@@ -262,7 +273,9 @@ abstract final class BoxStoreMigrationInternals {
     } catch (_) {
       try {
         await BoxStore._api.closeBox(name);
-      } catch (_) {}
+      } catch (_) {
+        // Best-effort close before deleting the reservation we own.
+      }
       try {
         await BoxStore._api.deleteBox(name);
       } catch (_) {
@@ -270,7 +283,9 @@ abstract final class BoxStoreMigrationInternals {
           if (await path.exists()) {
             await path.delete();
           }
-        } catch (_) {}
+        } catch (_) {
+          // Preserve the original open failure.
+        }
       }
       BoxStore._metadataByName.remove(name);
       await releaseReservation(name);
@@ -284,7 +299,10 @@ abstract final class BoxStoreMigrationInternals {
       if (await reservation.exists()) {
         await reservation.delete();
       }
-    } on FileSystemException {}
+    } on FileSystemException {
+      // A successful migration must not be reported as failed only because the
+      // advisory reservation marker disappeared concurrently.
+    }
   }
 }
 
