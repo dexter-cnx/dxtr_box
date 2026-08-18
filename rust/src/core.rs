@@ -81,7 +81,15 @@ pub fn close_box(name: &str) -> Result<(), String> {
 }
 
 pub fn delete_box(name: &str) -> Result<(), String> {
-    with_box_mutation_lock(name, || db::delete_box(name))
+    delete_box_with(name, || {})
+}
+
+pub fn delete_box_with(name: &str, after_delete: impl FnOnce()) -> Result<(), String> {
+    with_box_mutation_lock(name, || {
+        db::delete_box(name)?;
+        after_delete();
+        Ok(())
+    })
 }
 
 pub fn encrypt_box(name: &str, encryption_key: &str) -> Result<(), String> {
@@ -104,37 +112,48 @@ pub fn box_exists(name: &str) -> Result<bool, String> {
     db::box_exists(name)
 }
 
-pub fn validate_open_box(name: &str) -> Result<(), String> {
-    with_box_mutation_lock(name, || db::len(name).map(|_| ()))
+pub fn put(box_name: &str, key: String, value: Vec<u8>) -> Result<(), String> {
+    put_with(box_name, key, value, |_| {})
 }
 
-pub fn put(box_name: &str, key: String, value: Vec<u8>) -> Result<BoxEvent, String> {
+pub fn put_with(
+    box_name: &str,
+    key: String,
+    value: Vec<u8>,
+    mut on_event: impl FnMut(BoxEvent),
+) -> Result<(), String> {
     with_box_mutation_lock(box_name, || {
         db::put(box_name, &key, &value)?;
-        Ok(BoxEvent {
+        on_event(BoxEvent {
             box_name: box_name.to_string(),
             event_type: BoxEventType::Put,
             key: Some(key),
             value: Some(value),
-        })
+        });
+        Ok(())
     })
 }
 
-pub fn put_all(
+pub fn put_all(box_name: &str, entries: Vec<(String, Vec<u8>)>) -> Result<(), String> {
+    put_all_with(box_name, entries, |_| {})
+}
+
+pub fn put_all_with(
     box_name: &str,
     entries: Vec<(String, Vec<u8>)>,
-) -> Result<Vec<BoxEvent>, String> {
+    mut on_event: impl FnMut(BoxEvent),
+) -> Result<(), String> {
     with_box_mutation_lock(box_name, || {
         db::put_all(box_name, &entries)?;
-        Ok(entries
-            .into_iter()
-            .map(|(key, value)| BoxEvent {
+        for (key, value) in entries {
+            on_event(BoxEvent {
                 box_name: box_name.to_string(),
                 event_type: BoxEventType::Put,
                 key: Some(key),
                 value: Some(value),
-            })
-            .collect())
+            });
+        }
+        Ok(())
     })
 }
 
@@ -155,47 +174,67 @@ pub fn get_all(box_name: &str, keys: &[String]) -> Result<Vec<BatchRecord>, Stri
     })
 }
 
-pub fn delete(box_name: &str, key: String) -> Result<BoxEvent, String> {
+pub fn delete(box_name: &str, key: String) -> Result<(), String> {
+    delete_with(box_name, key, |_| {})
+}
+
+pub fn delete_with(
+    box_name: &str,
+    key: String,
+    mut on_event: impl FnMut(BoxEvent),
+) -> Result<(), String> {
     with_box_mutation_lock(box_name, || {
         db::delete(box_name, &key)?;
-        Ok(BoxEvent {
+        on_event(BoxEvent {
             box_name: box_name.to_string(),
             event_type: BoxEventType::Delete,
             key: Some(key),
             value: None,
-        })
+        });
+        Ok(())
     })
 }
 
-pub fn delete_all(
+pub fn delete_all(box_name: &str, keys: &[String]) -> Result<Vec<String>, String> {
+    delete_all_with(box_name, keys, |_| {})
+}
+
+pub fn delete_all_with(
     box_name: &str,
     keys: &[String],
-) -> Result<(Vec<String>, Vec<BoxEvent>), String> {
+    mut on_event: impl FnMut(BoxEvent),
+) -> Result<Vec<String>, String> {
     with_box_mutation_lock(box_name, || {
         let deleted = db::delete_all(box_name, keys)?;
-        let events = deleted
-            .iter()
-            .cloned()
-            .map(|key| BoxEvent {
+        for key in &deleted {
+            on_event(BoxEvent {
                 box_name: box_name.to_string(),
                 event_type: BoxEventType::Delete,
-                key: Some(key),
+                key: Some(key.clone()),
                 value: None,
-            })
-            .collect();
-        Ok((deleted, events))
+            });
+        }
+        Ok(deleted)
     })
 }
 
-pub fn clear(box_name: &str) -> Result<BoxEvent, String> {
+pub fn clear(box_name: &str) -> Result<(), String> {
+    clear_with(box_name, |_| {})
+}
+
+pub fn clear_with(
+    box_name: &str,
+    mut on_event: impl FnMut(BoxEvent),
+) -> Result<(), String> {
     with_box_mutation_lock(box_name, || {
         db::clear(box_name)?;
-        Ok(BoxEvent {
+        on_event(BoxEvent {
             box_name: box_name.to_string(),
             event_type: BoxEventType::Clear,
             key: None,
             value: None,
-        })
+        });
+        Ok(())
     })
 }
 
