@@ -54,10 +54,7 @@ fn rust_native_same_box_mutations_are_safe_across_threads() {
     }
 
     assert_eq!(items.len().unwrap(), 128);
-    assert_eq!(
-        items.get("worker-7-15").unwrap(),
-        Some(vec![0x92, 7, 15])
-    );
+    assert_eq!(items.get("worker-7-15").unwrap(), Some(vec![0x92, 7, 15]));
 
     drop(items);
 }
