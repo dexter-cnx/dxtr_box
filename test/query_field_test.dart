@@ -2,10 +2,10 @@ import 'package:dxtr_box/dxtr_box.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  group('DxtrField', () {
-    const status = DxtrField<String>('status');
-    const age = DxtrField<int>('profile.age');
-    const name = DxtrField<String>('name');
+  group('BoxField', () {
+    const status = BoxField<String>('status');
+    const age = BoxField<int>('profile.age');
+    const name = BoxField<String>('name');
 
     test('starts a typed standalone query and preserves the field path', () {
       final query = status.where().equals('active').build();
