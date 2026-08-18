@@ -46,9 +46,14 @@ void main() {
     });
 
     test('supports typed fields inside explicit groups', () {
-      final query = status.where().equals('active').andGroup(
-            (group) => group.whereField(age).gte(18).orField(name).equals('Ada'),
-          ).build();
+      final query = status
+          .where()
+          .equals('active')
+          .andGroup(
+            (group) =>
+                group.whereField(age).gte(18).orField(name).equals('Ada'),
+          )
+          .build();
 
       final outer = query.where as QueryGroup;
       final nested = outer.filters.last as QueryGroup;
@@ -105,7 +110,9 @@ void main() {
     });
 
     test('string-path API remains first-class beside typed metadata', () {
-      final stringQuery = BoxQueryBuilder.where('status').equals('active').build();
+      final stringQuery = BoxQueryBuilder.where(
+        'status',
+      ).equals('active').build();
       final typedQuery = status.where().equals('active').build();
 
       final stringComparison = stringQuery.where as QueryComparison;
