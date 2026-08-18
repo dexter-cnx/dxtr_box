@@ -54,10 +54,7 @@ fn asset(status: &str, captured_at: i64) -> Vec<u8> {
         Value::from("@dxtr:map"),
         Value::Array(vec![
             Value::Array(vec![Value::from("status"), Value::from(status)]),
-            Value::Array(vec![
-                Value::from("captured_at"),
-                Value::from(captured_at),
-            ]),
+            Value::Array(vec![Value::from("captured_at"), Value::from(captured_at)]),
         ]),
     ]);
     let mut bytes = Vec::new();
