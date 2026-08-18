@@ -38,7 +38,8 @@ final class BoxQueryBuilder {
   /// Adds an explicitly grouped AND expression.
   ///
   /// Mixed AND/OR chains are left-associative. Use this method when explicit
-  /// grouping is required.
+  /// grouping is required. Result modifiers such as [orderBy], [offset], and
+  /// [limit] are not valid inside a predicate group.
   BoxQueryBuilder andGroup(
     BoxQueryBuilder Function(QueryGroupStart group) buildGroup,
   ) {
@@ -51,7 +52,8 @@ final class BoxQueryBuilder {
   /// Adds an explicitly grouped OR expression.
   ///
   /// Mixed AND/OR chains are left-associative. Use this method when explicit
-  /// grouping is required.
+  /// grouping is required. Result modifiers such as [orderBy], [offset], and
+  /// [limit] are not valid inside a predicate group.
   BoxQueryBuilder orGroup(
     BoxQueryBuilder Function(QueryGroupStart group) buildGroup,
   ) {
@@ -140,6 +142,14 @@ final class BoxQueryBuilder {
     BoxQueryBuilder Function(QueryGroupStart group) buildGroup,
   ) {
     final grouped = buildGroup(const QueryGroupStart());
+    if (grouped._sortBy.isNotEmpty ||
+        grouped._limit != null ||
+        grouped._offset != 0) {
+      throw ArgumentError(
+        'Explicit query groups may contain predicates only; '
+        'orderBy, offset, and limit must be applied to the outer query.',
+      );
+    }
     return grouped._root;
   }
 }
