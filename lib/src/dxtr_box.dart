@@ -216,7 +216,8 @@ abstract final class BoxStore {
 
   static void _validateBoxName(String name) {
     final windowsStem = name.split('.').first.toUpperCase();
-    final invalid = name.isEmpty ||
+    final invalid =
+        name.isEmpty ||
         name == '.' ||
         name == '..' ||
         name.endsWith('.') ||
@@ -232,10 +233,7 @@ abstract final class BoxStore {
 /// Internal migration helpers. This symbol is intentionally not exported from
 /// `package:dxtr_box/dxtr_box.dart`.
 abstract final class BoxStoreMigrationInternals {
-  static Future<Box> openNew(
-    String name, {
-    String? encryptionKey,
-  }) async {
+  static Future<Box> openNew(String name, {String? encryptionKey}) async {
     BoxStore._ensureInitialized();
     BoxStore._validateBoxName(name);
 
