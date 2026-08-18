@@ -20,7 +20,10 @@ fn reduced_profile_indexes_report_unsupported_feature() {
     assert!(matches!(list, DxtrBoxError::UnsupportedFeature { .. }));
 
     let drop_error = box_handle.drop_index("by_value").unwrap_err();
-    assert!(matches!(drop_error, DxtrBoxError::UnsupportedFeature { .. }));
+    assert!(matches!(
+        drop_error,
+        DxtrBoxError::UnsupportedFeature { .. }
+    ));
 
     box_handle.close().unwrap();
 }
