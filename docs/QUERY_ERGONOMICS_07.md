@@ -26,7 +26,7 @@ existing Rust planner + indexes + authoritative record checks
 ```text
 PR1 — fluent queryWhere/comparison/AND/OR/grouping builder: merged (#44)
 PR2 — orderBy/offset/limit/find ergonomics: merged (#45)
-PR3 — optional DxtrField<T> typed field metadata: active
+PR3 — optional BoxField<T> typed field metadata: active
 PR4 — README/examples/API equivalence/compatibility closure
 ```
 
@@ -115,15 +115,15 @@ Standalone `BoxQueryBuilder` remains a pure AST builder and therefore exposes `b
 
 ## PR3 — optional typed field metadata
 
-PR3 adds `DxtrField<T>` as opt-in reusable Dart metadata for a field path:
+PR3 adds `BoxField<T>` as opt-in reusable Dart metadata for a field path:
 
 ```dart
-const status = DxtrField<String>('status');
-const age = DxtrField<int>('profile.age');
-const name = DxtrField<String>('name');
+const status = BoxField<String>('status');
+const age = BoxField<int>('profile.age');
+const name = BoxField<String>('name');
 ```
 
-`DxtrField<T>` is **not a schema definition**. It does not register fields, alter storage, generate serializers, create indexes, or require code generation. The underlying runtime field identity remains the same string/dotted path consumed by `QueryComparison` and `QuerySort`.
+`BoxField<T>` is **not a schema definition**. It does not register fields, alter storage, generate serializers, create indexes, or require code generation. The underlying runtime field identity remains the same string/dotted path consumed by `QueryComparison` and `QuerySort`.
 
 Typed standalone composition starts from the field itself:
 
@@ -160,9 +160,15 @@ final query = status
     .build();
 ```
 
-The value type carried by `DxtrField<T>` is enforced by Dart at the fluent authoring boundary. Every typed method then delegates to the existing untyped builder, so generated query objects remain structurally equivalent to direct `BoxQuery` construction.
+The value type carried by `BoxField<T>` is enforced by Dart at the fluent authoring boundary. Every typed method then delegates to the existing untyped builder, so generated query objects remain structurally equivalent to direct `BoxQuery` construction.
 
 String paths remain first-class and may be mixed with typed metadata. PR3 deliberately does not change the existing `where(String)`, `queryWhere(String)`, `and(String)`, `or(String)`, or `orderBy(String)` signatures because doing so would weaken their compile-time contracts.
+
+### Naming policy
+
+`dxtr_box` is the package/product identity. Public and internal code symbols should use domain/functional names rather than carrying the `Dxtr` brand prefix when it adds no semantic value. Examples include `BoxField`, `BoxCodec`, `NativeBoxApi`, and a functional storage facade name rather than brand-prefixed domain types.
+
+Brand-bearing strings remain appropriate where they are compatibility or package identity, including `dxtr_box`, native library/crate identity, durable format markers such as `dxtr_box/1`, existing `@dxtr:*` wire tags, and `.dxtr` storage markers. Those identifiers must not be renamed casually because they participate in packaging or durable compatibility.
 
 ### PR3 invariants
 
@@ -235,7 +241,7 @@ PR1 and PR2 are complete in merged PRs #44 and #45.
 
 PR3 requires:
 
-1. `DxtrField<T>` is optional reusable typed metadata over the existing field path;
+1. `BoxField<T>` is optional reusable typed metadata over the existing field path;
 2. typed equality/range comparison values are checked by Dart at authoring time;
 3. typed AND/OR continuation and typed sorting remain available without replacing string APIs;
 4. a typed box-bound entry point retains terminal `find()`;
