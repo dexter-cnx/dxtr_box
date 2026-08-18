@@ -216,8 +216,7 @@ abstract final class BoxStore {
 
   static void _validateBoxName(String name) {
     final windowsStem = name.split('.').first.toUpperCase();
-    final invalid =
-        name.isEmpty ||
+    final invalid = name.isEmpty ||
         name == '.' ||
         name == '..' ||
         name.endsWith('.') ||
@@ -328,7 +327,8 @@ abstract final class DxtrBox {
   static Future<void> encryptBox(
     String name, {
     required String encryptionKey,
-  }) => BoxStore.encryptBox(name, encryptionKey: encryptionKey);
+  }) =>
+      BoxStore.encryptBox(name, encryptionKey: encryptionKey);
 
   static Future<bool> boxExists(String name) => BoxStore.boxExists(name);
 }
