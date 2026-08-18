@@ -79,3 +79,11 @@ abstract final class BoxCodec {
     }
   }
 }
+
+/// Legacy package-internal compatibility shim. New code uses [BoxCodec].
+@Deprecated('Use BoxCodec instead.')
+abstract final class DxtrCodec {
+  static Uint8List encode(dynamic value) => BoxCodec.encode(value);
+
+  static dynamic decode(List<int> bytes) => BoxCodec.decode(bytes);
+}
