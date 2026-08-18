@@ -796,7 +796,10 @@ mod tests {
     #[test]
     fn signed_and_unsigned_integer_comparisons_remain_exact() {
         assert_eq!(
-            compare_numeric(NumericValue::Signed(i64::MAX), NumericValue::Unsigned(i64::MAX as u64)),
+            compare_numeric(
+                NumericValue::Signed(i64::MAX),
+                NumericValue::Unsigned(i64::MAX as u64)
+            ),
             Some(Ordering::Equal)
         );
         assert_eq!(
@@ -819,6 +822,9 @@ mod tests {
     fn integer_comparisons_preserve_values_above_f64_exact_range() {
         let left = Value::from(9_007_199_254_740_993_i64);
         let right = Value::from(9_007_199_254_740_992_i64);
-        assert_eq!(compare(&left, Some(&right)).unwrap(), Some(Ordering::Greater));
+        assert_eq!(
+            compare(&left, Some(&right)).unwrap(),
+            Some(Ordering::Greater)
+        );
     }
 }
