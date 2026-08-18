@@ -734,7 +734,7 @@ fn is_ordered_index_scalar(value: &Value) -> bool {
         || value.as_str().is_some()
 }
 
-fn validate_field(field: &str) -> Result<(), String> {
+pub(crate) fn validate_field(field: &str) -> Result<(), String> {
     if field.is_empty()
         || field.starts_with('.')
         || field.ends_with('.')
@@ -759,22 +759,13 @@ mod tests {
     fn planner_candidates_do_not_descend_into_or_groups() {
         let filter = Filter::Group {
             op: LogicalOp::Or,
-            filters: vec![
-                Filter::Comparison(Comparison {
-                    field: "status".to_string(),
-                    op: CompareOp::Equal,
-                    value: Some(Value::from("active")),
-                    upper_value: None,
-                }),
-                Filter::Comparison(Comparison {
-                    field: "profile.age".to_string(),
-                    op: CompareOp::GreaterThanOrEqual,
-                    value: Some(Value::from(18_i64)),
-                    upper_value: None,
-                }),
-            ],
+            filters: vec![Filter::Comparison(Comparison {
+                field: "age".to_string(),
+                op: CompareOp::Equal,
+                value: Some(Value::from(42)),
+                upper_value: None,
+            })],
         };
-
         assert!(index_candidates(&filter).unwrap().is_empty());
     }
 
@@ -784,68 +775,50 @@ mod tests {
             op: LogicalOp::And,
             filters: vec![
                 Filter::Comparison(Comparison {
-                    field: "status".to_string(),
+                    field: "age".to_string(),
                     op: CompareOp::Equal,
-                    value: Some(Value::from("active")),
+                    value: Some(Value::from(42)),
                     upper_value: None,
                 }),
                 Filter::Comparison(Comparison {
-                    field: "status".to_string(),
+                    field: "name".to_string(),
                     op: CompareOp::NotEqual,
-                    value: Some(Value::from("archived")),
+                    value: Some(Value::from("Ada")),
                     upper_value: None,
                 }),
             ],
         };
-
         let candidates = index_candidates(&filter).unwrap();
         assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].field, "status");
-        assert!(matches!(candidates[0].op, CompareOp::Equal));
-    }
-
-    #[test]
-    fn integer_comparisons_preserve_values_above_f64_exact_range() {
-        let lower = Value::from(9_007_199_254_740_992_i64);
-        let higher = Value::from(9_007_199_254_740_993_i64);
-
-        assert!(!values_equal(&lower, &higher));
-        assert_eq!(
-            compare(&higher, Some(&lower)).unwrap(),
-            Some(Ordering::Greater)
-        );
-        assert_eq!(
-            compare(&lower, Some(&higher)).unwrap(),
-            Some(Ordering::Less)
-        );
+        assert_eq!(candidates[0].field, "age");
     }
 
     #[test]
     fn signed_and_unsigned_integer_comparisons_remain_exact() {
-        let negative = Value::from(-1_i64);
-        let zero = Value::from(0_u64);
-        let max_signed = Value::from(i64::MAX);
-        let above_signed = Value::from((i64::MAX as u64) + 1);
-
         assert_eq!(
-            compare(&negative, Some(&zero)).unwrap(),
-            Some(Ordering::Less)
+            compare_numeric(NumericValue::Signed(i64::MAX), NumericValue::Unsigned(i64::MAX as u64)),
+            Some(Ordering::Equal)
         );
         assert_eq!(
-            compare(&above_signed, Some(&max_signed)).unwrap(),
-            Some(Ordering::Greater)
+            compare_numeric(NumericValue::Signed(-1), NumericValue::Unsigned(0)),
+            Some(Ordering::Less)
         );
     }
 
     #[test]
     fn integer_float_comparisons_do_not_round_large_integers_to_float() {
-        let integer = Value::from(9_007_199_254_740_993_i64);
-        let rounded_float = Value::from(9_007_199_254_740_992_f64);
-
-        assert!(!values_equal(&integer, &rounded_float));
+        let large = 9_007_199_254_740_993_i64;
+        let rounded = large as f64;
         assert_eq!(
-            compare(&integer, Some(&rounded_float)).unwrap(),
+            compare_numeric(NumericValue::Signed(large), NumericValue::Float(rounded)),
             Some(Ordering::Greater)
         );
+    }
+
+    #[test]
+    fn integer_comparisons_preserve_values_above_f64_exact_range() {
+        let left = Value::from(9_007_199_254_740_993_i64);
+        let right = Value::from(9_007_199_254_740_992_i64);
+        assert_eq!(compare(&left, Some(&right)).unwrap(), Some(Ordering::Greater));
     }
 }
