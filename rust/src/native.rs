@@ -4,7 +4,8 @@ use crate::{core, DxtrBoxError};
 
 #[cfg(feature = "full")]
 use crate::query::{
-    CompareOp, Comparison, Filter, LogicalOp, NullOrder, QuerySpec, SortDirection, SortSpec,
+    validate_field, CompareOp, Comparison, Filter, LogicalOp, NullOrder, QuerySpec, SortDirection,
+    SortSpec,
 };
 #[cfg(feature = "full")]
 use rmpv::Value;
@@ -36,23 +37,30 @@ impl DxtrBox {
         name: impl Into<String>,
         encryption_key: Option<impl Into<String>>,
     ) -> Result<BoxHandle> {
+        core::init(&self.path).map_err(DxtrBoxError::from)?;
+
         let name = name.into();
         if name.is_empty() {
             return Err(DxtrBoxError::invalid_input("box name cannot be empty"));
         }
         let encryption_key = encryption_key.map(Into::into);
         core::open_box(&name, encryption_key.as_deref()).map_err(DxtrBoxError::from)?;
-        Ok(BoxHandle { name })
+        Ok(BoxHandle {
+            name,
+            closed: false,
+        })
     }
 
     pub fn box_exists(&self, name: &str) -> Result<bool> {
+        core::init(&self.path).map_err(DxtrBoxError::from)?;
         core::box_exists(name).map_err(DxtrBoxError::from)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BoxHandle {
     name: String,
+    closed: bool,
 }
 
 impl BoxHandle {
@@ -129,8 +137,10 @@ impl BoxHandle {
         self.len().map(|len| len == 0)
     }
 
-    pub fn close(&self) -> Result<()> {
-        core::close_box(&self.name).map_err(DxtrBoxError::from)
+    pub fn close(mut self) -> Result<()> {
+        core::close_box(&self.name).map_err(DxtrBoxError::from)?;
+        self.closed = true;
+        Ok(())
     }
 
     pub fn compact(&self) -> Result<bool> {
@@ -138,30 +148,65 @@ impl BoxHandle {
     }
 
     pub fn create_index(&self, name: &str, field: &str) -> Result<()> {
-        if name.is_empty() || field.is_empty() {
-            return Err(DxtrBoxError::invalid_input(
-                "index name and field cannot be empty",
+        #[cfg(not(feature = "full"))]
+        {
+            let _ = (name, field);
+            return Err(DxtrBoxError::unsupported(
+                "full",
+                "persisted indexes require the full profile",
             ));
         }
-        core::create_index(&self.name, name, field).map_err(DxtrBoxError::from)
+
+        #[cfg(feature = "full")]
+        {
+            if name.is_empty() || field.is_empty() {
+                return Err(DxtrBoxError::invalid_input(
+                    "index name and field cannot be empty",
+                ));
+            }
+            core::create_index(&self.name, name, field).map_err(DxtrBoxError::from)
+        }
     }
 
     pub fn list_indexes(&self) -> Result<Vec<IndexDefinition>> {
-        core::list_indexes(&self.name)
-            .map(|definitions| {
-                definitions
-                    .into_iter()
-                    .map(|definition| IndexDefinition {
-                        name: definition.name,
-                        field: definition.field,
-                    })
-                    .collect()
-            })
-            .map_err(DxtrBoxError::from)
+        #[cfg(not(feature = "full"))]
+        {
+            return Err(DxtrBoxError::unsupported(
+                "full",
+                "persisted indexes require the full profile",
+            ));
+        }
+
+        #[cfg(feature = "full")]
+        {
+            core::list_indexes(&self.name)
+                .map(|definitions| {
+                    definitions
+                        .into_iter()
+                        .map(|definition| IndexDefinition {
+                            name: definition.name,
+                            field: definition.field,
+                        })
+                        .collect()
+                })
+                .map_err(DxtrBoxError::from)
+        }
     }
 
     pub fn drop_index(&self, name: &str) -> Result<bool> {
-        core::drop_index(&self.name, name).map_err(DxtrBoxError::from)
+        #[cfg(not(feature = "full"))]
+        {
+            let _ = name;
+            return Err(DxtrBoxError::unsupported(
+                "full",
+                "persisted indexes require the full profile",
+            ));
+        }
+
+        #[cfg(feature = "full")]
+        {
+            core::drop_index(&self.name, name).map_err(DxtrBoxError::from)
+        }
     }
 
     #[cfg(feature = "full")]
@@ -175,6 +220,15 @@ impl BoxHandle {
             "full",
             "native query execution requires the full profile",
         ))
+    }
+}
+
+impl Drop for BoxHandle {
+    fn drop(&mut self) {
+        if !self.closed {
+            let _ = core::close_box(&self.name);
+            self.closed = true;
+        }
     }
 }
 
@@ -287,6 +341,7 @@ pub struct QueryBuilder<'a> {
     sorts: Vec<SortSpec>,
     limit: Option<usize>,
     offset: usize,
+    validation_error: Option<DxtrBoxError>,
 }
 
 #[cfg(feature = "full")]
@@ -298,6 +353,7 @@ impl<'a> QueryBuilder<'a> {
             sorts: Vec::new(),
             limit: None,
             offset: 0,
+            validation_error: None,
         }
     }
 
@@ -313,8 +369,13 @@ impl<'a> QueryBuilder<'a> {
     }
 
     pub fn order_by(mut self, field: impl Into<String>, order: SortOrder) -> Self {
+        let field = field.into();
+        if let Err(message) = validate_field(&field) {
+            self.set_validation_error(message);
+            return self;
+        }
         self.sorts.push(SortSpec {
-            field: field.into(),
+            field,
             direction: match order {
                 SortOrder::Ascending => SortDirection::Ascending,
                 SortOrder::Descending => SortDirection::Descending,
@@ -324,14 +385,13 @@ impl<'a> QueryBuilder<'a> {
         self
     }
 
-    pub fn limit(mut self, limit: usize) -> Result<Self> {
+    pub fn limit(mut self, limit: usize) -> Self {
         if limit == 0 {
-            return Err(DxtrBoxError::invalid_input(
-                "query limit must be greater than 0",
-            ));
+            self.set_validation_error("query limit must be greater than 0");
+        } else {
+            self.limit = Some(limit);
         }
-        self.limit = Some(limit);
-        Ok(self)
+        self
     }
 
     pub fn offset(mut self, offset: usize) -> Self {
@@ -340,6 +400,9 @@ impl<'a> QueryBuilder<'a> {
     }
 
     pub fn find(self) -> Result<Vec<Record>> {
+        if let Some(error) = self.validation_error {
+            return Err(error);
+        }
         let filter = match self.filters.len() {
             0 => {
                 return Err(DxtrBoxError::invalid_input(
@@ -369,6 +432,12 @@ impl<'a> QueryBuilder<'a> {
                     .collect()
             })
             .map_err(DxtrBoxError::from)
+    }
+
+    fn set_validation_error(&mut self, message: impl Into<String>) {
+        if self.validation_error.is_none() {
+            self.validation_error = Some(DxtrBoxError::invalid_input(message));
+        }
     }
 }
 
@@ -426,6 +495,10 @@ impl<'a> FieldPredicateBuilder<'a> {
         value: Option<QueryValue>,
         upper_value: Option<QueryValue>,
     ) -> QueryBuilder<'a> {
+        if let Err(message) = validate_field(&self.field) {
+            self.builder.set_validation_error(message);
+            return self.builder;
+        }
         self.builder.filters.push(Filter::Comparison(Comparison {
             field: self.field,
             op,
