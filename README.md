@@ -4,99 +4,63 @@
 
 **Native local database for Flutter, forged in Rust. By Dxtr.**
 
-A fast, ACID, encrypted, Rust-powered local database for Flutter. No model code generation.
+`dxtr_box` is a Rust/redb-backed local database for Flutter with ACID persistence, authenticated encryption, native queries, persisted indexes, watch streams, migration tooling, and a simple box-style Dart API. No model code generation is required.
 
-> Status: **0.6 Query / Index + Encryption Hardening is complete.** The active milestone is **0.7 Query Ergonomics**. PR #44 adds the first fluent Dart authoring layer over the existing `BoxQuery` AST through `BoxQueryBuilder.where(...)` and collision-free `box.queryWhere(...)`, while preserving legacy `Box.where(predicate)`. Dxtr_Box is not positioned as a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer. The package remains pre-1.0; public API and storage format are not declared stable.
+> Status: **0.7 Query Ergonomics is complete pending closure PR merge.** PR #44 added fluent predicates, PR #45 added sort/pagination/bound `find()`, and PR #46 added optional `BoxField<T>` typed field metadata plus functional API naming. The package remains pre-1.0; public API and storage format are not yet declared stable.
 
-## Key Features
+## Key features
 
-- **Rust/redb ACID storage** — durable native persistence outside the Dart heap.
-- **Simple box-style Flutter API** — asynchronous CRUD without application model code generation.
-- **Fast authoritative reads** — optimized point reads plus one-snapshot `getAll` multi-key reads.
-- **Declarative native queries** — nested field comparisons, boolean groups, pagination, and deterministic sorting.
-- **Fluent query authoring** — 0.7 PR1 adds `queryWhere(...)`, comparisons, boolean chaining, and explicit grouping over the existing query AST.
-- **Persisted secondary indexes** — equality/range candidate narrowing for plaintext boxes plus equality-only encrypted narrowing under `full`.
-- **First-class encryption** — Argon2 key derivation + ChaCha20Poly1305 authenticated encryption.
-- **Encrypted equality tokens** — domain-separated deterministic keyed BLAKE2b MAC tokens; plaintext scalar bytes are not persisted in encrypted index entries.
-- **Transactional bulk operations** — primary records and derived index maintenance commit atomically.
-- **Native watch events** — cross-handle change notifications through Flutter Rust Bridge streams.
-- **Crash/reopen durability coverage** — acknowledged writes are validated across reopen/crash scenarios.
-- **Migration tooling** — explicit plaintext-to-encrypted conversion and optional Hive CE migration support.
-- **Five native platforms** — Android, iOS, macOS, Linux, and Windows consumer validation.
-- **Self-contained Flutter FFI plugin** — Rust/Cargokit/native platform inputs ship with the package.
+- Rust/redb ACID storage outside the Dart heap.
+- Async box-style CRUD and transactional bulk operations.
+- Authoritative optimized point reads and one-snapshot `getAll`.
+- Declarative native queries with nested fields, groups, sort, offset, and limit.
+- Fluent query builder with bound terminal `find()`.
+- Optional `BoxField<T>` typed field-path metadata without schema/codegen/ORM requirements.
+- Persisted plaintext equality/range indexes.
+- Encrypted equality indexes using domain-separated keyed BLAKE2b tokens under `full`.
+- Argon2 + ChaCha20Poly1305 authenticated encryption.
+- Native cross-handle watch events through Flutter Rust Bridge.
+- Explicit plaintext-to-encrypted migration and optional Hive CE migration tooling.
+- Android, iOS, macOS, Linux, and Windows staged consumer validation.
+- Self-contained Flutter FFI plugin topology.
 
 ## Compatibility
 
 ```text
 Dart >= 3.4.0 < 4.0.0
 Flutter >= 3.22.0
+flutter_rust_bridge = 2.8.0
+redb = 2.1.0
+native profiles = minimal | encryption | full
+durable format = dxtr_box/1
 ```
 
-The minimum is verified in CI using Flutter 3.22.0 / Dart 3.4.0.
-
-## Package architecture
-
-`dxtr_box` is a self-contained Flutter FFI plugin. Consumer-required native inputs live in the same package:
-
-```text
-lib/        Dart API + generated FRB bindings
-rust/       Rust crate (native library: rust_lib_dxtr_box)
-cargokit/   Rust/native build integration
-android/
-ios/
-macos/
-linux/
-windows/
-example/
-```
-
-The Flutter package/plugin identity is `dxtr_box`; the Rust crate/library intentionally remains `rust_lib_dxtr_box` to preserve the existing FRB/native loading contract. There is no nested path-dependent native builder package.
-
-## Why
-
-`dxtr_box` is designed as a native local database for Flutter rather than an in-memory-first Dart store. Persistence, transactions, encryption, maintenance, query execution, and native event fan-out live in Rust/redb, while Dart provides the public developer-facing API and value codec.
-
-Design goals include:
-
-- simple asynchronous Flutter ergonomics;
-- `redb` ACID storage, one `{box}.dxtr` file per box;
-- Flutter Rust Bridge v2 boundary;
-- MessagePack dynamic values;
-- Argon2 + ChaCha20Poly1305 encryption;
-- explicit plaintext-to-encrypted migration;
-- optional Hive CE migration/interoperability tooling;
-- native cross-handle `watch()` fan-out;
-- declarative native queries and persisted indexes;
-- Android, iOS, macOS, Linux, Windows first; Web later;
-- no model `build_runner` requirement;
-- bounded native-size regression policy without weakening correctness.
-
-Dart 3.13 recorded-use/native tree shaking remains future-only and must not raise the current SDK floor.
+The minimum SDK floor is validated in CI using Flutter 3.22.0 / Dart 3.4.0.
 
 ## Basic API
 
+Use `BoxStore` as the primary storage facade:
+
 ```dart
-await DxtrBox.init();
-final box = await DxtrBox.open('settings');
+await BoxStore.init();
+final box = await BoxStore.open('settings');
 
 await box.put('theme', 'dark');
 final theme = await box.get('theme');
 
 final selected = await box.getAll(['theme', 'missing', 'theme']);
-// Hits preserve requested order, missing keys are omitted,
-// and duplicate requested keys produce duplicate result entries.
 
 await box.deleteAll(['theme', 'legacy']);
 await box.compact();
 await box.close();
 ```
 
-Native reads remain asynchronous at the public Dart API. Internally, only the tiny single-key Rust `get` and `contains_key` FRB entrypoints use synchronous generated dispatch; batch reads, queries, mutations, scans, and migrations remain asynchronous. `getAll` uses one native crossing and one short-lived redb read snapshot for the requested key set.
+`DxtrBox` remains available only as a deprecated source-compatibility shim. New code and documentation should use `BoxStore`.
 
 ## Encryption
 
 ```dart
-final secure = await DxtrBox.open(
+final secure = await BoxStore.open(
   'secrets',
   encryptionKey: 'correct horse battery staple',
 );
@@ -105,65 +69,70 @@ await secure.put('token', 'secret');
 await secure.close();
 ```
 
-Encrypted boxes require the same key on reopen. Plaintext-to-encrypted conversion is explicit and transactional. Encrypted point, batch, query, and encrypted-index candidate reads retain full AEAD authentication.
+Encrypted boxes require the same key on reopen. Encrypted reads retain full AEAD authentication. Plaintext-to-encrypted conversion is explicit and transactional.
 
-## Hive CE migration
+## Fluent queries
 
-Hive CE support is optional interoperability tooling, not the product identity or API target. Core `dxtr_box` has no runtime dependency on Hive CE. Applications open the source using Hive CE itself and wrap it:
-
-```dart
-final source = HiveCeMigrationSource(
-  name: hiveBox.name,
-  isOpen: () => hiveBox.isOpen,
-  keys: () => hiveBox.keys,
-  get: hiveBox.get,
-);
-
-final result = await migrateFromHiveCe(
-  source,
-  destinationName: 'settings_v2',
-);
-```
-
-Migration preflights converted values, detects converted-key collisions, preserves source data, and writes through one destination `putAll` transaction. A distinct reservation marker prevents concurrent migrations and prevents ordinary `DxtrBox.open(destinationName)` from returning a usable handle while migration owns the target.
-
-Real Hive CE 2.19.3 fixtures are isolated under `tool/hive_ce_migration_fixture/` so they do not raise the root Dart/Flutter minimum. See `docs/HIVE_CE_MIGRATION_03.md`.
-
-## Queries
-
-### Fluent authoring — 0.7 PR1
-
-PR #44 adds a fluent authoring layer that compiles to the same existing `BoxQuery` AST:
+### String-path authoring
 
 ```dart
-final query = box
+final users = await box
     .queryWhere('status').equals('active')
     .and('profile.age').gte(18)
-    .build();
-
-final rows = await box.query(query);
+    .orderBy('name')
+    .offset(10)
+    .limit(20)
+    .find();
 ```
 
-Standalone composition is also available:
+Supported comparisons:
+
+```text
+equals / notEquals
+gt / gte / lt / lte
+between
+isNull / isNotNull
+and / or
+andGroup / orGroup
+```
+
+Mixed `AND` / `OR` chains are left-associative. Use explicit groups when precedence matters.
+
+### Optional typed field metadata
+
+```dart
+const status = BoxField<String>('status');
+const age = BoxField<int>('profile.age');
+const name = BoxField<String>('name');
+
+final users = await box
+    .queryWhereField(status).equals('active')
+    .andField(age).gte(18)
+    .orderByField(name)
+    .limit(20)
+    .find();
+```
+
+`BoxField<T>` is metadata only. It does not register a schema, generate serializers, create indexes, use reflection, or alter storage. String-path APIs remain first-class and may be mixed with typed metadata.
+
+### Standalone AST composition
 
 ```dart
 final query = BoxQueryBuilder
     .where('price').between(100, 500)
     .and('category').equals('camera')
+    .orderBy('price')
+    .limit(20)
     .build();
+
+final rows = await box.query(query);
 ```
 
-PR1 supports `equals`, `notEquals`, `gt`, `gte`, `lt`, `lte`, `between`, `isNull`, `isNotNull`, `and`, `or`, `andGroup`, and `orGroup`.
+Standalone builders intentionally expose `build()` but not `find()` because they do not carry a `Box` execution context.
 
-Mixed `AND` / `OR` chains are left-associative. Use explicit groups when precedence matters.
+### Direct declarative AST
 
-`Box` already exposes the legacy `where(bool Function(dynamic))` predicate-scan method. Dart cannot overload methods, so the fluent box entry point intentionally uses `queryWhere(...)` rather than breaking or dynamically weakening `Box.where(predicate)`.
-
-PR1 intentionally stops at `build()` plus existing `box.query(query)` execution. `orderBy`, `offset`, `limit`, and terminal `find()` ergonomics belong to PR2.
-
-### Direct declarative queries
-
-The direct AST API remains first-class:
+`Box.query(BoxQuery)` remains first-class for advanced or dynamic composition:
 
 ```dart
 final rows = await box.query(
@@ -180,7 +149,7 @@ final rows = await box.query(
         value: 'active',
       ),
     ]),
-    sortBy: const [
+    sortBy: [
       QuerySort(
         field: 'profile.age',
         direction: QuerySortDirection.descending,
@@ -192,25 +161,20 @@ final rows = await box.query(
 );
 ```
 
-Current query guarantees:
+The fluent and typed APIs compile to the same `BoxQuery` / `QueryFilter` AST and execute through the same Rust planner. There is no Dart-side query engine or second wire representation.
 
-- one FRB call per executed declarative query;
+## Query execution guarantees
+
+- one native call per executed declarative query;
 - dotted nested fields;
-- equality/inequality, ordered comparisons, `between`, null checks, AND/OR;
-- exact signed/unsigned integer semantics;
 - deterministic semantic sorting before pagination;
-- record-key ascending final tie-break;
 - one redb read snapshot for planner, primary reads, and sort inputs;
-- plaintext/encrypted scans;
-- plaintext persisted scalar index narrowing for `equal`, `>`, `>=`, `<`, `<=`, and `between` under `full`;
-- encrypted persisted index narrowing for `equal` under `full`;
-- encrypted ordered/range predicates remain scan-backed;
-- multi-index candidate intersection under AND where usable candidates exist;
-- authoritative primary-record re-read and full predicate re-evaluation.
+- plaintext equality/range persisted-index narrowing under `full`;
+- encrypted equality persisted-index narrowing under `full`;
+- encrypted ordered/range predicates remain authoritative scan-backed;
+- authoritative primary-record re-read and full predicate re-evaluation after candidate narrowing.
 
-Persisted indexes narrow `where` candidates only; they do not currently satisfy ORDER BY. Raw MessagePack bytes are not treated as numeric order.
-
-The fluent 0.7 layer is additive and does not introduce a second query engine, second wire AST, or Dart-side post-filtering. See `docs/QUERY_ERGONOMICS_07.md`.
+Persisted indexes narrow `where` candidates only; they do not currently satisfy ORDER BY.
 
 ## Persisted indexes
 
@@ -223,13 +187,31 @@ final indexes = await box.listIndexes();
 final removed = await box.dropIndex('by-age');
 ```
 
-Primary data is authoritative. Index definitions and entries are derived state maintained in the same redb write transaction as primary mutations.
+Primary data is authoritative. Index definitions and entries are derived state maintained transactionally with primary mutations.
 
-For plaintext boxes, persisted scalar indexes support equality and ordered/range narrowing. For encrypted boxes, persisted indexes use deterministic 256-bit BLAKE2b keyed MAC tokens for **equality narrowing only**. Tokens are derived from authenticated box key material and domain-separated by index name and field. Raw plaintext scalar values are not persisted in encrypted index entries.
+Encrypted equality indexes intentionally leak equality classes/frequency for repeated indexed values plus index metadata and record identifiers. They do not persist raw plaintext scalar values or semantic scalar ordering. Encrypted ordered/range predicates stay scan-backed.
 
-Encrypted equality indexing intentionally leaks equality classes/frequency for repeated indexed values, and index metadata still exposes index/field names plus record identifiers. Every candidate is still resolved through the authoritative encrypted primary record, ChaCha20Poly1305 authenticated/decrypted, and fully predicate-rechecked before it can be returned. Encrypted range operators do not treat keyed tokens as order-preserving and continue to use authoritative scan fallback. See `docs/QUERY_INDEX_ENCRYPTION_06.md`.
+See `docs/QUERY_INDEX_ENCRYPTION_06.md` and `docs/ENCRYPTED_RANGE_DECISION_06.md`.
 
-Plaintext-to-encrypted migration still requires persisted plaintext indexes to be dropped before migration; recreate them after opening the encrypted box so derived state is generated using the encrypted equality-index contract.
+## Hive CE migration
+
+Hive CE support is optional interoperability tooling, not the product identity or API target. Core `dxtr_box` has no runtime dependency on Hive CE.
+
+```dart
+final source = HiveCeMigrationSource(
+  name: hiveBox.name,
+  isOpen: () => hiveBox.isOpen,
+  keys: () => hiveBox.keys,
+  get: hiveBox.get,
+);
+
+final result = await migrateFromHiveCe(
+  source,
+  destinationName: 'settings_v2',
+);
+```
+
+Migration preflights converted values, detects converted-key collisions, preserves source data, and writes through one destination transaction.
 
 ## Native feature profiles
 
@@ -241,191 +223,57 @@ Exactly three Rust capability profiles are supported:
 | `encryption` | `--no-default-features --features encryption` | minimal + encrypted create/open/read/write |
 | `full` | default | encryption + maintenance + query/index implementation |
 
-`full` remains the default production build. Do not add a fourth product profile merely for binary-size tuning.
+Do not add a fourth profile merely for binary-size tuning.
 
-## Native-size hardening
-
-0.4 adds a controlled cross-commit gate. Base and head commits are built from committed snapshots on the same Linux x64 runner/toolchain and compared independently for all three profiles.
+## Package architecture
 
 ```text
-allowed_growth = max(65,536 bytes, 3% of base artifact)
+lib/        Dart API + generated FRB bindings
+rust/       Rust crate / native library: rust_lib_dxtr_box
+cargokit/   native build integration
+android/
+ios/
+macos/
+linux/
+windows/
+example/
 ```
 
-PR2's encrypted equality-index implementation reuses BLAKE2 already present through Argon2 rather than adding a second heavy hash dependency. The validated Linux x64 full-profile artifact moved from 2,385,720 to 2,416,152 bytes: +30,432 bytes / +1.276%, within policy.
+The package identity `dxtr_box`, native library identity `rust_lib_dxtr_box`, `.dxtr` files, durable marker `dxtr_box/1`, and existing `@dxtr:*` wire tags are compatibility identities and intentionally retain the brand string.
 
-The budget is a regression alarm, not routine allowance. See `docs/NATIVE_SIZE_POLICY_04.md`.
+Ordinary API/domain symbols use functional names such as `Box`, `BoxStore`, `BoxCodec`, `NativeBoxApi`, `BoxQueryBuilder`, and `BoxField`.
 
-## Package / pub.dev readiness
+## CI and validation
 
-The package is validated before any future publication:
+The merge quality bar covers:
 
-```bash
-make package-readiness
-```
+- format/analyze/tests;
+- Flutter 3.22 / Dart 3.4 minimum compatibility;
+- exact `minimal | encryption | full` Rust profiles;
+- native integration;
+- migration/query/index/crash-reopen regressions;
+- generated FRB reproducibility;
+- native-size regression policy;
+- package/pub dry-run;
+- benchmark correctness smoke;
+- Android/iOS/macOS/Linux/Windows staged consumers.
 
-This runs public API documentation generation and `dart pub publish --dry-run --ignore-warnings`. CI also checks that consumer-required Rust/Cargokit/platform files are present and that no publishable dependency uses a path source.
-
-`flutter_rust_bridge` remains pinned to 2.8.0 because checked-in generated bindings and native runtime must remain on the same FRB version; the pub dry-run therefore ignores the advisory broad-dependency warning while still failing validation errors.
-
-No package is automatically published by CI or by the hardening/performance milestones. See `docs/PACKAGE_RELEASE_04.md`.
-
-## Published-payload consumer validation
-
-PH-04 adds a stronger native package-boundary proof. `tool/validate_published_consumer.dart` stages the files allowed by the current `.pubignore`, verifies required native inputs and absence of repository-only leakage, creates a fresh Flutter app, adds only the staged `dxtr_box` copy as a dependency, imports the public API, and builds the app.
-
-The main CI DAG validates all five native targets before merge when consumer/native behavior can be affected:
-
-```bash
-make published-consumer-android
-make published-consumer-ios
-make published-consumer-macos
-make published-consumer-linux
-make published-consumer-windows
-```
-
-During Draft iteration, platform-specific changes can validate only the affected platform after Fast CI; common native/plugin/package changes still fan out as required. The staging helper fails closed if `.pubignore` starts using wildcard/negation rules it does not model exactly. `dart pub publish --dry-run` remains the source of truth for pub validation and intended file listing. See `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md` and `docs/CI_STRATEGY.md`.
-
-## Public API + durable storage contract guard
-
-PH-05 adds fail-fast compatibility change control without claiming pre-1.0 stability.
-
-```bash
-dart run tool/verify_public_storage_contract.dart
-```
-
-The normal Flutter test suite also runs this contract. It verifies the package entrypoint export set, compiles representative public constructors/enums/typedefs and typed `Box`/`DxtrBox`/migration signatures, and guards the current durable metadata identity:
-
-```text
-meta key: format_version
-value:    dxtr_box/1
-```
-
-A deliberate 0.x API change is allowed only with an intentional contract/doc update. A future storage-format change must include backward-read or migration behavior plus compatibility evidence rather than merely updating the marker. PH-05 completed in PR #31. See `docs/PUBLIC_API_STORAGE_CONTRACT_04.md`.
-
-## Local database comparison
-
-PH-03 broadens benchmark evidence beyond a single peer. The current matrix runs `dxtr_box`, Hive CE, Sembast, and SQLite through `sqflite_common_ffi`.
-
-Correctness and timing are intentionally separate:
-
-```bash
-make benchmark-comparison-correctness
-make benchmark-comparison
-```
-
-The correctness gate verifies a shared CRUD/overwrite/delete/close/reopen workload converges to the same persisted snapshot across all four engines. The diagnostic matrix measures sequential put, batch put, point get, contains, delete-all, and reopen-read, but **does not assert that any engine must be faster than another**.
-
-`Box.getAll` is intentionally not forced into that four-engine matrix because the other adapters do not expose an equivalent contract with identical order/missing/duplicate semantics. Its evidence comes from the dedicated dxtr_box batch benchmark instead.
-
-CI uploads machine-readable JSONL evidence as the `local-database-comparison` artifact. Hosted-runner timing is diagnostic only and must not be presented as stable product performance. See `docs/LOCAL_DATABASE_COMPARISON_04.md` and `docs/PERFORMANCE_05_CLOSURE_AUDIT.md`.
-
-## Query/index diagnostic benchmark
-
-Use the dedicated matrix for query/index engineering evidence:
-
-```bash
-make benchmark-query-index
-```
-
-The harness covers plaintext scan/index equality, range, AND intersection, and sorted-range scenarios plus encrypted equality scan versus encrypted equality-index narrowing. Timing is diagnostic only; correctness, authenticated primary recheck, durability, and the encrypted-index security contract are the hard gates.
-
-## Fast local preflight
-
-Run this before pushing:
-
-```bash
-make preflight
-```
-
-It mirrors the mandatory Fast CI gate and catches common cheap failures first: Dart formatting, rustfmt, Flutter analyze, Rust clippy, compile checks for `minimal`/`encryption`/`full`, cheap Dart/Rust tests, and public/storage contract guards.
-
-Individual targets are also available:
-
-```bash
-make format-check
-make rust-check
-make analyze
-make test-fast
-make ci-fast
-```
-
-Expensive migration/native-size/FRB/publication/platform/benchmark validation remains change-aware during Draft iteration and becomes mandatory full validation when a pull request is Ready for review. See `docs/CI_STRATEGY.md`.
-
-### Pre-push formatting guard
-
-PR #44 includes a lightweight Git hook to keep formatting-only failures local while retaining CI as the source of truth.
-
-Install once per clone:
+Install the repository pre-push formatting hook once per clone:
 
 ```bash
 bash tool/install_git_hooks.sh
 ```
 
-The installer sets `core.hooksPath` to `.githooks`. The tracked `.githooks/pre-push` file is executable (`100755`). On push it requires a clean worktree/index, runs `make format`, and stops the push if formatting changes tracked files so those changes can be reviewed and committed first.
+## Documentation
 
-The hook never auto-adds, auto-commits, or discards changes. CI `format-check` remains mandatory because hooks can be bypassed.
+- `docs/QUERY_ERGONOMICS_07.md` — 0.7 fluent/typed query design.
+- `docs/RELEASE_AUDIT_07.md` — 0.7 closure and API equivalence matrix.
+- `docs/PROJECT_HANDOFF.md` — current project state and next milestone.
+- `docs/CODE_WALKTHROUGH.md` — current runtime/API execution paths.
+- `docs/QUERY_INDEX_ENCRYPTION_06.md` — encrypted index contract.
 
-## Developer workflow
+## Direction after 0.7
 
-Common root targets:
+The next planned milestone is **0.8 Rust-native API / Multi-frontend Foundation**: a first-class Rust frontend and the existing Dart frontend over one shared authoritative Rust storage core. GPUI may consume the Rust frontend later, but is not a dependency of Dxtr_Box.
 
-```bash
-make preflight
-make package-readiness
-dart run tool/verify_public_storage_contract.dart
-make dart-doc
-make pub-dry-run
-make frb-generate
-make native-test
-make hive-ce-migration-test
-make query-index-test
-make query-sort-test
-make process-crash
-make benchmark-smoke
-make benchmark-comparison-correctness
-make benchmark-comparison
-make benchmark-query-index
-make diagnose-point-read
-make benchmark-read-path
-make benchmark-batch-read
-make rust-check
-make native-size-baseline
-make native-size-stability
-make native-size-regression
-make published-consumer-linux
-```
-
-The original example build targets remain available for local documentation/example validation:
-
-```bash
-make example-android
-make example-ios
-make example-macos
-make example-linux
-make example-windows
-```
-
-## Engineering docs
-
-- `docs/PROJECT_HANDOFF.md` — current milestone state and sequencing.
-- `docs/CODE_WALKTHROUGH.md` — Dart -> FRB -> Rust -> redb architecture and CI DAG.
-- `docs/QUERY_INDEX_ENCRYPTION_06.md` — completed 0.6 encrypted-index threat model and runtime/security contract.
-- `docs/ENCRYPTED_RANGE_DECISION_06.md` — rationale for scan-backed encrypted ordered/range predicates.
-- `docs/RELEASE_AUDIT_06.md` — final 0.6 acceptance/closure matrix.
-- `docs/QUERY_ERGONOMICS_07.md` — active additive fluent-query milestone over the existing `BoxQuery` AST.
-- `docs/PERFORMANCE_READ_PATH_05.md` — 0.5 read-path measurements and production decisions.
-- `docs/READ_SESSION_INVESTIGATION_05.md` — evidence-backed read-session decision.
-- `docs/PERFORMANCE_05_CLOSURE_AUDIT.md` — final 0.5 acceptance audit.
-- `docs/CI_STRATEGY.md` — Fast CI, affected CI, full merge validation, and trigger policy.
-- `docs/PACKAGE_RELEASE_04.md` — self-contained plugin and publication-readiness contract.
-- `docs/PUBLISHED_PAYLOAD_CONSUMER_04.md` — PH-04 staged publication-boundary consumer build contract.
-- `docs/PUBLIC_API_STORAGE_CONTRACT_04.md` — PH-05 public API and durable-format change-control contract.
-- `docs/NATIVE_SIZE_POLICY_04.md` — controlled native-size regression policy.
-- `docs/LOCAL_DATABASE_COMPARISON_04.md` — PH-03 correctness + diagnostic comparison contract.
-- `docs/QUERY_INDEX_03.md` — query/index semantics and planner constraints.
-- `docs/HIVE_CE_MIGRATION_03.md` — optional Hive CE migration contract and failure behavior.
-- `docs/HIVE_FUNCTIONAL_PARITY.md` — historical compatibility inventory only; not the product direction or a 1.0 release gate.
-
-## 1.0 direction
-
-A 1.0 release should represent a coherent, production-ready native local database contract: durable storage, simple public API, query/index behavior, encryption semantics, migration compatibility, and five-platform packaging. It is not defined by Hive/Hive CE feature parity.
+See `docs/PROJECT_HANDOFF.md` for the guarded 0.8 plan.
