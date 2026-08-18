@@ -1,5 +1,6 @@
 pub mod api;
 mod codec;
+mod core;
 #[cfg(feature = "encryption")]
 pub mod crypto;
 // The minimal/encryption-only profiles compile mutation paths without the
