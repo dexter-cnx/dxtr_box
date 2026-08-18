@@ -304,10 +304,10 @@ abstract final class DxtrBox {
     String? encryptionKey,
     bool lazy = false,
   }) => BoxStore.open(
-        name,
-        encryptionKey: encryptionKey,
-        lazy: lazy,
-      );
+    name,
+    encryptionKey: encryptionKey,
+    lazy: lazy,
+  );
 
   static Future<void> deleteBox(String name) => BoxStore.deleteBox(name);
 
