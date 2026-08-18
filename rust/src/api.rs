@@ -4,9 +4,9 @@ use flutter_rust_bridge::frb;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 
-use crate::{core, frb_generated::StreamSink};
 #[cfg(feature = "full")]
 use crate::query;
+use crate::{core, frb_generated::StreamSink};
 
 #[derive(Clone)]
 pub enum NativeBoxEventType {
@@ -234,8 +234,7 @@ pub fn scan_query(
     #[cfg(feature = "full")]
     {
         let spec = query::decode_query(&query_payload)?;
-        core::query(&box_name, &spec)
-            .map(|records| records.into_iter().map(Into::into).collect())
+        core::query(&box_name, &spec).map(|records| records.into_iter().map(Into::into).collect())
     }
 
     #[cfg(not(feature = "full"))]
