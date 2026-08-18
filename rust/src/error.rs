@@ -27,6 +27,7 @@ impl DxtrBoxError {
         }
     }
 
+    #[cfg(not(feature = "full"))]
     pub(crate) fn unsupported(feature: &'static str, message: impl Into<String>) -> Self {
         Self::UnsupportedFeature {
             feature,
