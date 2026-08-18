@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make common Dxtr_Box queries substantially easier to read and write without replacing the existing query engine, changing durable storage, or turning Dxtr_Box into an ORM/schema framework.
+Make common queries substantially easier to read and write without replacing the existing query engine, changing durable storage, or turning Dxtr_Box into an ORM/schema framework.
 
 The fluent API remains an additive Dart-side authoring layer over the existing `BoxQuery` AST:
 
@@ -26,9 +26,11 @@ existing Rust planner + indexes + authoritative record checks
 ```text
 PR1 — fluent queryWhere/comparison/AND/OR/grouping builder: merged (#44)
 PR2 — orderBy/offset/limit/find ergonomics: merged (#45)
-PR3 — optional BoxField<T> typed field metadata: active
-PR4 — README/examples/API equivalence/compatibility closure
+PR3 — optional BoxField<T> typed field metadata + functional API naming: merged (#46)
+PR4 — README/examples/API equivalence/compatibility closure: current
 ```
+
+0.7 is complete when PR4 merges with the repository full quality bar green.
 
 ## Entry-point compatibility decision
 
@@ -115,7 +117,7 @@ Standalone `BoxQueryBuilder` remains a pure AST builder and therefore exposes `b
 
 ## PR3 — optional typed field metadata
 
-PR3 adds `BoxField<T>` as opt-in reusable Dart metadata for a field path:
+PR #46 adds `BoxField<T>` as opt-in reusable Dart metadata for a field path:
 
 ```dart
 const status = BoxField<String>('status');
@@ -162,31 +164,45 @@ final query = status
 
 The value type carried by `BoxField<T>` is enforced by Dart at the fluent authoring boundary. Every typed method then delegates to the existing untyped builder, so generated query objects remain structurally equivalent to direct `BoxQuery` construction.
 
-String paths remain first-class and may be mixed with typed metadata. PR3 deliberately does not change the existing `where(String)`, `queryWhere(String)`, `and(String)`, `or(String)`, or `orderBy(String)` signatures because doing so would weaken their compile-time contracts.
+String paths remain first-class and may be mixed with typed metadata.
 
-### Naming policy
+## Functional naming policy
 
-`dxtr_box` is the package/product identity. Public and internal code symbols should use domain/functional names rather than carrying the `Dxtr` brand prefix when it adds no semantic value. Examples include `BoxField`, `BoxCodec`, `NativeBoxApi`, and a functional storage facade name rather than brand-prefixed domain types.
+`dxtr_box` is the package/product identity. Public and internal code symbols use domain/functional names rather than carrying the `Dxtr` brand prefix when it adds no semantic value.
 
-Brand-bearing strings remain appropriate where they are compatibility or package identity, including `dxtr_box`, native library/crate identity, durable format markers such as `dxtr_box/1`, existing `@dxtr:*` wire tags, and `.dxtr` storage markers. Those identifiers must not be renamed casually because they participate in packaging or durable compatibility.
+Primary names after PR #46 include:
 
-### PR3 invariants
+```text
+BoxStore
+BoxCodec
+NativeBoxApi
+FrbNativeBoxApi
+UnavailableNativeBoxApi
+BoxStoreMigrationInternals
+BoxField<T>
+```
 
-PR3 must not introduce:
+`DxtrBox` is retained as a deprecated source-compatibility shim. Brand-bearing strings remain appropriate where they are durable/package identity, including `dxtr_box`, `rust_lib_dxtr_box`, `dxtr_box/1`, `.dxtr`, and existing `@dxtr:*` wire tags.
 
-- mandatory schema registration;
-- model/entity generation;
-- code generation;
-- runtime reflection;
-- automatic index creation;
-- Dart-side filtering or sorting;
-- a second query AST;
-- FRB changes;
-- Rust query-engine changes;
-- storage-format changes;
-- native-profile changes.
+## API equivalence contract
 
-Malformed dotted paths continue to fail through the same existing `QueryComparison` / `QuerySort` validation when the typed field is used.
+All supported authoring paths converge onto the same query representation:
+
+```text
+manual BoxQuery -------------------------┐
+BoxQueryBuilder.where(String) -----------+
+box.queryWhere(String) ------------------+--> BoxQuery / QueryFilter
+BoxField<T>.where() ---------------------+
+box.queryWhereField(BoxField<T>) --------┘
+                                                |
+                                                v
+                                      existing serialization / FRB
+                                                |
+                                                v
+                                      existing Rust planner/indexes
+```
+
+The closure matrix in `docs/RELEASE_AUDIT_07.md` records the compatibility expectations for string paths, typed metadata, direct AST construction, bound execution, legacy predicate scans, and deprecated facade aliases.
 
 ## Correctness contract
 
@@ -218,38 +234,3 @@ Do not add in 0.7 without a separate product decision:
 - automatic index creation hidden inside fluent query calls;
 - index-backed ORDER BY;
 - encrypted order-revealing persisted indexes.
-
-## Compatibility rules
-
-0.7 query ergonomics must preserve:
-
-- legacy `Box.where(bool Function(dynamic))` compatibility behavior;
-- string-path query authoring as first-class API;
-- `Box.query(BoxQuery)` as the canonical advanced query API;
-- the existing native query execution path;
-- one native query crossing per executed query;
-- authoritative primary-record re-read and full predicate re-evaluation;
-- deterministic sort-before-pagination semantics;
-- `dxtr_box/1` storage compatibility;
-- Dart >= 3.4 / Flutter >= 3.22;
-- exactly `minimal | encryption | full` native profiles;
-- FRB 2.8.0 and redb 2.1.0 unless separately reprioritized.
-
-## Acceptance criteria
-
-PR1 and PR2 are complete in merged PRs #44 and #45.
-
-PR3 requires:
-
-1. `BoxField<T>` is optional reusable typed metadata over the existing field path;
-2. typed equality/range comparison values are checked by Dart at authoring time;
-3. typed AND/OR continuation and typed sorting remain available without replacing string APIs;
-4. a typed box-bound entry point retains terminal `find()`;
-5. explicit groups can start/continue with typed fields;
-6. typed and manual/string forms compile to the same existing `BoxQuery` AST semantics;
-7. no schema registry, codegen, ORM, reflection, or hidden index behavior is introduced;
-8. no Rust/FRB/storage-format/native-profile change is introduced.
-
-PR4 owns final README/examples/API-equivalence/compatibility closure and publication-level documentation sync.
-
-The intended 0.7 outcome is a compact native local database with easier box-style query ergonomics, not a larger ORM or application framework.

@@ -14,7 +14,7 @@ class DxtrBoxExample extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
-        appBar: AppBar(title: const Text('dxtr_box 0.4 preview')),
+        appBar: AppBar(title: const Text('dxtr_box 0.7')),
         body: Center(
           child: FilledButton(
             onPressed: () async {

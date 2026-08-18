@@ -1,3 +1,17 @@
+## 0.7.0-dev.1
+
+- Added fluent query authoring over the existing `BoxQuery` / `QueryFilter` AST with `BoxQueryBuilder.where(...)` and collision-free `box.queryWhere(...)` while preserving legacy `Box.where(predicate)`.
+- Added fluent equality/inequality, ordered comparisons, `between`, null checks, boolean chaining, and explicit groups with left-associative mixed `AND` / `OR` semantics.
+- Added `orderBy`, `offset`, `limit`, and bound terminal `find()` ergonomics. Standalone builders remain AST-only and intentionally expose `build()` but not `find()`.
+- Added optional `BoxField<T>` typed field-path metadata, including `queryWhereField`, `andField`, `orField`, `orderByField`, and typed fields inside explicit groups. Typed metadata remains schema-free and codegen-free.
+- Kept string-path query APIs first-class and verified typed/string/direct-AST paths compile to the same existing query representation and Rust execution path.
+- Introduced functional primary API names including `BoxStore`, `BoxCodec`, `NativeBoxApi`, `FrbNativeBoxApi`, `UnavailableNativeBoxApi`, and `BoxStoreMigrationInternals`.
+- Retained `DxtrBox`, `DxtrCodec`, and old native seam names only where source compatibility requires deprecated shims; new examples/documentation use functional names.
+- Preserved package/durable identities including `dxtr_box`, `rust_lib_dxtr_box`, `.dxtr`, `dxtr_box/1`, and existing `@dxtr:*` durable wire tags.
+- Preserved the existing Rust planner, persisted-index behavior, encrypted equality-index contract, encrypted range scan fallback, direct `Box.query(BoxQuery)` API, and authoritative primary-record rechecks.
+- Preserved Dart >=3.4 / Flutter >=3.22, flutter_rust_bridge 2.8.0, redb 2.1.0, and exactly `minimal | encryption | full` native profiles.
+- Added 0.7 release/compatibility closure documentation and kept the next Rust-native multi-frontend architecture milestone deferred until 0.7 is merged cleanly.
+
 ## 0.6.0-dev.1
 
 - Repositioned Dxtr_Box clearly as its own native local database for Flutter rather than a Hive/Hive CE replacement; Hive CE remains an optional migration source, compatibility reference, and benchmark peer.
