@@ -48,22 +48,31 @@ PR4    — README/examples/API equivalence/compatibility closure (current)
 Normative design: `docs/QUERY_ERGONOMICS_07.md`.
 Closure record: `docs/RELEASE_AUDIT_07.md`.
 
-## Primary Dart API after 0.7
+## Public Dart API after 0.7
 
-Use functional names for ordinary API/domain symbols:
+Consumers importing only `package:dxtr_box/dxtr_box.dart` should use the exported public surface:
 
 ```text
 Box
 BoxStore
-BoxCodec
 BoxQuery
 BoxQueryBuilder
 BoxField<T>
+```
+
+`DxtrBox` remains exported only as a deprecated source-compatibility shim that forwards callers to `BoxStore`.
+
+The following functional names are implementation seams, not primary consumer API, and must not be presented as barrel-exported types:
+
+```text
+BoxCodec
 NativeBoxApi
 FrbNativeBoxApi
 UnavailableNativeBoxApi
 BoxStoreMigrationInternals
 ```
+
+They live under `lib/src/` for package implementation, tests, adapters, or migration internals. Application consumers should not depend on unsupported `src/` imports.
 
 Package/durable identities intentionally retain the product string:
 
@@ -75,7 +84,7 @@ dxtr_box/1
 @dxtr:* durable wire tags
 ```
 
-`DxtrBox` remains a deprecated source-compatibility shim. Old codec/native seam names remain only where compatibility requires them. New implementation, examples, and documentation should use functional names.
+Old codec/native seam names remain only where compatibility requires them internally. New implementation and internal documentation should prefer functional names without implying that internal seams are part of the public barrel.
 
 ## 0.7 query authoring contract
 
