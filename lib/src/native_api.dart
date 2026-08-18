@@ -369,3 +369,13 @@ final class UnavailableNativeBoxApi
   @override
   Future<int> length(String boxName) async => _missing();
 }
+
+/// Legacy package-internal compatibility aliases. New code uses the Box names.
+@Deprecated('Use NativeBoxApi instead.')
+typedef NativeDxtrApi = NativeBoxApi;
+
+@Deprecated('Use FrbNativeBoxApi instead.')
+typedef FrbNativeDxtrApi = FrbNativeBoxApi;
+
+@Deprecated('Use UnavailableNativeBoxApi instead.')
+typedef UnavailableNativeDxtrApi = UnavailableNativeBoxApi;
