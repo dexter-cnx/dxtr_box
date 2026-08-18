@@ -91,7 +91,7 @@ void main() {
           value: 18,
           upperValue: 65,
         ),
-        sortBy: const <QuerySort>[
+        sortBy: <QuerySort>[
           QuerySort(field: 'name'),
         ],
         offset: 2,
