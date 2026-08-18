@@ -1,0 +1,22 @@
+name: Format Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/0.7-pr3-typed-field-metadata
+
+jobs:
+  dart-format-diff:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Show formatter canonical diff
+        shell: bash
+        run: |
+          dart --version
+          dart format lib/src/dxtr_box.dart
+          git --no-pager diff -- lib/src/dxtr_box.dart
