@@ -17,9 +17,28 @@ abstract final class BoxStore {
   static final Random _watcherRandom = Random.secure();
 
   static const Set<String> _windowsReservedNames = <String>{
-    'CON', 'PRN', 'AUX', 'NUL',
-    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'LPT1',
+    'LPT2',
+    'LPT3',
+    'LPT4',
+    'LPT5',
+    'LPT6',
+    'LPT7',
+    'LPT8',
+    'LPT9',
   };
 
   static final RegExp _unsafeWindowsNameCharacters = RegExp(
@@ -40,7 +59,8 @@ abstract final class BoxStore {
   static Future<void> init({String? path}) async {
     final resolvedPath = p.normalize(
       p.absolute(
-        path ?? p.join((await getApplicationSupportDirectory()).path, 'dxtr_box'),
+        path ??
+            p.join((await getApplicationSupportDirectory()).path, 'dxtr_box'),
       ),
     );
 
@@ -269,7 +289,9 @@ abstract final class BoxStoreMigrationInternals {
 }
 
 /// Legacy compatibility shim. New code should use [BoxStore].
-@Deprecated('Use BoxStore instead. The Dxtr prefix is retained only for source compatibility.')
+@Deprecated(
+  'Use BoxStore instead. The Dxtr prefix is retained only for source compatibility.',
+)
 abstract final class DxtrBox {
   static bool get isInitialized => BoxStore.isInitialized;
 
