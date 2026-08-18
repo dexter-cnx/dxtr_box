@@ -50,8 +50,8 @@ Future<HiveCeMigrationResult> migrateFromHiveCe(
   HiveCeValueConverter? valueConverter,
   HiveCeKeyConverter? keyConverter,
 }) async {
-  if (!DxtrBox.isInitialized) {
-    throw StateError('Call DxtrBox.init() before migrating a Hive CE box.');
+  if (!BoxStore.isInitialized) {
+    throw StateError('Call BoxStore.init() before migrating a Hive CE box.');
   }
   if (!source.isOpen) {
     throw StateError('Hive CE source box "${source.name}" must be open.');
@@ -70,11 +70,11 @@ Future<HiveCeMigrationResult> migrateFromHiveCe(
       source.get(sourceKey),
       valueConverter,
     );
-    DxtrCodec.encode(normalized);
+    BoxCodec.encode(normalized);
     prepared[destinationKey] = normalized;
   }
 
-  final destination = await DxtrBoxMigrationInternals.openNew(
+  final destination = await BoxStoreMigrationInternals.openNew(
     destinationName,
     encryptionKey: destinationEncryptionKey,
   );
@@ -87,10 +87,10 @@ Future<HiveCeMigrationResult> migrateFromHiveCe(
     if (!destinationClosed) {
       await destination.close();
     }
-    await DxtrBox.deleteBox(destinationName);
+    await BoxStore.deleteBox(destinationName);
     rethrow;
   } finally {
-    await DxtrBoxMigrationInternals.releaseReservation(destinationName);
+    await BoxStoreMigrationInternals.releaseReservation(destinationName);
   }
 
   return HiveCeMigrationResult(

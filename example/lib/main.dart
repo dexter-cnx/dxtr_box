@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await DxtrBox.init();
+  await BoxStore.init();
   runApp(const DxtrBoxExample());
 }
 
@@ -18,7 +18,7 @@ class DxtrBoxExample extends StatelessWidget {
         body: Center(
           child: FilledButton(
             onPressed: () async {
-              final box = await DxtrBox.open('demo');
+              final box = await BoxStore.open('demo');
               try {
                 await box.put('settings', <String, dynamic>{
                   'theme': 'dark',

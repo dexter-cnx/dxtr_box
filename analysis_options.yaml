@@ -10,6 +10,8 @@ analyzer:
     - benchmark/**
     - tool/hive_ce_migration_fixture/**
     - cargokit/**
+  errors:
+    deprecated_member_use_from_same_package: ignore
 include: package:flutter_lints/flutter.yaml
 
 linter:

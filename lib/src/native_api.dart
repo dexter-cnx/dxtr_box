@@ -41,7 +41,7 @@ final class NativeIndexDefinition {
 }
 
 /// Small seam over generated flutter_rust_bridge symbols.
-abstract interface class NativeDxtrApi {
+abstract interface class NativeBoxApi {
   Future<void> initDb(String path);
   Future<void> openBox(String name, {String? encryptionKey});
   Future<void> closeBox(String name);
@@ -85,14 +85,14 @@ abstract interface class NativeEncryptionMigrationApi {
 }
 
 /// Production adapter backed by generated flutter_rust_bridge bindings.
-final class FrbNativeDxtrApi
+final class FrbNativeBoxApi
     implements
-        NativeDxtrApi,
+        NativeBoxApi,
         NativeBatchReadApi,
         NativeQueryApi,
         NativeIndexApi,
         NativeEncryptionMigrationApi {
-  const FrbNativeDxtrApi();
+  const FrbNativeBoxApi();
 
   static Future<void>? _initializing;
 
@@ -299,9 +299,9 @@ final class FrbNativeDxtrApi
 }
 
 /// Test/failure adapter retained so callers can explicitly disable native IO.
-final class UnavailableNativeDxtrApi
-    implements NativeDxtrApi, NativeEncryptionMigrationApi {
-  const UnavailableNativeDxtrApi();
+final class UnavailableNativeBoxApi
+    implements NativeBoxApi, NativeEncryptionMigrationApi {
+  const UnavailableNativeBoxApi();
 
   Never _missing() =>
       throw StateError('dxtr_box Rust bindings are unavailable.');
@@ -369,3 +369,13 @@ final class UnavailableNativeDxtrApi
   @override
   Future<int> length(String boxName) async => _missing();
 }
+
+/// Legacy package-internal compatibility aliases. New code uses the Box names.
+@Deprecated('Use NativeBoxApi instead.')
+typedef NativeDxtrApi = NativeBoxApi;
+
+@Deprecated('Use FrbNativeBoxApi instead.')
+typedef FrbNativeDxtrApi = FrbNativeBoxApi;
+
+@Deprecated('Use UnavailableNativeBoxApi instead.')
+typedef UnavailableNativeDxtrApi = UnavailableNativeBoxApi;

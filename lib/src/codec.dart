@@ -5,7 +5,7 @@ import 'package:msgpack_dart/msgpack_dart.dart' as msgpack;
 /// Stable package-internal wire format.
 ///
 /// Tagged values preserve Dart types that MessagePack does not model directly.
-abstract final class DxtrCodec {
+abstract final class BoxCodec {
   static Uint8List encode(dynamic value) {
     final normalized = _toWire(value);
     return Uint8List.fromList(msgpack.serialize(normalized));
@@ -78,4 +78,12 @@ abstract final class DxtrCodec {
         return value;
     }
   }
+}
+
+/// Legacy package-internal compatibility shim. New code uses [BoxCodec].
+@Deprecated('Use BoxCodec instead.')
+abstract final class DxtrCodec {
+  static Uint8List encode(dynamic value) => BoxCodec.encode(value);
+
+  static dynamic decode(List<int> bytes) => BoxCodec.decode(bytes);
 }

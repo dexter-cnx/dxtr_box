@@ -14,7 +14,7 @@ final class Box {
   Box.internal({
     required this.name,
     required String watcherId,
-    required NativeDxtrApi api,
+    required NativeBoxApi api,
     required BoxMetadata metadata,
     required void Function() onClose,
   })  : _watcherId = watcherId,
@@ -24,7 +24,7 @@ final class Box {
 
   final String name;
   final String _watcherId;
-  final NativeDxtrApi _api;
+  final NativeBoxApi _api;
   final BoxMetadata _metadata;
   final void Function() _onClose;
   final StreamController<BoxEvent> _events =
@@ -95,7 +95,7 @@ final class Box {
   Future<void> put(String key, dynamic value) async {
     _ensureOpen();
     _validateKey(key);
-    await _api.put(name, key, DxtrCodec.encode(value));
+    await _api.put(name, key, BoxCodec.encode(value));
     if (!_metadata.keys.contains(key)) {
       _metadata.keys = List<String>.unmodifiable(<String>[
         ..._metadata.keys,
@@ -109,7 +109,7 @@ final class Box {
     final encoded = <String, Uint8List>{};
     for (final entry in entries.entries) {
       _validateKey(entry.key);
-      encoded[entry.key] = DxtrCodec.encode(entry.value);
+      encoded[entry.key] = BoxCodec.encode(entry.value);
     }
     await _api.putAll(name, encoded);
     final set = <String>{..._metadata.keys, ...entries.keys};
@@ -120,7 +120,7 @@ final class Box {
     _ensureOpen();
     _validateKey(key);
     final bytes = await _api.get(name, key);
-    return bytes == null ? defaultValue : DxtrCodec.decode(bytes);
+    return bytes == null ? defaultValue : BoxCodec.decode(bytes);
   }
 
   Future<bool> containsKey(String key) async {
@@ -154,7 +154,7 @@ final class Box {
         .map(
           (record) => MapEntry<String, dynamic>(
             record.key,
-            DxtrCodec.decode(record.value),
+            BoxCodec.decode(record.value),
           ),
         )
         .toList(growable: false);
@@ -209,13 +209,13 @@ final class Box {
     final queryApi = _api as NativeQueryApi;
     final records = await queryApi.scanQuery(
       name,
-      DxtrCodec.encode(_queryWire(query)),
+      BoxCodec.encode(_queryWire(query)),
     );
     return records
         .map(
           (record) => MapEntry<String, dynamic>(
             record.key,
-            DxtrCodec.decode(record.value),
+            BoxCodec.decode(record.value),
           ),
         )
         .toList(growable: false);
@@ -335,7 +335,7 @@ final class Box {
             boxName: name,
             type: BoxEventType.put,
             key: key,
-            value: DxtrCodec.decode(bytes),
+            value: BoxCodec.decode(bytes),
           ),
         );
       case NativeWatchEventType.delete:

@@ -3,10 +3,11 @@ import 'dart:io';
 const _expectedExports = <String>{
   "export 'src/box.dart';",
   "export 'src/box_event.dart';",
-  "export 'src/dxtr_box.dart' show DxtrBox;",
+  "export 'src/dxtr_box.dart' show BoxStore, DxtrBox;",
   "export 'src/hive_ce_migration.dart';",
   "export 'src/query.dart';",
   "export 'src/query_builder.dart';",
+  "export 'src/query_field.dart';",
 };
 
 const _storageFormatMarker = 'dxtr_box/1';
