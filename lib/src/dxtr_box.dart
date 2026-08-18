@@ -7,8 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import 'box.dart';
 import 'native_api.dart';
 
-abstract final class DxtrBox {
-  static NativeDxtrApi _api = const FrbNativeDxtrApi();
+abstract final class BoxStore {
+  static NativeBoxApi _api = const FrbNativeBoxApi();
   static String? _basePath;
   static int _openHandleCount = 0;
   static final Map<String, int> _openHandlesByName = <String, int>{};
@@ -17,28 +17,9 @@ abstract final class DxtrBox {
   static final Random _watcherRandom = Random.secure();
 
   static const Set<String> _windowsReservedNames = <String>{
-    'CON',
-    'PRN',
-    'AUX',
-    'NUL',
-    'COM1',
-    'COM2',
-    'COM3',
-    'COM4',
-    'COM5',
-    'COM6',
-    'COM7',
-    'COM8',
-    'COM9',
-    'LPT1',
-    'LPT2',
-    'LPT3',
-    'LPT4',
-    'LPT5',
-    'LPT6',
-    'LPT7',
-    'LPT8',
-    'LPT9',
+    'CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
   };
 
   static final RegExp _unsafeWindowsNameCharacters = RegExp(
@@ -48,7 +29,7 @@ abstract final class DxtrBox {
   static bool get isInitialized => _basePath != null;
 
   /// Package-internal injection point used by tests and alternate engines.
-  static void bindNativeApi(NativeDxtrApi api) {
+  static void bindNativeApi(NativeBoxApi api) {
     _api = api;
     _basePath = null;
     _openHandleCount = 0;
@@ -59,8 +40,7 @@ abstract final class DxtrBox {
   static Future<void> init({String? path}) async {
     final resolvedPath = p.normalize(
       p.absolute(
-        path ??
-            p.join((await getApplicationSupportDirectory()).path, 'dxtr_box'),
+        path ?? p.join((await getApplicationSupportDirectory()).path, 'dxtr_box'),
       ),
     );
 
@@ -108,9 +88,6 @@ abstract final class DxtrBox {
 
     await _api.openBox(name, encryptionKey: encryptionKey);
 
-    // Close the race where a normal open started just before migration acquired
-    // the reservation. If migration won destination creation, this handle must
-    // not escape to application code and mutate the migration target.
     if (!allowMigrationReservation && await migrationReservation.exists()) {
       await _api.closeBox(name);
       throw StateError(
@@ -159,12 +136,6 @@ abstract final class DxtrBox {
     _metadataByName.remove(name);
   }
 
-  /// Explicitly converts an existing plaintext box to encrypted storage.
-  ///
-  /// All handles for [name] must be closed before migration. The native engine
-  /// performs the value rewrite and encryption metadata transition in one redb
-  /// write transaction, so callers observe either the original plaintext state
-  /// or the fully encrypted state after a successful return.
   static Future<void> encryptBox(
     String name, {
     required String encryptionKey,
@@ -210,7 +181,7 @@ abstract final class DxtrBox {
 
   static void _ensureInitialized() {
     if (!isInitialized) {
-      throw StateError('Call DxtrBox.init() before opening a box.');
+      throw StateError('Call BoxStore.init() before opening a box.');
     }
   }
 
@@ -231,16 +202,16 @@ abstract final class DxtrBox {
 
 /// Internal migration helpers. This symbol is intentionally not exported from
 /// `package:dxtr_box/dxtr_box.dart`.
-abstract final class DxtrBoxMigrationInternals {
+abstract final class BoxStoreMigrationInternals {
   static Future<Box> openNew(
     String name, {
     String? encryptionKey,
   }) async {
-    DxtrBox._ensureInitialized();
-    DxtrBox._validateBoxName(name);
+    BoxStore._ensureInitialized();
+    BoxStore._validateBoxName(name);
 
-    final path = File(p.join(DxtrBox._basePath!, '$name.dxtr'));
-    final reservation = DxtrBox._migrationReservationFile(name);
+    final path = File(p.join(BoxStore._basePath!, '$name.dxtr'));
+    final reservation = BoxStore._migrationReservationFile(name);
 
     if (await path.exists()) {
       throw StateError('Destination dxtr_box "$name" already exists.');
@@ -258,13 +229,11 @@ abstract final class DxtrBoxMigrationInternals {
     }
 
     try {
-      // Re-check after acquiring the reservation to close the race with an
-      // ordinary open that may have created the destination just beforehand.
       if (await path.exists()) {
         throw StateError('Destination dxtr_box "$name" already exists.');
       }
       await path.create(exclusive: true);
-      return await DxtrBox._open(
+      return await BoxStore._open(
         name,
         encryptionKey: encryptionKey,
         lazy: false,
@@ -272,36 +241,54 @@ abstract final class DxtrBoxMigrationInternals {
       );
     } catch (_) {
       try {
-        await DxtrBox._api.closeBox(name);
-      } catch (_) {
-        // Best-effort close before deleting the reservation we own.
-      }
+        await BoxStore._api.closeBox(name);
+      } catch (_) {}
       try {
-        await DxtrBox._api.deleteBox(name);
+        await BoxStore._api.deleteBox(name);
       } catch (_) {
         try {
           if (await path.exists()) {
             await path.delete();
           }
-        } catch (_) {
-          // Preserve the original open failure.
-        }
+        } catch (_) {}
       }
-      DxtrBox._metadataByName.remove(name);
+      BoxStore._metadataByName.remove(name);
       await releaseReservation(name);
       rethrow;
     }
   }
 
   static Future<void> releaseReservation(String name) async {
-    final reservation = DxtrBox._migrationReservationFile(name);
+    final reservation = BoxStore._migrationReservationFile(name);
     try {
       if (await reservation.exists()) {
         await reservation.delete();
       }
-    } on FileSystemException {
-      // A successful migration must not be reported as failed only because the
-      // advisory reservation marker disappeared concurrently.
-    }
+    } on FileSystemException {}
   }
+}
+
+/// Legacy compatibility shim. New code should use [BoxStore].
+@Deprecated('Use BoxStore instead. The Dxtr prefix is retained only for source compatibility.')
+abstract final class DxtrBox {
+  static bool get isInitialized => BoxStore.isInitialized;
+
+  static void bindNativeApi(NativeBoxApi api) => BoxStore.bindNativeApi(api);
+
+  static Future<void> init({String? path}) => BoxStore.init(path: path);
+
+  static Future<Box> open(
+    String name, {
+    String? encryptionKey,
+    bool lazy = false,
+  }) => BoxStore.open(name, encryptionKey: encryptionKey, lazy: lazy);
+
+  static Future<void> deleteBox(String name) => BoxStore.deleteBox(name);
+
+  static Future<void> encryptBox(
+    String name, {
+    required String encryptionKey,
+  }) => BoxStore.encryptBox(name, encryptionKey: encryptionKey);
+
+  static Future<bool> boxExists(String name) => BoxStore.boxExists(name);
 }
