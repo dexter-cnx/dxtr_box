@@ -17,15 +17,15 @@ void main() {
     });
 
     final api = _FailingWatchApi();
-    DxtrBox.bindNativeApi(api);
-    await DxtrBox.init(path: root.path);
+    BoxStore.bindNativeApi(api);
+    await BoxStore.init(path: root.path);
 
     await expectLater(
-      DxtrBoxMigrationInternals.openNew('failed-destination'),
+      BoxStoreMigrationInternals.openNew('failed-destination'),
       throwsStateError,
     );
 
-    expect(await DxtrBox.boxExists('failed-destination'), isFalse);
+    expect(await BoxStore.boxExists('failed-destination'), isFalse);
     expect(File('${root.path}/failed-destination.dxtr').existsSync(), isFalse);
     expect(
       File('${root.path}/.failed-destination.dxtr.migrating').existsSync(),
@@ -44,14 +44,14 @@ void main() {
     });
 
     final api = _SuccessfulApi();
-    DxtrBox.bindNativeApi(api);
-    await DxtrBox.init(path: root.path);
+    BoxStore.bindNativeApi(api);
+    await BoxStore.init(path: root.path);
 
     final migrationBox =
-        await DxtrBoxMigrationInternals.openNew('reserved-destination');
+        await BoxStoreMigrationInternals.openNew('reserved-destination');
 
     await expectLater(
-      DxtrBox.open('reserved-destination'),
+      BoxStore.open('reserved-destination'),
       throwsA(
         isA<StateError>().having(
           (error) => error.message,
@@ -62,14 +62,14 @@ void main() {
     );
 
     await migrationBox.close();
-    await DxtrBoxMigrationInternals.releaseReservation('reserved-destination');
+    await BoxStoreMigrationInternals.releaseReservation('reserved-destination');
 
-    final reopened = await DxtrBox.open('reserved-destination');
+    final reopened = await BoxStore.open('reserved-destination');
     await reopened.close();
   });
 }
 
-class _SuccessfulApi implements NativeDxtrApi {
+class _SuccessfulApi implements NativeBoxApi {
   String? basePath;
   final Set<String> boxes = <String>{};
   final Set<String> open = <String>{};
