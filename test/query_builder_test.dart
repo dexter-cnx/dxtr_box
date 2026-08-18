@@ -138,6 +138,29 @@ void main() {
       expect((nested.filters.last as QueryComparison).field, 'role');
     });
 
+    test('rejects result modifiers inside explicit groups', () {
+      final builder = BoxQueryBuilder.where('status').equals('active');
+
+      expect(
+        () => builder.andGroup(
+          (group) => group.where('age').gte(18).orderBy('age'),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => builder.andGroup(
+          (group) => group.where('age').gte(18).offset(1),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => builder.orGroup(
+          (group) => group.where('role').equals('admin').limit(1),
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test('keeps existing field validation behavior', () {
       expect(
         () => BoxQueryBuilder.where('profile..age').gte(18),
