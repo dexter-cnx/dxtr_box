@@ -4,11 +4,11 @@ import 'query_builder.dart';
 
 /// Optional typed metadata for a query field path.
 ///
-/// [DxtrField] does not define a schema and does not require code generation.
+/// [BoxField] does not define a schema and does not require code generation.
 /// It only carries a reusable Dart type plus the same string path consumed by
 /// the existing query AST.
-final class DxtrField<T> {
-  const DxtrField(this.path);
+final class BoxField<T> {
+  const BoxField(this.path);
 
   /// Existing dotted-path field name used by [QueryComparison] and [QuerySort].
   final String path;
@@ -19,7 +19,7 @@ final class DxtrField<T> {
   }
 
   @override
-  String toString() => 'DxtrField<$T>($path)';
+  String toString() => 'BoxField<$T>($path)';
 }
 
 /// Typed field stage for standalone query composition.
@@ -81,16 +81,16 @@ final class BoundTypedQueryFieldBuilder<T> {
 
 /// Typed-field helpers for standalone fluent query continuation.
 extension BoxQueryBuilderTypedFields on BoxQueryBuilder {
-  TypedQueryFieldBuilder<T> andField<T>(DxtrField<T> field) {
+  TypedQueryFieldBuilder<T> andField<T>(BoxField<T> field) {
     return TypedQueryFieldBuilder<T>._(and(field.path));
   }
 
-  TypedQueryFieldBuilder<T> orField<T>(DxtrField<T> field) {
+  TypedQueryFieldBuilder<T> orField<T>(BoxField<T> field) {
     return TypedQueryFieldBuilder<T>._(or(field.path));
   }
 
   BoxQueryBuilder orderByField<T>(
-    DxtrField<T> field, {
+    BoxField<T> field, {
     bool descending = false,
     QueryNullOrder nulls = QueryNullOrder.last,
   }) {
@@ -100,16 +100,16 @@ extension BoxQueryBuilderTypedFields on BoxQueryBuilder {
 
 /// Typed-field helpers for box-bound fluent query continuation.
 extension BoundBoxQueryBuilderTypedFields on BoundBoxQueryBuilder {
-  BoundTypedQueryFieldBuilder<T> andField<T>(DxtrField<T> field) {
+  BoundTypedQueryFieldBuilder<T> andField<T>(BoxField<T> field) {
     return BoundTypedQueryFieldBuilder<T>._(and(field.path));
   }
 
-  BoundTypedQueryFieldBuilder<T> orField<T>(DxtrField<T> field) {
+  BoundTypedQueryFieldBuilder<T> orField<T>(BoxField<T> field) {
     return BoundTypedQueryFieldBuilder<T>._(or(field.path));
   }
 
   BoundBoxQueryBuilder orderByField<T>(
-    DxtrField<T> field, {
+    BoxField<T> field, {
     bool descending = false,
     QueryNullOrder nulls = QueryNullOrder.last,
   }) {
@@ -119,14 +119,14 @@ extension BoundBoxQueryBuilderTypedFields on BoundBoxQueryBuilder {
 
 /// Typed-field helpers for explicit predicate groups.
 extension QueryGroupStartTypedFields on QueryGroupStart {
-  TypedQueryFieldBuilder<T> whereField<T>(DxtrField<T> field) {
+  TypedQueryFieldBuilder<T> whereField<T>(BoxField<T> field) {
     return TypedQueryFieldBuilder<T>._(where(field.path));
   }
 }
 
 /// Optional typed entry point for queries bound to a [Box].
 extension BoxTypedFieldQuery on Box {
-  BoundTypedQueryFieldBuilder<T> queryWhereField<T>(DxtrField<T> field) {
+  BoundTypedQueryFieldBuilder<T> queryWhereField<T>(BoxField<T> field) {
     return BoundTypedQueryFieldBuilder<T>._(queryWhere(field.path));
   }
 }
