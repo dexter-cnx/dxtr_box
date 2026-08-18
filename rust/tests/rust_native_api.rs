@@ -59,7 +59,6 @@ fn rust_native_crud_reopen_query_index_and_pagination() {
         .order_by("captured_at", SortOrder::Descending)
         .offset(1)
         .limit(2)
-        .unwrap()
         .find()
         .unwrap();
     assert_eq!(
@@ -85,5 +84,64 @@ fn rust_native_errors_are_structured() {
 
     let error = box_handle.put("", Vec::new()).unwrap_err();
     assert!(matches!(error, DxtrBoxError::InvalidInput { .. }));
+
+    let invalid_field = box_handle
+        .query()
+        .where_("a..b")
+        .equals(1)
+        .find()
+        .unwrap_err();
+    assert!(matches!(invalid_field, DxtrBoxError::InvalidInput { .. }));
+
+    let invalid_limit = box_handle
+        .query()
+        .where_("value")
+        .equals(1)
+        .limit(0)
+        .find()
+        .unwrap_err();
+    assert!(matches!(invalid_limit, DxtrBoxError::InvalidInput { .. }));
+
     box_handle.close().unwrap();
+}
+
+#[test]
+fn rust_native_receiver_rebinds_its_own_root() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let first_dir = tempfile::tempdir().unwrap();
+    let second_dir = tempfile::tempdir().unwrap();
+
+    let first = DxtrBox::open(first_dir.path()).unwrap();
+    let second = DxtrBox::open(second_dir.path()).unwrap();
+
+    let first_box = first.box_("items").unwrap();
+    first_box.put("first", vec![1]).unwrap();
+    first_box.close().unwrap();
+
+    let second_box = second.box_("items").unwrap();
+    assert!(second_box.get("first").unwrap().is_none());
+    second_box.put("second", vec![2]).unwrap();
+    second_box.close().unwrap();
+
+    let first_box = first.box_("items").unwrap();
+    assert_eq!(first_box.get("first").unwrap(), Some(vec![1]));
+    assert!(first_box.get("second").unwrap().is_none());
+    first_box.close().unwrap();
+}
+
+#[test]
+fn rust_native_drop_releases_handle_ownership() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let first_dir = tempfile::tempdir().unwrap();
+    let second_dir = tempfile::tempdir().unwrap();
+
+    let first = DxtrBox::open(first_dir.path()).unwrap();
+    {
+        let handle = first.box_("items").unwrap();
+        handle.put("key", vec![1]).unwrap();
+    }
+
+    let second = DxtrBox::open(second_dir.path()).unwrap();
+    let handle = second.box_("items").unwrap();
+    handle.close().unwrap();
 }
