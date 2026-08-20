@@ -13,6 +13,8 @@ on:
       - 'rust/**'
       - 'test/read_path_benchmark_test.dart'
       - 'test/read_path_boundary_benchmark_test.dart'
+      - 'test/multi_frontend_benchmark_test.dart'
+      - 'tool/multi_frontend_benchmark.sh'
   workflow_dispatch:
 
 permissions:
@@ -24,7 +26,7 @@ concurrency:
 
 jobs:
   diagnostic:
-    name: 0.5 read-path decomposition / Linux x64
+    name: Read-path + 0.8 multi-frontend / Linux x64
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -60,25 +62,41 @@ jobs:
           DYLD_LIBRARY_PATH="rust/target/release:${DYLD_LIBRARY_PATH:-}" \
           PATH="rust/target/release:$PATH" \
           flutter test test/read_path_boundary_benchmark_test.dart --reporter expanded
-      - name: Verify read-path evidence
+      - name: Run 0.8 multi-frontend diagnostic
+        env:
+          DXTR_BOX_MULTI_FRONTEND_RUST_ITERATIONS: '200'
+          DXTR_BOX_MULTI_FRONTEND_DART_ITERATIONS: '200'
+          DXTR_BOX_MULTI_FRONTEND_SAMPLES: '5'
+          DXTR_BOX_MULTI_FRONTEND_RECORDS: '1000'
+        run: bash tool/multi_frontend_benchmark.sh
+      - name: Verify benchmark evidence
         run: |
           test -s build/read-path/rust-read-path.jsonl
           test -s build/read-path/dart-read-path.jsonl
           test -s build/read-path/dart-boundary.jsonl
+          test -s build/multi-frontend/rust-native.jsonl
+          test -s build/multi-frontend/dart-frb.jsonl
       - name: Toolchain metadata
         if: always()
         run: |
-          mkdir -p build/read-path
+          mkdir -p build/read-path build/multi-frontend
           flutter --version | tee build/read-path/flutter-version.txt
           rustc --version | tee build/read-path/rust-version.txt
           cargo --version | tee build/read-path/cargo-version.txt
           uname -a | tee build/read-path/runner.txt
           lscpu > build/read-path/cpu.txt || true
-      - name: Upload read-path evidence
+          cp build/read-path/flutter-version.txt build/multi-frontend/flutter-version.txt
+          cp build/read-path/rust-version.txt build/multi-frontend/rust-version.txt
+          cp build/read-path/cargo-version.txt build/multi-frontend/cargo-version.txt
+          cp build/read-path/runner.txt build/multi-frontend/runner.txt
+          cp build/read-path/cpu.txt build/multi-frontend/cpu.txt || true
+      - name: Upload benchmark evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: read-path-benchmark-linux-x64
-          path: build/read-path
+          name: read-path-and-multi-frontend-linux-x64
+          path: |
+            build/read-path
+            build/multi-frontend
           if-no-files-found: error
           retention-days: 14
