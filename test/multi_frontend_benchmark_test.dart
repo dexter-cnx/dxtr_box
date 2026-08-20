@@ -48,16 +48,32 @@ void main() {
         entries['item-${index.toString().padLeft(5, '0')}'] = <String, dynamic>{
           'score': index,
           'group': index % 4 == 0 ? 'target' : 'other',
-          'payload': 'x' * 128,
+          'payload': List<String>.filled(128, 'x').join(),
         };
       }
       await box.putAll(entries);
-      await box.createIndex(name: 'by_group', field: 'group');
+      await box.createIndex(
+        IndexDefinition(name: 'by_group', field: 'group'),
+      );
 
       final pointKey = 'item-${(records ~/ 2).toString().padLeft(5, '0')}';
       final batchKeys = List<String>.generate(
         records < 100 ? records : 100,
         (index) => 'item-${index.toString().padLeft(5, '0')}',
+      );
+      final query = BoxQuery(
+        where: QueryComparison(
+          field: 'group',
+          operator: QueryOperator.equal,
+          value: 'target',
+        ),
+        sortBy: <QuerySort>[
+          QuerySort(
+            field: 'score',
+            direction: QuerySortDirection.descending,
+          ),
+        ],
+        limit: 50,
       );
 
       _emit(<String, Object>{
@@ -97,12 +113,7 @@ void main() {
         iterations: iterations,
         samples: samples,
         action: () async {
-          sink = await box
-              .queryWhere('group')
-              .equals('target')
-              .orderBy('score', descending: true)
-              .limit(50)
-              .find();
+          sink = await box.query(query);
         },
       );
       expect(sink, isA<List<MapEntry<String, dynamic>>>());
