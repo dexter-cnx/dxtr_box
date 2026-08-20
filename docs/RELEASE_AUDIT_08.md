@@ -63,6 +63,8 @@ Both harnesses use the same logical workload shape:
 
 Each frontend reports per-operation sample totals and median nanoseconds/op. Iteration/sample/record counts are environment-configurable.
 
+The `Read-path Benchmark` workflow executes this 0.8 matrix on Linux x64 and uploads both JSONL files together with Flutter, Rust, Cargo, kernel, and CPU metadata. The artifact is retained for 14 days so benchmark claims can be traced back to the exact PR run rather than copied out of context.
+
 ### Interpretation rule
 
 The benchmark is diagnostic evidence, not a marketing leaderboard.
@@ -82,10 +84,14 @@ Do not compare numbers collected on different machines, build modes, record coun
 - [x] Rust-native external consumer example exists.
 - [x] Cross-frontend write/read compatibility is tested in both directions.
 - [x] Reproducible Rust-native versus Dart/FRB benchmark harness exists for get, batch read, and query.
+- [x] CI captures the multi-frontend JSONL evidence with toolchain/runner metadata.
 - [x] Package version advances to `0.8.0-dev.1`.
-- [ ] PR4 merge gate is green and PR4 is merged to `main`.
 
-The milestone is considered closed only after the final unchecked item is satisfied. This avoids documenting 0.8 as complete before the repository merge gate proves the closure commit.
+## Closure rule
+
+This audit is authoritative only when it is present on `main` after PR4 passes the full merge quality bar. At that point all implementation, compatibility, benchmark-evidence, documentation, and version criteria above have been proven by the merge commit, and milestone 0.8 is closed.
+
+This wording intentionally avoids a permanently stale "PR merged" checkbox inside the commit that must itself be merged.
 
 ## Deferred
 
