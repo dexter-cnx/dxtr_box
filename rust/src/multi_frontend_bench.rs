@@ -19,7 +19,10 @@ const WARMUP_ITERATIONS: usize = 20;
 #[test]
 #[ignore = "purpose-built 0.8 multi-frontend diagnostic; run through make benchmark-multi-frontend"]
 fn rust_native_frontend_benchmark() {
-    let iterations = env_usize("DXTR_BOX_MULTI_FRONTEND_RUST_ITERATIONS", DEFAULT_ITERATIONS);
+    let iterations = env_usize(
+        "DXTR_BOX_MULTI_FRONTEND_RUST_ITERATIONS",
+        DEFAULT_ITERATIONS,
+    );
     let samples = env_usize("DXTR_BOX_MULTI_FRONTEND_RUST_SAMPLES", DEFAULT_SAMPLES);
     let records = env_usize("DXTR_BOX_MULTI_FRONTEND_RECORDS", DEFAULT_RECORDS);
     assert!(iterations > 0);
@@ -33,7 +36,10 @@ fn rust_native_frontend_benchmark() {
     let entries = (0..records)
         .map(|index| {
             let group = if index % 4 == 0 { "target" } else { "other" };
-            (format!("item-{index:05}"), encoded_record(index as i64, group))
+            (
+                format!("item-{index:05}"),
+                encoded_record(index as i64, group),
+            )
         })
         .collect::<Vec<_>>();
     items.put_all(entries).expect("seed benchmark records");
