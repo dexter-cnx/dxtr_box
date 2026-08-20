@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current publishable Flutter FFI package boundary, Dart -> flutter_rust_bridge -> Rust/redb execution paths, and the completed 0.7 Query Ergonomics API surface.
+This walkthrough describes the current 0.8 architecture: one authoritative Rust/redb storage engine with a Flutter/Dart frontend through flutter_rust_bridge and a first-class native Rust frontend.
 
 ## 1. Package boundary
 
@@ -9,15 +9,11 @@ dxtr_box/
   lib/                 Dart API + generated FRB bindings
   rust/                Rust crate/library: rust_lib_dxtr_box
   cargokit/            native build integration
-  android/
-  ios/
-  macos/
-  linux/
-  windows/
-  example/
+  android/ ios/ macos/ linux/ windows/
+  example/             Flutter consumer
 ```
 
-Stable compatibility:
+Stable compatibility contract:
 
 ```text
 Dart >= 3.4
@@ -28,69 +24,51 @@ native profiles = minimal | encryption | full
 format_version = dxtr_box/1
 ```
 
-## 2. Runtime ownership
+## 2. Dependency direction after 0.8
 
 ```text
-Flutter app
-  -> BoxStore / Box / query + migration types
-  -> generated flutter_rust_bridge bindings
-  -> Rust API
-  -> redb
+Dart API -> FRB adapter ----┐
+                            ├-> shared Rust core -> redb
+Rust API -------------------┘
 ```
 
-Dart owns public ergonomics, MessagePack encoding/decoding, lifecycle guards, query objects/builders, optional typed field metadata, and migration preflight.
+The native Rust frontend does not call Dart or FRB. Both frontends enter the same core for lifecycle, storage, encryption, query/index, and maintenance behavior.
 
-Rust owns durable storage, transactions, encryption, native watchers, query evaluation, persisted indexes, maintenance, and plaintext-to-encrypted migration.
-
-`DxtrBox` remains only as a deprecated compatibility facade over `BoxStore`.
-
-## 3. Naming boundary after 0.7
-
-Ordinary API/domain symbols use functional names:
+Main Rust boundaries:
 
 ```text
-Box
-BoxStore
-BoxCodec
-BoxQuery
-BoxQueryBuilder
-BoxField<T>
-NativeBoxApi
-FrbNativeBoxApi
-UnavailableNativeBoxApi
-BoxStoreMigrationInternals
+rust/src/api.rs       FRB-facing adapter functions and bridge DTOs
+rust/src/native.rs    native Rust facade: DxtrBox / BoxHandle / query builder
+rust/src/core.rs      shared authoritative engine operations
+rust/src/db.rs        redb/storage mechanics
+rust/src/query.rs     canonical query representation/evaluation
+rust/src/index*.rs    persisted index implementation
+rust/src/error.rs     structured Rust-facing DxtrBoxError
 ```
 
-Compatibility/package identities intentionally keep the product string:
+`rust_lib_dxtr_box` builds as both `cdylib` for Flutter and `rlib` for native Rust consumers.
 
-```text
-dxtr_box
-rust_lib_dxtr_box
-.dxtr
-dxtr_box/1
-@dxtr:* durable wire tags
-```
+## 3. Durable ownership
 
-The deprecated `DxtrBox`, `DxtrCodec`, and old native seam names exist only for source compatibility where required.
-
-## 4. Storage and mutation atomicity
-
-Each box maps to `{base_path}/{box_name}.dxtr`.
-
-Durable identity:
+Each box maps to `{base_path}/{box_name}.dxtr` with:
 
 ```text
 meta[format_version] = dxtr_box/1
 ```
 
-Mutation path:
+There is no Dart storage format and no Rust-native storage format. MessagePack values and all durable metadata remain shared.
+
+Primary data is authoritative. Persisted indexes are derived state maintained transactionally with primary mutations.
+
+## 4. Dart mutation path
 
 ```text
 Box.put / putAll / delete / deleteAll / clear
   -> BoxCodec
   -> NativeBoxApi
-  -> FRB
-  -> Rust validation
+  -> generated FRB
+  -> rust/src/api.rs
+  -> shared core
   -> optional encryption
   -> one redb write transaction
   -> primary + derived index changes
@@ -98,55 +76,70 @@ Box.put / putAll / delete / deleteAll / clear
   -> watch event after commit only
 ```
 
-Primary data is authoritative. Persisted indexes are derived state.
+Dart owns public async ergonomics, MessagePack encode/decode, lifecycle guards, query authoring objects, optional `BoxField<T>` metadata, and Hive CE migration preflight.
 
-## 5. Point-read path
+## 5. Native Rust mutation path
 
-Public Dart API remains asynchronous:
+```text
+DxtrBox::open
+  -> shared core init
+
+DxtrBox::box_
+  -> shared core open_box
+
+BoxHandle::put / put_all / delete / delete_all / clear
+  -> shared core
+  -> same redb mutation path as FRB adapter
+```
+
+`BoxHandle` closes its shared runtime handle explicitly through `close()` and defensively on `Drop`.
+
+Rust callers receive `Result<T, DxtrBoxError>` instead of FRB's string-flattened bridge errors.
+
+## 6. Point reads
+
+Dart/FRB:
 
 ```text
 Box.get
-  -> NativeBoxApi.get : Future<Uint8List?>
   -> FrbNativeBoxApi.get
   -> generated FRB sync dispatch
-  -> Rust api::get #[frb(sync)]
-  -> db::get
-  -> fresh redb read transaction
-  -> optional ChaCha20Poly1305 authenticate/decrypt
+  -> api::get
+  -> shared core get
+  -> redb read transaction
+  -> optional authenticate/decrypt
   -> MessagePack validation
   -> Dart decode
 ```
 
-`Box.containsKey` uses the same small generated sync-dispatch optimization internally.
-
-Only tiny single-key reads use this FRB call mode. Queries, batch reads, mutations, scans, and migrations remain asynchronous.
-
-0.5 controlled boundary evidence retained:
+Rust-native:
 
 ```text
-generated FRB get        ~226 us -> 4.312 us   ~52x faster
-generated FRB contains   ~197 us -> 2.570 us   ~77x faster
+BoxHandle::get
+  -> shared core get
+  -> same redb/authentication/validation path
+  -> Vec<u8> MessagePack bytes to Rust caller
 ```
 
-No Dart whole-box cache or long-lived stale read snapshot was introduced.
+No Dart whole-box cache or long-lived stale read snapshot is used.
 
-## 6. Batch-read path
+## 7. Batch reads
+
+Both frontends use the same one-snapshot core operation:
 
 ```text
-Box.getAll
-  -> validate requested keys
-  -> one asynchronous FRB crossing
-  -> Rust api::get_all / db::get_all
+getAll / get_all
+  -> validate keys
+  -> shared core get_all
   -> one redb ReadTransaction
   -> one DATA table open
   -> N authoritative key lookups
-  -> decrypt/authenticate each encrypted hit
-  -> MessagePack validation
-  -> one response
-  -> Dart decode per hit
+  -> authenticate/decrypt each encrypted hit
+  -> validate MessagePack
+  -> ordered hit records
 ```
 
-Semantics:
+Semantics are shared:
 
 ```text
 hit order: preserved
@@ -154,184 +147,47 @@ missing keys: omitted
 duplicate input keys: duplicate output entries
 ```
 
-## 7. Direct query execution
+## 8. Query execution
+
+Dart authoring:
 
 ```text
-Box.query(BoxQuery)
-  -> serialize query AST
-  -> one asynchronous FRB call
-  -> one redb ReadTransaction snapshot
-  -> optional persisted-index candidate narrowing
+BoxQuery / BoxQueryBuilder / BoxField<T>
+  -> canonical query wire representation
+  -> FRB adapter
+  -> canonical Rust QuerySpec
+```
+
+Rust-native authoring:
+
+```text
+BoxHandle::query()
+  -> QueryBuilder
+  -> canonical Rust QuerySpec
+```
+
+Both converge before execution:
+
+```text
+QuerySpec
+  -> planner/index selection
+  -> one redb read snapshot
   -> authoritative primary reads
   -> optional decrypt/authenticate
-  -> full predicate re-evaluation
+  -> full predicate recheck
   -> deterministic semantic sort
   -> offset / limit
-  -> one response
 ```
 
-Persisted indexes narrow candidates only. They do not replace predicate re-evaluation and do not currently satisfy ORDER BY.
+There is no second Rust-native query engine. Persisted indexes narrow candidates only and do not currently satisfy ORDER BY.
 
-## 8. 0.7 fluent string-path authoring
+## 9. Persisted indexes and encryption
 
-PR #44 introduced `BoxQueryBuilder` and collision-free `box.queryWhere(...)`:
+Plaintext persisted indexes may narrow equality and range predicates.
 
-```dart
-final query = box
-    .queryWhere('status').equals('active')
-    .and('profile.age').gte(18)
-    .build();
+Under `full`, encrypted equality narrowing uses domain-separated keyed BLAKE2b MAC tokens. Raw plaintext scalar values and semantic ordering are not persisted in encrypted index entries.
 
-final rows = await box.query(query);
-```
-
-Supported comparisons map one-to-one to existing `QueryOperator` values:
-
-```text
-equals / notEquals
-gt / gte / lt / lte
-between
-isNull / isNotNull
-```
-
-Boolean composition:
-
-```text
-and / or
-andGroup / orGroup
-```
-
-Mixed `AND` / `OR` chaining is left-associative. Explicit groups produce the corresponding nested `QueryGroup` structure.
-
-`Box.where(bool Function(dynamic))` remains the legacy predicate-scan API. Dart cannot overload methods, so the fluent entry point intentionally uses `queryWhere` rather than weakening or breaking source typing.
-
-## 9. 0.7 result/sort/pagination ergonomics
-
-PR #45 added result options directly onto the same builder:
-
-```dart
-final rows = await box
-    .queryWhere('status').equals('active')
-    .orderBy('name')
-    .offset(10)
-    .limit(20)
-    .find();
-```
-
-The builder flow is:
-
-```text
-box.queryWhere(field)
-  -> bound comparison stage
-  -> BoxQueryBuilder state
-  -> orderBy / offset / limit
-  -> build()
-  -> existing BoxQuery
-  -> find()
-  -> existing Box.query(build())
-```
-
-Standalone `BoxQueryBuilder.where(...)` remains a pure AST builder and intentionally has no `find()` because no `Box` execution context exists.
-
-`findFirst`, `exists`, and `count` remain deferred until efficient native operations exist.
-
-## 10. 0.7 optional typed field metadata
-
-PR #46 added `BoxField<T>`:
-
-```dart
-const status = BoxField<String>('status');
-const age = BoxField<int>('profile.age');
-const name = BoxField<String>('name');
-```
-
-Typed bound execution:
-
-```dart
-final rows = await box
-    .queryWhereField(status).equals('active')
-    .andField(age).gte(18)
-    .orderByField(name)
-    .limit(20)
-    .find();
-```
-
-Typed standalone composition:
-
-```dart
-final query = status
-    .where().equals('active')
-    .andField(age).gte(18)
-    .orderByField(name)
-    .build();
-```
-
-Explicit groups may use `whereField`, `andField`, and `orField`.
-
-`BoxField<T>` is metadata only. It does not define a schema, generate serializers, create indexes, use reflection, or change storage. Typed stages delegate to the existing string-path builder and therefore produce the same `BoxQuery` / `QueryFilter` AST.
-
-String paths remain first-class and may be mixed with typed metadata.
-
-## 11. Query API equivalence
-
-All supported authoring paths converge before serialization:
-
-```text
-manual BoxQuery -------------------------┐
-                                        |
-BoxQueryBuilder.where(String) -----------+--> BoxQuery / QueryFilter
-                                        |
-box.queryWhere(String) ------------------+
-                                        |
-BoxField<T>.where() ---------------------+
-                                        |
-box.queryWhereField(BoxField<T>) --------┘
-                                                |
-                                                v
-                                      existing serialization / FRB
-                                                |
-                                                v
-                                      existing Rust planner/indexes
-```
-
-No fluent or typed path may introduce semantics unavailable through direct `BoxQuery` construction.
-
-## 12. Plaintext index execution
-
-Plaintext indexes persist sortable scalar representations and may narrow:
-
-```text
-equal
->
->=
-<
-<=
-between
-```
-
-Planner selection is deterministic. Multiple usable AND candidates may be intersected. Primary records are still authoritative and predicates are re-evaluated after candidate lookup.
-
-## 13. Encrypted equality-index execution
-
-Under `full`, encrypted equality candidate narrowing uses domain-separated keyed BLAKE2b MAC tokens:
-
-```text
-encrypted equality query
-  -> canonical scalar value
-  -> keyed BLAKE2b token
-  -> exact token candidate lookup
-  -> authoritative encrypted primary read
-  -> ChaCha20Poly1305 authenticate/decrypt
-  -> full predicate recheck
-```
-
-Encrypted index entries do not persist raw plaintext scalar bytes.
-
-Accepted leakage includes equality classes/frequency, index/field metadata, and candidate record identifiers.
-
-## 14. Encrypted ordered/range predicates
-
-Encrypted persisted index tokens are not order-preserving. Therefore:
+Encrypted ordered/range predicates remain scan-backed:
 
 ```text
 Equal                  -> equality index may narrow
@@ -342,60 +198,125 @@ LessThanOrEqual        -> scan
 Between                -> scan
 ```
 
-Mixed AND predicates may use an equality term to narrow candidates; range terms are then evaluated against authoritative decrypted records.
+Authoritative decrypt/authenticate and predicate recheck remain mandatory after candidate narrowing.
 
-## 15. Migration path
+## 10. Native profiles
 
-Plaintext-to-encrypted migration and Hive CE migration preserve destination exclusivity and transactional writes.
-
-`BoxStoreMigrationInternals` is the current functional migration seam. Old brand-prefixed migration internals should not be introduced into new code.
-
-## 16. Native profiles
-
-Exactly three profiles exist:
+Exactly three profiles remain:
 
 ```text
-minimal
-encryption
-full
+minimal     CRUD/lifecycle/watch-capable core
+
+encryption minimal + encrypted box support
+
+full        encryption + maintenance + query/index implementation
 ```
 
-`full` is default. Do not add a fourth profile.
+`full` is default. Query/index Rust APIs that require `full` are feature-gated rather than creating another profile.
 
-## 17. Package and platform validation
+## 11. Concurrency boundary
 
-The full merge quality bar validates:
+The shared runtime owns the process-global root and box registry. Multiple `BoxHandle`s share engine handles safely; a box remains open until its last registered handle closes.
+
+PR3 validates:
+
+- `DxtrBox` and `BoxHandle` are `Send + Sync`;
+- same-box mutation from multiple Rust threads;
+- multi-handle open-count behavior;
+- encrypted reopen/error behavior where enabled;
+- full-profile query/index behavior.
+
+The public native API is synchronous and does not require Tokio.
+
+## 12. Cross-frontend compatibility evidence
+
+`rust/tests/cross_frontend_compat.rs` proves the durable bridge in both directions:
+
+```text
+Rust-native put
+  -> close box
+  -> FRB adapter open/get
+  -> identical MessagePack bytes
+
+FRB adapter put
+  -> close box
+  -> Rust-native open/get
+  -> identical MessagePack bytes
+```
+
+Each direction also asserts the same `{box}.dxtr` file exists. Because this is CRUD-only compatibility evidence, it participates in all three Rust profile test runs.
+
+## 13. Multi-frontend benchmark path
+
+`bash tool/multi_frontend_benchmark.sh` executes equivalent logical workloads for:
+
+```text
+rust-native public facade
+Dart public API -> generated FRB
+```
+
+Workloads:
+
+```text
+point get
+100-key get_all / getAll
+indexed equality query + descending sort + limit(50)
+```
+
+Evidence output:
+
+```text
+build/multi-frontend/rust-native.jsonl
+build/multi-frontend/dart-frb.jsonl
+```
+
+The Rust number includes public Rust facade + shared core + storage work. Dart/FRB additionally includes Dart async/public API, codec work where applicable, generated bridge transport, and cross-runtime overhead. Treat the delta as diagnostic boundary evidence rather than a storage-engine speedup claim.
+
+## 14. Flutter-facing 0.7 ergonomics remain intact
+
+String-path fluent authoring remains first-class:
+
+```dart
+final rows = await box
+    .queryWhere('status').equals('active')
+    .and('profile.age').gte(18)
+    .orderBy('name')
+    .offset(10)
+    .limit(20)
+    .find();
+```
+
+Optional typed metadata remains only an authoring layer:
+
+```dart
+const status = BoxField<String>('status');
+final rows = await box.queryWhereField(status).equals('active').find();
+```
+
+Both compile to the existing `BoxQuery` / `QueryFilter` AST and retain the same planner semantics.
+
+## 15. Package and merge validation
+
+The full merge quality bar retains:
 
 ```text
 format + analyze
 Dart tests
 Flutter 3.22 / Dart 3.4 minimum SDK
-Rust minimal/encryption/full
+Rust minimal/encryption/full all-target tests
 native integration
 migration/query/index/crash-reopen regression
-FRB generated bindings
+FRB generated binding reproducibility
 native-size policy
 package/pub dry-run
-benchmark correctness smoke
-Android consumer
-Linux consumer
-Windows consumer
-macOS consumer
-iOS consumer
+benchmark correctness/smoke
+Android/Linux/Windows/macOS/iOS staged consumers
 ```
 
-## 18. Next architecture boundary
+0.8 adds cross-frontend compatibility to the Rust all-target matrix and a reproducible two-frontend benchmark runner without weakening any existing gate.
 
-0.8 starts only after 0.7 closure merges to clean `main`.
+## 16. 0.8 boundary
 
-Target dependency direction:
+0.8 stops at the multi-frontend storage foundation. It does not add GPUI integration, Tokio, ORM/schema/model generation, cloud sync/networking, storage-format redesign, a fourth native profile, or a new encryption/query engine.
 
-```text
-Dart API ----> FRB adapter ----┐
-                              ├----> shared authoritative Rust core ----> redb
-Rust API ---------------------┘
-```
-
-The Rust frontend must not wrap Dart or FRB. GPUI is a potential external consumer only, not a dependency of Dxtr_Box.
-
-See `docs/PROJECT_HANDOFF.md` for the guarded 0.8 audit and PR plan.
+See `docs/RELEASE_AUDIT_08.md` for closure evidence and `docs/PROJECT_HANDOFF.md` for current milestone state.
