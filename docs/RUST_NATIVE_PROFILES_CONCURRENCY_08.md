@@ -25,7 +25,7 @@ No Rust-specific fourth profile is introduced. The Rust frontend consumes the sa
 
 Core CRUD is available in every profile.
 
-When a reduced profile is used, full-only Rust-native operations return structured `DxtrBoxError::UnsupportedFeature` errors rather than silently changing semantics. In particular, persisted indexes and native query execution remain full-profile capabilities.
+In reduced profiles, persisted-index operations and native query execution return structured `DxtrBoxError::UnsupportedFeature` errors rather than silently changing semantics. These are the capability errors covered by the PR3 reduced-profile contract. Maintenance operations keep their existing shared-core error mapping in 0.8; PR3 does not redefine that error surface.
 
 The encryption profile can create, close, and reopen encrypted boxes through the Rust frontend with the same key validation and authenticated storage path used by the shared core.
 
