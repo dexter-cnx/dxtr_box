@@ -2,11 +2,9 @@
 
 ## Product
 
-**dxtr_box — Native local database for Flutter, forged in Rust. By Dxtr.**
+**dxtr_box — Native local database for Flutter and Rust, forged in Rust. By Dxtr.**
 
-Dxtr_Box is a compact Flutter-facing local database backed by Rust/redb, with durable native storage, declarative query/index execution, authenticated encryption, and simple box-style ergonomics.
-
-It is **not** positioned as a Hive/Hive CE replacement. Hive CE remains an optional migration source, compatibility reference, and benchmark peer.
+Dxtr_Box is a compact Rust/redb local database engine with a Flutter/Dart frontend and a first-class native Rust frontend. It is **not** positioned as a Hive/Hive CE replacement; Hive CE remains optional migration tooling, a compatibility reference, and a benchmark peer.
 
 ## Stable runtime/package contract
 
@@ -25,32 +23,52 @@ native profiles:        minimal | encryption | full
 
 ## Milestone state
 
-Closed:
+Closed before 0.8:
 
 - **0.3 Query / Index / Migration** — complete.
 - **0.4 Production Hardening PH-01..PH-05** — complete.
 - **0.5 Performance / Read-path Optimization** — complete.
 - **0.6 Query / Index + Encryption Hardening** — complete.
+- **0.7 Query Ergonomics** — complete.
 
-### 0.7 Query Ergonomics
+### 0.8 Rust-native API / Multi-frontend Foundation
 
-Implementation PRs are merged:
+Implementation sequence:
 
 ```text
-PR #44 — fluent queryWhere/comparison/AND/OR/grouping builder
-PR #45 — orderBy/offset/limit + bound terminal find()
-PR #46 — optional BoxField<T> typed metadata + functional API naming
-PR4    — README/examples/API equivalence/compatibility closure (current)
+PR1 — core/FRB boundary audit + Rust-native foundation                merged
+PR2 — Rust-native CRUD/query API + structured errors                 merged
+PR3 — profiles/concurrency + native integration tests/examples       merged
+PR4 — cross-frontend validation + benchmark/docs/version closure     current
 ```
 
-0.7 is complete when this closure PR merges with the full quality bar green.
+0.8 is complete only after PR4's full merge quality bar is green and PR4 is merged to `main`. The closure record is `docs/RELEASE_AUDIT_08.md`.
 
-Normative design: `docs/QUERY_ERGONOMICS_07.md`.
-Closure record: `docs/RELEASE_AUDIT_07.md`.
+## Architecture after 0.8
 
-## Public Dart API after 0.7
+Required dependency direction is now implemented:
 
-Consumers importing only `package:dxtr_box/dxtr_box.dart` should use the exported public surface:
+```text
+Dart API -> FRB adapter ----┐
+                            ├-> shared authoritative Rust core -> redb
+Rust API -------------------┘
+```
+
+The Rust frontend does not wrap Dart or FRB. GPUI remains only a potential downstream consumer and is not a Dxtr_Box dependency.
+
+One canonical storage engine means one durable contract:
+
+```text
+{box}.dxtr
+meta[format_version] = dxtr_box/1
+@dxtr:* durable MessagePack tags where already defined
+```
+
+There is no Rust-native storage format or conversion step between frontends.
+
+## Public Dart API
+
+Consumers importing `package:dxtr_box/dxtr_box.dart` use:
 
 ```text
 Box
@@ -60,35 +78,9 @@ BoxQueryBuilder
 BoxField<T>
 ```
 
-`DxtrBox` remains exported only as a deprecated source-compatibility shim that forwards callers to `BoxStore`.
+`DxtrBox` remains exported in Dart only as a deprecated source-compatibility shim that forwards to `BoxStore`.
 
-The following functional names are implementation seams, not primary consumer API, and must not be presented as barrel-exported types:
-
-```text
-BoxCodec
-NativeBoxApi
-FrbNativeBoxApi
-UnavailableNativeBoxApi
-BoxStoreMigrationInternals
-```
-
-They live under `lib/src/` for package implementation, tests, adapters, or migration internals. Application consumers should not depend on unsupported `src/` imports.
-
-Package/durable identities intentionally retain the product string:
-
-```text
-dxtr_box
-rust_lib_dxtr_box
-.dxtr
-dxtr_box/1
-@dxtr:* durable wire tags
-```
-
-Old codec/native seam names remain only where compatibility requires them internally. New implementation and internal documentation should prefer functional names without implying that internal seams are part of the public barrel.
-
-## 0.7 query authoring contract
-
-String-path authoring remains first-class:
+Dart query authoring remains dynamic-first with optional typed metadata:
 
 ```dart
 final rows = await box
@@ -100,132 +92,113 @@ final rows = await box
     .find();
 ```
 
-Optional typed metadata:
+`BoxField<T>` is metadata only. It does not introduce schema registration, code generation, reflection, automatic indexes, or a second query AST.
 
-```dart
-const status = BoxField<String>('status');
-const age = BoxField<int>('profile.age');
-const name = BoxField<String>('name');
+## Public native Rust API
 
-final rows = await box
-    .queryWhereField(status).equals('active')
-    .andField(age).gte(18)
-    .orderByField(name)
-    .limit(20)
-    .find();
-```
-
-Standalone composition remains AST-only:
-
-```dart
-final query = BoxQueryBuilder
-    .where('score').between(50, 100)
-    .orderBy('score', descending: true)
-    .limit(20)
-    .build();
-```
-
-Direct `Box.query(BoxQuery)` remains first-class for advanced/dynamic composition.
-
-### Query invariants
-
-The fluent and typed APIs are authoring layers only:
+Primary Rust-facing types:
 
 ```text
-string/typed fluent authoring
-  -> existing BoxQuery / QueryFilter AST
-  -> existing serialization / FRB
-  -> existing Rust planner/indexes
-  -> authoritative primary-record recheck
+DxtrBox
+BoxHandle
+Record
+IndexDefinition
+DxtrBoxError
+QueryBuilder / QueryValue / SortOrder under full
 ```
 
-0.7 does not add:
+Representative use:
 
-- a second query AST;
-- Dart-side filtering or sorting;
-- a second native query engine;
-- automatic index creation;
-- mandatory schemas;
-- model/entity code generation;
-- runtime reflection;
-- storage-format changes;
-- native-profile changes.
+```rust
+let db = DxtrBox::open(path)?;
+let assets = db.box_("assets")?;
+assets.put("asset-1", encoded_value)?;
 
-`findFirst`, `exists`, and `count` remain deferred until efficient native-backed operations exist. Do not implement them by materializing full result sets in Dart.
+let rows = assets
+    .query()
+    .where_("workplace_id")
+    .equals("cnx")
+    .order_by("captured_at", SortOrder::Descending)
+    .limit(200)
+    .find()?;
+```
 
-## Current capabilities
+Rust conventions are intentional:
 
-- Rust/redb ACID storage, one `{box}.dxtr` file per box.
-- MessagePack dynamic values.
-- Transactional CRUD and bulk CRUD.
-- Authoritative `get`, `containsKey`, and one-snapshot `getAll` reads.
-- Native cross-handle watch fan-out through FRB streams.
-- Argon2 + ChaCha20Poly1305 persisted encryption.
-- Explicit plaintext-to-encrypted migration.
-- Process crash/reopen durability coverage.
-- Declarative `Box.query(BoxQuery)` with one native query call.
-- Fluent 0.7 string-path query authoring.
-- Optional `BoxField<T>` typed query metadata.
-- Plaintext persisted scalar indexes: equality, range, nested fields, deterministic selection, AND intersection.
-- Encrypted persisted equality indexes under `full` using deterministic keyed BLAKE2b MAC tokens.
-- Encrypted ordered/range predicates remain scan-backed.
-- Deterministic semantic sorting before pagination.
-- Self-contained publishable Flutter FFI plugin topology.
-- Android/iOS/macOS/Linux/Windows staged consumer validation.
-- Native-size baseline/stability/cross-commit regression policy.
-- Four-engine local-database comparison harness plus read/query diagnostics.
+- structured `Result<T, DxtrBoxError>`;
+- `Path` / `PathBuf` root handling;
+- explicit handle ownership/close behavior;
+- `Send + Sync` validation for native handles;
+- synchronous API today, with no forced Tokio commitment.
 
-## Hard correctness invariants
+External-consumer example: `rust/examples/native_consumer.rs`.
 
-Primary `data` is authoritative. Persisted indexes are derived state.
+## Shared query/index contract
 
-Mutations keep primary data and index maintenance in the same redb write transaction; watch events publish only after commit.
-
-Do not replace authoritative native reads with Dart metadata, a Dart whole-box cache, or an implicit long-lived read snapshot.
-
-Encrypted reads always retain full AEAD authentication.
-
-Encrypted persisted indexes:
+Both frontends converge onto one canonical Rust query representation and planner:
 
 ```text
-Equal                  -> keyed equality index may narrow candidates
-GreaterThan            -> authoritative scan
-GreaterThanOrEqual     -> authoritative scan
-LessThan               -> authoritative scan
-LessThanOrEqual        -> authoritative scan
-Between                -> authoritative scan
+Dart BoxQuery/Builder ----┐
+                          ├-> canonical QuerySpec -> planner -> redb
+Rust QueryBuilder --------┘
 ```
 
-For mixed `AND`, equality terms may narrow candidates; ordered/range terms are evaluated after authoritative decrypt/authenticate.
+They share predicate semantics, index selection, encrypted equality behavior, encrypted range scan fallback, authoritative primary rechecks, deterministic sorting, offset, and limit.
 
-Encrypted index entries must never contain raw plaintext scalar bytes.
+Primary `data` remains authoritative. Persisted indexes are derived state and are maintained in the same redb write transaction as primary mutations.
 
-`dxtr_box/1` remains readable. Any storage-format change requires deliberate backward-read/migration evidence.
+Encrypted reads always retain full AEAD authentication. Encrypted ordered/range predicates remain scan-backed; only deterministic keyed equality tokens may narrow candidates under `full`.
 
-## 0.5 read-path evidence retained
+## Cross-frontend evidence in PR4
 
-Controlled boundary evidence:
+`rust/tests/cross_frontend_compat.rs` validates both directions on real `.dxtr` files:
+
+```text
+Rust-native write -> close -> FRB-adapter read
+FRB-adapter write -> close -> Rust-native read
+```
+
+It uses valid MessagePack payloads and performs no export/import or codec conversion between frontends. Because the contract is CRUD-only, it participates in the existing all-target tests for `minimal`, `encryption`, and `full`.
+
+## 0.8 benchmark evidence
+
+Run:
+
+```bash
+bash tool/multi_frontend_benchmark.sh
+```
+
+Equivalent logical workloads run through native Rust and Dart/FRB frontends:
+
+```text
+point get
+100-key get_all / getAll
+indexed equality query + descending sort + limit(50)
+```
+
+Evidence files:
+
+```text
+build/multi-frontend/rust-native.jsonl
+build/multi-frontend/dart-frb.jsonl
+```
+
+These results are diagnostic boundary evidence, not marketing claims. Rust-native timing includes the Rust facade, shared core, validation/encryption/storage work. Dart/FRB timing additionally includes Dart async/public API work, codec work where applicable, generated bridge transport, and cross-runtime overhead.
+
+Do not compare runs from different machines/build modes/workload settings as a speedup ratio.
+
+## Retained 0.5 read-path evidence
+
+Controlled point-read bridge work remains relevant:
 
 ```text
 generated FRB get        ~226 us -> 4.312 us   ~52x faster
 generated FRB contains   ~197 us -> 2.570 us   ~77x faster
 ```
 
-`Box.getAll` uses one native crossing and one redb read snapshot. Do not regress these paths opportunistically during later work.
+`Box.getAll` still uses one native crossing and one redb read snapshot. Do not regress these paths opportunistically.
 
 ## CI topology
-
-```text
-change detection
-      |
-      v
-   Fast CI
-      |
-      +--> affected expensive validation during Draft iteration
-      |
-      v
-Merge Gate / full quality bar
-```
 
 Cheap local preflight:
 
@@ -241,168 +214,45 @@ bash tool/install_git_hooks.sh
 
 Full merge validation preserves:
 
-- minimum Flutter/Dart compatibility;
-- Dart/Rust/native tests;
-- exact three native profiles;
-- migration/query/crash-reopen regression;
+- format/analyze/tests;
+- Flutter 3.22 / Dart 3.4 minimum compatibility;
+- Rust minimal/encryption/full all-target tests;
+- native integration;
+- migration/query/index/crash-reopen regression;
 - FRB generated-binding reproducibility;
 - native-size policy;
 - package/pub readiness;
 - benchmark correctness/smoke;
 - staged Android/iOS/macOS/Linux/Windows consumers.
 
-## Next milestone — 0.8 Rust-native API / Multi-frontend Foundation
+PR4 adds cross-frontend compatibility to the Rust all-target profile matrix and provides a reproducible multi-frontend benchmark runner without weakening existing gates.
 
-Start **only after 0.7 is merged to a clean `main`**.
+## 0.8 non-goals retained
 
-Goal: evolve Dxtr_Box into a storage engine with a Dart frontend and a first-class native Rust frontend over one shared authoritative Rust storage core.
-
-```text
-Dart frontend
-    |
-    v
-FRB adapter
-    |
-    v
-shared Rust core
-    |
-    v
-redb
-
-Rust frontend
-    |
-    v
-shared Rust core
-    |
-    v
-redb
-```
-
-Required dependency direction:
-
-```text
-Dart API ----> FRB adapter ----┐
-                              ├----> shared Rust core ----> redb
-Rust API ---------------------┘
-```
-
-The Rust frontend must not wrap Dart or FRB. GPUI is only an expected consumer, not a Dxtr_Box dependency or architectural target.
-
-### 0.8 Phase 1 — architecture audit
-
-Before changing crate topology, document:
-
-1. where authoritative storage behavior currently lives;
-2. which modules/types are FRB-specific;
-3. whether query/index/encryption domain types are reusable without FRB;
-4. bridge DTOs that should become native Rust domain types;
-5. serialization that exists only because Dart calls the engine;
-6. errors currently flattened to strings for FRB;
-7. whether the current Rust crate links cleanly as an `rlib`;
-8. Flutter/FRB-specific dependencies/features;
-9. minimum module/crate boundary changes required;
-10. whether current Rust tests already exercise the engine without FRB initialization.
-
-Prefer the smallest topology that creates real dependency separation. Do not create extra crates merely for architectural aesthetics.
-
-### 0.8 Rust-native API direction
-
-Use normal Rust conventions rather than mechanically copying Dart:
-
-```rust
-let db = DxtrBox::open(path)?;
-let assets = db.box_("assets")?;
-
-let rows = assets
-    .query()
-    .where_("workplace_id")
-    .equals(workplace_id)
-    .order_by("captured_at", SortOrder::Descending)
-    .limit(200)
-    .find()?;
-```
-
-Prefer:
-
-- structured `Result<T, DxtrBoxError>` errors;
-- `Path` / `PathBuf`;
-- explicit ownership/lifetime behavior;
-- documented `Send` / `Sync` behavior;
-- no forced Tokio commitment;
-- no GPUI dependency.
-
-Minimum meaningful Rust-native surface should cover existing engine capabilities only: open/create, CRUD, batch reads/iteration, canonical queries, sort/pagination, indexes, migration, encryption where supported, and close/flush semantics where required.
-
-### One query engine across both frontends
-
-```text
-Dart query builder ----┐
-                       ├----> canonical Rust query representation ----> planner
-Rust query builder ----┘
-```
-
-Both frontends must share predicate semantics, planner, persisted-index selection, encrypted equality rules, encrypted range scan fallback, authoritative rechecks, sorting, offset, and limit behavior.
-
-### 0.8 validation
-
-Add external-consumer-style native Rust tests for:
-
-```text
-open
-put/get/delete
-reopen
-query
-index
-sorting
-pagination
-migration
-encryption when enabled
-```
-
-Add cross-frontend compatibility evidence where practical:
-
-```text
-Rust API write -> Dart/FRB-compatible read
-Dart/FRB-compatible write -> Rust API read
-```
-
-Both frontends must use the same `dxtr_box/1` database. There is no Rust-native storage format.
-
-### Proposed 0.8 PR strategy
-
-```text
-PR1 — core/FRB boundary audit + Rust-native foundation
-PR2 — Rust-native CRUD/query API + structured errors
-PR3 — profiles/concurrency + native integration tests/examples
-PR4 — cross-frontend validation + benchmark evidence + docs/milestone closure
-```
-
-Adjust only if the actual Rust tree shows a safer decomposition.
-
-### 0.8 non-goals
-
-Do not turn 0.8 into:
+Do not turn the closure into:
 
 - GPUI integration;
 - a GUI framework package;
+- Tokio/runtime commitment;
 - ORM/schema/model code generation;
 - sync/CRDT/vector-clock infrastructure;
 - networking/server database functionality;
 - storage-format redesign;
-- a query-engine rewrite;
-- a new encryption design;
+- query-engine rewrite;
+- encryption redesign;
 - a fourth native profile;
-- a broad Dart API redesign.
+- broad Dart API redesign.
 
-## Post-0.7 maturity candidates
+## Post-0.8 candidates
 
-Later candidates only:
+Consider later, only with evidence:
 
-1. reusable conformance/storage-contract test kit;
-2. schema/config fingerprint + startup fast path;
-3. broader typed metadata only if `BoxField<T>` proves valuable while keeping dynamic APIs first-class;
+1. reusable cross-frontend conformance/storage-contract test kit;
+2. schema/config fingerprint and startup fast path;
+3. broader typed metadata only if `BoxField<T>` proves useful while dynamic APIs stay first-class;
 4. capability abstractions only when multiple execution variants justify them;
-5. user-facing benchmark scenarios rather than isolated microbenchmarks only.
+5. user-facing end-to-end benchmark scenarios;
+6. an explicit GPUI consumer integration project outside the core package if needed.
 
 ## Deferred unless explicitly reprioritized
 
@@ -417,4 +267,4 @@ Later candidates only:
 
 ## Working rule
 
-Correctness, durability, authenticated encryption, cross-process visibility, compatibility, and evidence quality take priority over feature count or benchmark wins.
+Correctness, durability, authenticated encryption, cross-process/cross-frontend visibility, compatibility, and evidence quality take priority over feature count or benchmark wins.

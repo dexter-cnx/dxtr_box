@@ -1,6 +1,6 @@
 name: dxtr_box
 description: A fast, ACID, encrypted, Rust-powered NoSQL box database for Flutter. No model code generation.
-version: 0.7.0-dev.1
+version: 0.8.0-dev.1
 homepage: https://github.com/dexter-cnx/dxtr_box
 repository: https://github.com/dexter-cnx/dxtr_box
 issue_tracker: https://github.com/dexter-cnx/dxtr_box/issues
