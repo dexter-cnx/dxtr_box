@@ -17,7 +17,7 @@ const DEFAULT_RECORDS: usize = 1_000;
 const WARMUP_ITERATIONS: usize = 20;
 
 #[test]
-#[ignore = "purpose-built 0.8 multi-frontend diagnostic; run through make benchmark-multi-frontend"]
+#[ignore = "purpose-built 0.8 multi-frontend diagnostic; run through tool/multi_frontend_benchmark.sh"]
 fn rust_native_frontend_benchmark() {
     let iterations = env_usize(
         "DXTR_BOX_MULTI_FRONTEND_RUST_ITERATIONS",
