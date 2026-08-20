@@ -2,27 +2,28 @@
 
 [![CI](https://github.com/dexter-cnx/dxtr_box/actions/workflows/ci.yml/badge.svg)](https://github.com/dexter-cnx/dxtr_box/actions/workflows/ci.yml)
 
-**Native local database for Flutter, forged in Rust. By Dxtr.**
+**Native local database for Flutter and Rust, forged in Rust. By Dxtr.**
 
-`dxtr_box` is a Rust/redb-backed local database for Flutter with ACID persistence, authenticated encryption, native queries, persisted indexes, watch streams, migration tooling, and a simple box-style Dart API. No model code generation is required.
+`dxtr_box` is a Rust/redb-backed local database engine with a Flutter/Dart frontend and a first-class native Rust frontend. Both frontends share the same authoritative Rust storage/query core, `dxtr_box/1` durable format, ACID persistence, authenticated encryption, native queries, persisted indexes, and batch reads. No model code generation is required.
 
-> Status: **0.7 Query Ergonomics is complete pending closure PR merge.** PR #44 added fluent predicates, PR #45 added sort/pagination/bound `find()`, and PR #46 added optional `BoxField<T>` typed field metadata plus functional API naming. The package remains pre-1.0; public API and storage format are not yet declared stable.
+> Status: **0.8 Rust-native API / Multi-frontend Foundation is at closure PR.** PR1 established the shared-core boundary, PR2 added the Rust-native CRUD/query API, PR3 validated profiles/concurrency and added a native consumer example, and PR4 adds cross-frontend compatibility plus benchmark evidence and final documentation/version synchronization. The package remains pre-1.0; public API and storage format are not yet declared stable.
 
 ## Key features
 
-- Rust/redb ACID storage outside the Dart heap.
-- Async box-style CRUD and transactional bulk operations.
-- Authoritative optimized point reads and one-snapshot `getAll`.
+- One Rust/redb ACID storage engine shared by Dart/FRB and native Rust frontends.
+- Async box-style Dart CRUD plus idiomatic `Result<T, DxtrBoxError>` Rust APIs.
+- Authoritative optimized point reads and one-snapshot `getAll` / `get_all`.
 - Declarative native queries with nested fields, groups, sort, offset, and limit.
-- Fluent query builder with bound terminal `find()`.
-- Optional `BoxField<T>` typed field-path metadata without schema/codegen/ORM requirements.
+- Fluent Dart query builder and native Rust query builder over one canonical planner.
+- Optional `BoxField<T>` typed Dart field-path metadata without schema/codegen/ORM requirements.
 - Persisted plaintext equality/range indexes.
 - Encrypted equality indexes using domain-separated keyed BLAKE2b tokens under `full`.
 - Argon2 + ChaCha20Poly1305 authenticated encryption.
 - Native cross-handle watch events through Flutter Rust Bridge.
 - Explicit plaintext-to-encrypted migration and optional Hive CE migration tooling.
-- Android, iOS, macOS, Linux, and Windows staged consumer validation.
-- Self-contained Flutter FFI plugin topology.
+- Android, iOS, macOS, Linux, and Windows staged Flutter consumer validation.
+- Rust `rlib` consumer support with no Dart/FRB dependency direction.
+- Cross-frontend storage compatibility tests and reproducible multi-frontend diagnostics.
 
 ## Compatibility
 
@@ -37,9 +38,19 @@ durable format = dxtr_box/1
 
 The minimum SDK floor is validated in CI using Flutter 3.22.0 / Dart 3.4.0.
 
-## Basic API
+## Architecture
 
-Use `BoxStore` as the primary storage facade:
+```text
+Dart API -> FRB adapter ----┐
+                            ├-> shared Rust core -> redb
+Rust API -------------------┘
+```
+
+The Rust frontend never wraps Dart or FRB. GPUI is a possible downstream consumer, not a `dxtr_box` dependency.
+
+## Dart API
+
+Use `BoxStore` as the primary Flutter/Dart storage facade:
 
 ```dart
 await BoxStore.init();
@@ -47,7 +58,6 @@ final box = await BoxStore.open('settings');
 
 await box.put('theme', 'dark');
 final theme = await box.get('theme');
-
 final selected = await box.getAll(['theme', 'missing', 'theme']);
 
 await box.deleteAll(['theme', 'legacy']);
@@ -55,7 +65,35 @@ await box.compact();
 await box.close();
 ```
 
-`DxtrBox` remains available only as a deprecated source-compatibility shim. New code and documentation should use `BoxStore`.
+`DxtrBox` remains available in Dart only as a deprecated source-compatibility shim. New Dart code and documentation should use `BoxStore`.
+
+## Rust-native API
+
+The Rust frontend exposes normal Rust ownership/error conventions over the same storage engine:
+
+```rust
+use rust_lib_dxtr_box::{DxtrBox, SortOrder};
+
+let db = DxtrBox::open("./data")?;
+let assets = db.box_("assets")?;
+
+assets.put("asset-1", encoded_value)?;
+let value = assets.get("asset-1")?;
+
+let rows = assets
+    .query()
+    .where_("workplace_id")
+    .equals("cnx")
+    .order_by("captured_at", SortOrder::Descending)
+    .limit(200)
+    .find()?;
+
+assets.close()?;
+```
+
+`DxtrBox`, `BoxHandle`, `Record`, `IndexDefinition`, and `DxtrBoxError` are native Rust-facing types. Query types are available under the `full` profile. The native frontend is synchronous today and does not impose a Tokio runtime.
+
+See `rust/examples/native_consumer.rs` for the external-consumer-style example.
 
 ## Encryption
 
@@ -71,9 +109,7 @@ await secure.close();
 
 Encrypted boxes require the same key on reopen. Encrypted reads retain full AEAD authentication. Plaintext-to-encrypted conversion is explicit and transactional.
 
-## Fluent queries
-
-### String-path authoring
+## Fluent Dart queries
 
 ```dart
 final users = await box
@@ -85,87 +121,26 @@ final users = await box
     .find();
 ```
 
-Supported comparisons:
+Supported comparisons include `equals`, `notEquals`, `gt`, `gte`, `lt`, `lte`, `between`, `isNull`, `isNotNull`, AND/OR, and grouped AND/OR composition. Mixed chains are left-associative; use explicit groups when precedence matters.
 
-```text
-equals / notEquals
-gt / gte / lt / lte
-between
-isNull / isNotNull
-and / or
-andGroup / orGroup
-```
-
-Mixed `AND` / `OR` chains are left-associative. Use explicit groups when precedence matters.
-
-### Optional typed field metadata
+Optional typed metadata remains available without making schemas mandatory:
 
 ```dart
 const status = BoxField<String>('status');
 const age = BoxField<int>('profile.age');
-const name = BoxField<String>('name');
 
 final users = await box
     .queryWhereField(status).equals('active')
     .andField(age).gte(18)
-    .orderByField(name)
     .limit(20)
     .find();
 ```
 
-`BoxField<T>` is metadata only. It does not register a schema, generate serializers, create indexes, use reflection, or alter storage. String-path APIs remain first-class and may be mixed with typed metadata.
-
-### Standalone AST composition
-
-```dart
-final query = BoxQueryBuilder
-    .where('price').between(100, 500)
-    .and('category').equals('camera')
-    .orderBy('price')
-    .limit(20)
-    .build();
-
-final rows = await box.query(query);
-```
-
-Standalone builders intentionally expose `build()` but not `find()` because they do not carry a `Box` execution context.
-
-### Direct declarative AST
-
-`Box.query(BoxQuery)` remains first-class for advanced or dynamic composition:
-
-```dart
-final rows = await box.query(
-  BoxQuery(
-    where: QueryGroup.and([
-      QueryComparison(
-        field: 'profile.age',
-        operator: QueryOperator.greaterThanOrEqual,
-        value: 18,
-      ),
-      QueryComparison(
-        field: 'status',
-        operator: QueryOperator.equal,
-        value: 'active',
-      ),
-    ]),
-    sortBy: [
-      QuerySort(
-        field: 'profile.age',
-        direction: QuerySortDirection.descending,
-        nulls: QueryNullOrder.last,
-      ),
-    ],
-    limit: 20,
-  ),
-);
-```
-
-The fluent and typed APIs compile to the same `BoxQuery` / `QueryFilter` AST and execute through the same Rust planner. There is no Dart-side query engine or second wire representation.
+The Dart fluent/typed layers and the Rust-native builder execute through the same canonical Rust query representation and planner. There is no Dart-side query engine and no Rust-only query engine.
 
 ## Query execution guarantees
 
-- one native call per executed declarative query;
+- one native call per executed declarative Dart query;
 - dotted nested fields;
 - deterministic semantic sorting before pagination;
 - one redb read snapshot for planner, primary reads, and sort inputs;
@@ -180,7 +155,7 @@ Persisted indexes narrow `where` candidates only; they do not currently satisfy 
 
 ```dart
 await box.createIndex(
-  const IndexDefinition(name: 'by-age', field: 'profile.age'),
+  IndexDefinition(name: 'by-age', field: 'profile.age'),
 );
 
 final indexes = await box.listIndexes();
@@ -225,6 +200,36 @@ Exactly three Rust capability profiles are supported:
 
 Do not add a fourth profile merely for binary-size tuning.
 
+## Cross-frontend compatibility
+
+`rust/tests/cross_frontend_compat.rs` verifies both durable directions against the same database files:
+
+```text
+Rust-native write -> close -> FRB-adapter read
+FRB-adapter write -> close -> Rust-native read
+```
+
+No export/import or format translation is involved. The test is part of the existing Rust all-target/profile matrix, so CRUD compatibility is exercised under `minimal`, `encryption`, and `full`.
+
+## Multi-frontend benchmark evidence
+
+Run the reproducible 0.8 diagnostic:
+
+```bash
+bash tool/multi_frontend_benchmark.sh
+```
+
+It runs equivalent logical workloads for native Rust and Dart/FRB and emits:
+
+```text
+build/multi-frontend/rust-native.jsonl
+build/multi-frontend/dart-frb.jsonl
+```
+
+The matrix covers point `get`, 100-key batch read, and an indexed equality query with sort/limit. Treat results as boundary diagnostics, not marketing claims: Dart/FRB measurements include cross-runtime and Dart-side overhead that direct Rust measurements do not.
+
+See `docs/RELEASE_AUDIT_08.md` for the exact workload and interpretation rules.
+
 ## Package architecture
 
 ```text
@@ -241,8 +246,6 @@ example/
 
 The package identity `dxtr_box`, native library identity `rust_lib_dxtr_box`, `.dxtr` files, durable marker `dxtr_box/1`, and existing `@dxtr:*` wire tags are compatibility identities and intentionally retain the brand string.
 
-Ordinary API/domain symbols use functional names such as `Box`, `BoxStore`, `BoxCodec`, `NativeBoxApi`, `BoxQueryBuilder`, and `BoxField`.
-
 ## CI and validation
 
 The merge quality bar covers:
@@ -251,6 +254,7 @@ The merge quality bar covers:
 - Flutter 3.22 / Dart 3.4 minimum compatibility;
 - exact `minimal | encryption | full` Rust profiles;
 - native integration;
+- Rust-native external integration/profile/concurrency coverage;
 - migration/query/index/crash-reopen regressions;
 - generated FRB reproducibility;
 - native-size regression policy;
@@ -266,14 +270,13 @@ bash tool/install_git_hooks.sh
 
 ## Documentation
 
-- `docs/QUERY_ERGONOMICS_07.md` — 0.7 fluent/typed query design.
-- `docs/RELEASE_AUDIT_07.md` — 0.7 closure and API equivalence matrix.
-- `docs/PROJECT_HANDOFF.md` — current project state and next milestone.
-- `docs/CODE_WALKTHROUGH.md` — current runtime/API execution paths.
-- `docs/QUERY_INDEX_ENCRYPTION_06.md` — encrypted index contract.
+- `docs/RELEASE_AUDIT_08.md` — 0.8 closure, cross-frontend evidence, benchmark contract.
+- `docs/RUST_NATIVE_ARCHITECTURE_AUDIT_08.md` — shared-core/native frontend architecture audit.
+- `docs/RUST_NATIVE_PROFILES_CONCURRENCY_08.md` — profile and concurrency contract.
+- `docs/PROJECT_HANDOFF.md` — current project state and next work.
+- `docs/CODE_WALKTHROUGH.md` — current Dart/FRB/Rust execution paths.
+- `docs/QUERY_ERGONOMICS_07.md` — fluent/typed Dart query design.
 
-## Direction after 0.7
+## Direction after 0.8
 
-The next planned milestone is **0.8 Rust-native API / Multi-frontend Foundation**: a first-class Rust frontend and the existing Dart frontend over one shared authoritative Rust storage core. GPUI may consume the Rust frontend later, but is not a dependency of Dxtr_Box.
-
-See `docs/PROJECT_HANDOFF.md` for the guarded 0.8 plan.
+0.8 deliberately stops at the multi-frontend storage foundation. GPUI integration, ORM/model generation, cloud sync/networking, storage-format redesign, a fourth native profile, and a new query/encryption engine remain out of scope unless separately planned.
