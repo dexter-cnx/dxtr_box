@@ -1,3 +1,15 @@
+## 0.8.0-dev.1
+
+- Established one authoritative Rust storage/query core with two frontends: the existing Flutter/Dart API through flutter_rust_bridge and a first-class native Rust API that links directly to the shared core.
+- Added native Rust `DxtrBox` / `BoxHandle` lifecycle, CRUD, batch reads, query/sort/pagination, persisted-index operations, profile-aware encryption support, and structured `DxtrBoxError` results without wrapping Dart/FRB.
+- Preserved one `dxtr_box/1` durable format and the existing `.dxtr` files across both frontends; no Rust-only storage format or conversion layer was introduced.
+- Validated `minimal`, `encryption`, and `full` native profiles plus `Send + Sync`, multi-threaded same-box mutations, shared-handle lifecycle, encrypted reopen behavior, and full-profile query/index behavior.
+- Added an external-consumer-style native Rust example and kept the native API synchronous without imposing Tokio or adding GPUI as a dependency.
+- Added bidirectional cross-frontend compatibility tests: Rust-native write -> FRB-adapter read and FRB-adapter write -> Rust-native read on the same physical database files.
+- Added reproducible Rust-native vs Dart/FRB diagnostic workloads for point `get`, 100-key batch reads, and indexed query + sort + limit, emitting JSONL evidence with explicit non-marketing interpretation rules.
+- Synchronized README, project handoff, code walkthrough, release audit, and package version for the 0.8 closure.
+- Preserved Dart >=3.4 / Flutter >=3.22, flutter_rust_bridge 2.8.0, redb 2.1.0, native library `rust_lib_dxtr_box`, and exactly `minimal | encryption | full` native profiles.
+
 ## 0.7.0-dev.1
 
 - Added fluent query authoring over the existing `BoxQuery` / `QueryFilter` AST with `BoxQueryBuilder.where(...)` and collision-free `box.queryWhere(...)` while preserving legacy `Box.where(predicate)`.
