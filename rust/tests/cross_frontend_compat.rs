@@ -20,7 +20,10 @@ fn rust_native_write_is_readable_through_frb_adapter() {
     items.close().unwrap();
 
     let storage_file = dir.path().join("cross_frontend_rust_to_frb.dxtr");
-    assert!(storage_file.is_file(), "both frontends must share one .dxtr file");
+    assert!(
+        storage_file.is_file(),
+        "both frontends must share one .dxtr file"
+    );
 
     api::init_db(dir.path().to_string_lossy().into_owned()).unwrap();
     api::open_box("cross_frontend_rust_to_frb".to_string(), None).unwrap();
@@ -52,7 +55,10 @@ fn frb_adapter_write_is_readable_through_rust_native_frontend() {
     api::close_box("cross_frontend_frb_to_rust".to_string()).unwrap();
 
     let storage_file = dir.path().join("cross_frontend_frb_to_rust.dxtr");
-    assert!(storage_file.is_file(), "both frontends must share one .dxtr file");
+    assert!(
+        storage_file.is_file(),
+        "both frontends must share one .dxtr file"
+    );
 
     let db = DxtrBox::open(dir.path()).unwrap();
     let items = db.box_("cross_frontend_frb_to_rust").unwrap();
