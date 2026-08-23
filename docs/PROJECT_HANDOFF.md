@@ -23,30 +23,40 @@ native profiles:        minimal | encryption | full
 
 ## Milestone state
 
-Closed before 0.8:
+Completed:
 
-- **0.3 Query / Index / Migration** — complete.
-- **0.4 Production Hardening PH-01..PH-05** — complete.
-- **0.5 Performance / Read-path Optimization** — complete.
-- **0.6 Query / Index + Encryption Hardening** — complete.
-- **0.7 Query Ergonomics** — complete.
+- **0.3 Query / Index / Migration**
+- **0.4 Production Hardening PH-01..PH-05**
+- **0.5 Performance / Read-path Optimization**
+- **0.6 Query / Index + Encryption Hardening**
+- **0.7 Query Ergonomics**
+- **0.8 Rust-native API / Multi-frontend Foundation**
 
-### 0.8 Rust-native API / Multi-frontend Foundation
+0.8 closure is recorded in `docs/RELEASE_AUDIT_08.md`.
 
-Implementation sequence:
+### 0.9 Conformance & Startup Maturity
+
+Current sequence:
 
 ```text
-PR1 — core/FRB boundary audit + Rust-native foundation                merged
-PR2 — Rust-native CRUD/query API + structured errors                 merged
-PR3 — profiles/concurrency + native integration tests/examples       merged
-PR4 — cross-frontend validation + benchmark/docs/version closure     current
+PR1 — reusable cross-frontend storage conformance test kit                   merged
+PR2 — schema/index config fingerprint design + correctness guards            current
+PR3 — cold-open/reopen benchmark; runtime fast path only if evidence justifies
+PR4 — cross-frontend closure audit + docs/version sync
 ```
 
-0.8 is complete only after PR4's full merge quality bar is green and PR4 is merged to `main`. The closure record is `docs/RELEASE_AUDIT_08.md`.
+PR2's current design conclusion is intentionally conservative: do not persist a configuration fingerprint merely to hash the already-authoritative `index_definitions` table. Dxtr_Box has no consumer-supplied desired schema/index manifest at open time and currently performs no automatic schema/index reconciliation or rebuild pass that such a hash could skip.
+
+PR3 must therefore profile the existing startup/reopen path before introducing durable metadata or runtime shortcuts. An evidence-backed no-op runtime decision is acceptable and preferable to speculative state.
+
+See:
+
+- `docs/CONFORMANCE_09.md`
+- `docs/CONFIG_FINGERPRINT_DECISION_09.md`
 
 ## Architecture after 0.8
 
-Required dependency direction is now implemented:
+Required dependency direction is implemented:
 
 ```text
 Dart API -> FRB adapter ----┐
@@ -149,16 +159,18 @@ Primary `data` remains authoritative. Persisted indexes are derived state and ar
 
 Encrypted reads always retain full AEAD authentication. Encrypted ordered/range predicates remain scan-backed; only deterministic keyed equality tokens may narrow candidates under `full`.
 
-## Cross-frontend evidence in PR4
+## Cross-frontend conformance
 
-`rust/tests/cross_frontend_compat.rs` validates both directions on real `.dxtr` files:
+0.8 established bidirectional same-file compatibility with `rust/tests/cross_frontend_compat.rs`:
 
 ```text
 Rust-native write -> close -> FRB-adapter read
 FRB-adapter write -> close -> Rust-native read
 ```
 
-It uses valid MessagePack payloads and performs no export/import or codec conversion between frontends. Because the contract is CRUD-only, it participates in the existing all-target tests for `minimal`, `encryption`, and `full`.
+0.9 PR1 adds a reusable internal `StorageBoxContract` under `rust/tests/support/` and runs the same CRUD/batch/deletion semantics against both frontends. The initial contract covers missing-key behavior, put/get/contains, overwrite, bulk put, `get_all` ordering/duplicate/miss behavior, key enumeration, delete/delete-all, clear, and final empty state.
+
+PR2 adds full-profile index-configuration guards across both frontends so future startup work cannot accidentally replace the dynamic-first index lifecycle with implicit schema registration.
 
 ## 0.8 benchmark evidence
 
@@ -185,7 +197,7 @@ build/multi-frontend/dart-frb.jsonl
 
 These results are diagnostic boundary evidence, not marketing claims. Rust-native timing includes the Rust facade, shared core, validation/encryption/storage work. Dart/FRB timing additionally includes Dart async/public API work, codec work where applicable, generated bridge transport, and cross-runtime overhead.
 
-Do not compare runs from different machines/build modes/workload settings as a speedup ratio.
+Do not compare runs from different machines, build modes, record counts, or workload settings as a speedup ratio.
 
 ## Retained 0.5 read-path evidence
 
@@ -225,11 +237,22 @@ Full merge validation preserves:
 - benchmark correctness/smoke;
 - staged Android/iOS/macOS/Linux/Windows consumers.
 
-PR4 adds cross-frontend compatibility to the Rust all-target profile matrix and provides a reproducible multi-frontend benchmark runner without weakening existing gates.
+## 0.9 fingerprint/startup rule
 
-## 0.8 non-goals retained
+Do not introduce a schema/index fingerprint unless there is an independently meaningful expected configuration to compare with durable state and a measured reconciliation cost to skip.
 
-Do not turn the closure into:
+A future fingerprint must never bypass:
+
+- `dxtr_box/1` format validation;
+- encryption metadata/key validation;
+- reduced-profile safety checks;
+- authoritative fallback on missing/unknown/mismatched metadata.
+
+Any durable fingerprint must be deterministic, versioned, transactionally updated with the configuration it summarizes, compatible with old boxes that lack it, and justified by cold-open/reopen evidence.
+
+## Non-goals retained
+
+Do not turn 0.9 into:
 
 - GPUI integration;
 - a GUI framework package;
@@ -243,16 +266,15 @@ Do not turn the closure into:
 - a fourth native profile;
 - broad Dart API redesign.
 
-## Post-0.8 candidates
+## Post-0.9 candidates
 
 Consider later, only with evidence:
 
-1. reusable cross-frontend conformance/storage-contract test kit;
-2. schema/config fingerprint and startup fast path;
-3. broader typed metadata only if `BoxField<T>` proves useful while dynamic APIs stay first-class;
-4. capability abstractions only when multiple execution variants justify them;
-5. user-facing end-to-end benchmark scenarios;
-6. an explicit GPUI consumer integration project outside the core package if needed.
+1. broader typed metadata only if `BoxField<T>` proves useful while dynamic APIs stay first-class;
+2. capability abstractions only when multiple execution variants justify them;
+3. user-facing end-to-end benchmark scenarios;
+4. an explicit GPUI consumer integration project outside the core package if needed;
+5. public conformance-kit extraction only if downstream frontend/adapter authors need it.
 
 ## Deferred unless explicitly reprioritized
 
