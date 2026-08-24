@@ -134,9 +134,10 @@ Future<RealWorldResult> _catalogScenario(
       stopwatch.stop();
       elapsed.add(stopwatch.elapsedMicroseconds);
 
-      final actualKeys = batch
-          .map((entry) => entry.key)
-          .toList(growable: false);
+      final actualKeys = <String>[];
+      for (final entry in batch) {
+        actualKeys.add(entry.key);
+      }
       if (!_sameStrings(actualKeys, hotKeys)) {
         throw StateError('catalog scenario batch ordering validation failed');
       }
@@ -147,11 +148,11 @@ Future<RealWorldResult> _catalogScenario(
         }
         final value = Map<String, Object?>.from(raw);
         final expected = fixture[hotKeys[index]]!;
-        if (value['id'] != expected['id'] ||
-            value['name'] != expected['name']) {
-          throw StateError(
-            'catalog scenario batch value validation failed for ${hotKeys[index]}',
-          );
+        final idMatches = value['id'] == expected['id'];
+        final nameMatches = value['name'] == expected['name'];
+        if (!idMatches || !nameMatches) {
+          final key = hotKeys[index];
+          throw StateError('catalog scenario value validation failed for $key');
         }
       }
     }
@@ -198,9 +199,7 @@ Future<RealWorldResult> _activityScenario(
     for (var sample = 0; sample < samples; sample++) {
       final stopwatch = Stopwatch()..start();
       for (var index = 0; index < readCount; index++) {
-        await box.get(
-          'event-${(records - 1 - index).toString().padLeft(8, '0')}',
-        );
+        await box.get(_activityKey(records - 1 - index));
       }
       stopwatch.stop();
       elapsed.add(stopwatch.elapsedMicroseconds);
@@ -214,7 +213,7 @@ Future<RealWorldResult> _activityScenario(
     }
     final retainedIndex = deleteKeys.length;
     if (retainedIndex < records) {
-      final retainedKey = 'event-${retainedIndex.toString().padLeft(8, '0')}';
+      final retainedKey = _activityKey(retainedIndex);
       if (!await box.containsKey(retainedKey)) {
         throw StateError('activity retention removed first retained record');
       }
@@ -270,6 +269,10 @@ String _dartBuildMode() {
     return 'profile';
   }
   return 'debug';
+}
+
+String _activityKey(int index) {
+  return 'event-${index.toString().padLeft(8, '0')}';
 }
 
 bool _sameStrings(List<String> actual, List<String> expected) {
