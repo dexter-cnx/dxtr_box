@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - 'lib/**'
       - 'benchmark/lib/real_world_*.dart'
       - 'benchmark/test/real_world_*.dart'
-      - 'rust/src/real_world_bench.rs'
-      - 'rust/src/lib.rs'
+      - 'rust/src/**'
       - 'tool/real_world_workloads.sh'
       - '.github/workflows/real_world_workloads.yml'
       - 'docs/REAL_WORLD_WORKLOADS_010.md'
