@@ -22,10 +22,14 @@ Opening an existing box performs bounded metadata checks:
 
 1. open the redb database;
 2. ensure the primary/meta tables are available;
-3. verify `meta[format_version] == dxtr_box/1`;
+3. resolve format metadata:
+   - for boxes that already contain `meta[format_version]`, verify the stored value is exactly `dxtr_box/1`;
+   - for legacy plaintext boxes that predate format metadata, initialize the missing metadata as `dxtr_box/1` rather than pretending an existing value was validated;
 4. resolve and validate encryption metadata/key state;
 5. under reduced profiles, reject boxes that contain persisted indexes;
 6. under `full`, ensure the existing index-definition/index-entry tables exist.
+
+The legacy metadata-initialization path is an explicit compatibility behavior that any future startup optimization must preserve. A fast path must not skip validation when a format value already exists, and it must not break the supported initialization path for legacy boxes whose format metadata is absent.
 
 There is currently no schema scan, model registration pass, automatic index declaration pass, or index rebuild/reconciliation pass on every open.
 
@@ -72,7 +76,7 @@ A persisted configuration fingerprint may be reconsidered only if at least one o
 Any future fingerprint must still satisfy:
 
 - deterministic, versioned canonical input encoding;
-- no skipping of `dxtr_box/1` format validation;
+- no skipping of existing-format validation or the supported legacy metadata-initialization path;
 - no skipping of encryption/key validation;
 - mismatch/unknown-version fallback to authoritative reconciliation;
 - transactional updates with the configuration they summarize;
