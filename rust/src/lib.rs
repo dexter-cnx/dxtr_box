@@ -21,6 +21,8 @@ pub mod native;
 mod query;
 #[cfg(test)]
 mod read_path_bench;
+#[cfg(all(test, feature = "full"))]
+mod real_world_bench;
 
 pub use api::*;
 pub use error::DxtrBoxError;
