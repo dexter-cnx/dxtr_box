@@ -134,7 +134,9 @@ Future<RealWorldResult> _catalogScenario(
       stopwatch.stop();
       elapsed.add(stopwatch.elapsedMicroseconds);
 
-      final actualKeys = batch.map((entry) => entry.key).toList(growable: false);
+      final actualKeys = batch
+          .map((entry) => entry.key)
+          .toList(growable: false);
       if (!_sameStrings(actualKeys, hotKeys)) {
         throw StateError('catalog scenario batch ordering validation failed');
       }
@@ -145,7 +147,8 @@ Future<RealWorldResult> _catalogScenario(
         }
         final value = Map<String, Object?>.from(raw);
         final expected = fixture[hotKeys[index]]!;
-        if (value['id'] != expected['id'] || value['name'] != expected['name']) {
+        if (value['id'] != expected['id'] ||
+            value['name'] != expected['name']) {
           throw StateError(
             'catalog scenario batch value validation failed for ${hotKeys[index]}',
           );
