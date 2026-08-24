@@ -17,10 +17,18 @@ void main() {
         Platform.environment['DXTR_BOX_REAL_WORLD_SAMPLES'] ?? '',
       ) ??
       5;
+  final nativeBuildMode =
+      Platform.environment['DXTR_BOX_NATIVE_BUILD_MODE']?.trim() ?? '';
 
   test(
     'Dart/FRB real-world workload runner emits validated JSONL evidence',
     () async {
+      if (nativeBuildMode.isEmpty) {
+        throw StateError(
+          'DXTR_BOX_NATIVE_BUILD_MODE must identify the loaded native build.',
+        );
+      }
+
       final root = await Directory.systemTemp.createTemp(
         'dxtr_box_real_world_',
       );
@@ -32,6 +40,7 @@ void main() {
 
       final results = await runDxtrRealWorldScenarios(
         root: root,
+        nativeBuildMode: nativeBuildMode,
         catalogRecords: catalogRecords,
         activityRecords: activityRecords,
         samples: samples,
@@ -50,6 +59,8 @@ void main() {
         expect(result['frontend'], 'dart_frb');
         expect(result['samples'], samples);
         expect(result['median_us'], isA<int>());
+        expect(result['dart_build_mode'], anyOf('debug', 'profile', 'release'));
+        expect(result['native_build_mode'], nativeBuildMode);
       }
 
       for (final line in encodeRealWorldJsonl(results).split('\n')) {
