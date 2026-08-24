@@ -7,6 +7,7 @@ RUST_ITERATIONS="${DXTR_BOX_MULTI_FRONTEND_RUST_ITERATIONS:-200}"
 DART_ITERATIONS="${DXTR_BOX_MULTI_FRONTEND_DART_ITERATIONS:-200}"
 SAMPLES="${DXTR_BOX_MULTI_FRONTEND_SAMPLES:-5}"
 RECORDS="${DXTR_BOX_MULTI_FRONTEND_RECORDS:-1000}"
+STARTUP_ITERATIONS="${DXTR_BOX_STARTUP_ITERATIONS:-100}"
 
 rm -rf "${OUTPUT_DIR}"
 mkdir -p "${OUTPUT_DIR}"
@@ -31,6 +32,11 @@ DXTR_BOX_MULTI_FRONTEND_RECORDS="${RECORDS}" \
 DXTR_BOX_MULTI_FRONTEND_DART_OUTPUT="${OUTPUT_DIR}/dart-frb.jsonl" \
 flutter test test/multi_frontend_benchmark_test.dart --reporter expanded
 
+DXTR_BOX_STARTUP_ITERATIONS="${STARTUP_ITERATIONS}" \
+cargo run --manifest-path rust/Cargo.toml --release --example startup_benchmark --features full \
+  | tee "${OUTPUT_DIR}/startup-open.jsonl"
+
 test -s "${OUTPUT_DIR}/rust-native.jsonl"
 test -s "${OUTPUT_DIR}/dart-frb.jsonl"
-printf '0.8 multi-frontend benchmark evidence: %s\n' "${OUTPUT_DIR}"
+test -s "${OUTPUT_DIR}/startup-open.jsonl"
+printf '0.8 multi-frontend + 0.9 startup benchmark evidence: %s\n' "${OUTPUT_DIR}"
