@@ -1,3 +1,13 @@
+## 0.9.0-dev.1
+
+- Added a reusable cross-frontend `StorageBoxContract` conformance kit covering shared CRUD, batch-read ordering/duplicate/miss semantics, key enumeration, deletion, clear, and final empty-state behavior across Rust-native and FRB-adapter frontends.
+- Added full-profile index lifecycle correctness guards proving dynamic create/list/drop/reopen semantics remain shared across frontends without introducing schema registration.
+- Rejected a speculative persisted schema/index configuration fingerprint because persisted `index_definitions` already are authoritative and there is no independent desired-schema manifest or reconciliation pass for a fingerprint to accelerate.
+- Added reproducible startup/reopen diagnostics across 0/1,000/10,000 records and 0/1/4 persisted indexes, recording first-open, p50, p95, and max reopen latency.
+- Recorded hosted Linux x64 evidence with reopen p95 below 1 ms across the tested matrix and intentionally added no startup cache, startup fast path, or new durable metadata.
+- Hardened the startup benchmark so caller-supplied roots are treated only as parents and zero benchmark iterations are rejected.
+- Synchronized README, code walkthrough, project handoff, release audit, and package version for the 0.9 closure while preserving `dxtr_box/1`, Dart >=3.4, Flutter >=3.22, flutter_rust_bridge 2.8.0, redb 2.1.0, and exactly `minimal | encryption | full` native profiles.
+
 ## 0.8.0-dev.1
 
 - Established one authoritative Rust storage/query core with two frontends: the existing Flutter/Dart API through flutter_rust_bridge and a first-class native Rust API that links directly to the shared core.

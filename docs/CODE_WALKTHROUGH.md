@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current 0.8 architecture: one authoritative Rust/redb storage engine with a Flutter/Dart frontend through flutter_rust_bridge and a first-class native Rust frontend.
+This walkthrough describes the current **0.9** architecture: one authoritative Rust/redb storage engine with a Flutter/Dart frontend through flutter_rust_bridge and a first-class native Rust frontend.
 
 ## 1. Package boundary
 
@@ -22,9 +22,10 @@ flutter_rust_bridge = 2.8.0
 redb = 2.1.0
 native profiles = minimal | encryption | full
 format_version = dxtr_box/1
+package version = 0.9.0-dev.1
 ```
 
-## 2. Dependency direction after 0.8
+## 2. Dependency direction
 
 ```text
 Dart API -> FRB adapter ----┐
@@ -96,9 +97,9 @@ BoxHandle::put / put_all / delete / delete_all / clear
 
 Rust callers receive `Result<T, DxtrBoxError>` instead of FRB's string-flattened bridge errors.
 
-## 6. Point reads
+## 6. Point and batch reads
 
-Dart/FRB:
+Dart/FRB point read:
 
 ```text
 Box.get
@@ -112,7 +113,7 @@ Box.get
   -> Dart decode
 ```
 
-Rust-native:
+Rust-native point read:
 
 ```text
 BoxHandle::get
@@ -121,11 +122,7 @@ BoxHandle::get
   -> Vec<u8> MessagePack bytes to Rust caller
 ```
 
-No Dart whole-box cache or long-lived stale read snapshot is used.
-
-## 7. Batch reads
-
-Both frontends use the same one-snapshot core operation:
+Batch reads converge on one core operation:
 
 ```text
 getAll / get_all
@@ -139,15 +136,11 @@ getAll / get_all
   -> ordered hit records
 ```
 
-Semantics are shared:
+Semantics are shared: hit order is preserved, misses are omitted, and duplicate input keys produce duplicate output entries.
 
-```text
-hit order: preserved
-missing keys: omitted
-duplicate input keys: duplicate output entries
-```
+No Dart whole-box cache or long-lived stale read snapshot is used.
 
-## 8. Query execution
+## 7. Query execution
 
 Dart authoring:
 
@@ -181,70 +174,80 @@ QuerySpec
 
 There is no second Rust-native query engine. Persisted indexes narrow candidates only and do not currently satisfy ORDER BY.
 
-## 9. Persisted indexes and encryption
+## 8. Persisted indexes and encryption
 
 Plaintext persisted indexes may narrow equality and range predicates.
 
 Under `full`, encrypted equality narrowing uses domain-separated keyed BLAKE2b MAC tokens. Raw plaintext scalar values and semantic ordering are not persisted in encrypted index entries.
 
-Encrypted ordered/range predicates remain scan-backed:
+Encrypted ordered/range predicates remain scan-backed. Authoritative decrypt/authenticate and predicate recheck remain mandatory after candidate narrowing.
 
-```text
-Equal                  -> equality index may narrow
-GreaterThan            -> scan
-GreaterThanOrEqual     -> scan
-LessThan               -> scan
-LessThanOrEqual        -> scan
-Between                -> scan
-```
-
-Authoritative decrypt/authenticate and predicate recheck remain mandatory after candidate narrowing.
-
-## 10. Native profiles
+## 9. Native profiles
 
 Exactly three profiles remain:
 
 ```text
 minimal     CRUD/lifecycle/watch-capable core
-
-encryption minimal + encrypted box support
-
+encryption  minimal + encrypted box support
 full        encryption + maintenance + query/index implementation
 ```
 
 `full` is default. Query/index Rust APIs that require `full` are feature-gated rather than creating another profile.
 
-## 11. Concurrency boundary
+## 10. Cross-frontend compatibility and conformance
 
-The shared runtime owns the process-global root and box registry. Multiple `BoxHandle`s share engine handles safely; a box remains open until its last registered handle closes.
-
-PR3 validates:
-
-- `DxtrBox` and `BoxHandle` are `Send + Sync`;
-- same-box mutation from multiple Rust threads;
-- multi-handle open-count behavior;
-- encrypted reopen/error behavior where enabled;
-- full-profile query/index behavior.
-
-The public native API is synchronous and does not require Tokio.
-
-## 12. Cross-frontend compatibility evidence
-
-`rust/tests/cross_frontend_compat.rs` proves the durable bridge in both directions:
+0.8 durable compatibility tests prove both directions:
 
 ```text
-Rust-native put
-  -> close box
-  -> FRB adapter open/get
-  -> identical MessagePack bytes
-
-FRB adapter put
-  -> close box
-  -> Rust-native open/get
-  -> identical MessagePack bytes
+Rust-native put -> close -> FRB adapter open/get
+FRB adapter put -> close -> Rust-native open/get
 ```
 
-Each direction also asserts the same `{box}.dxtr` file exists. Because this is CRUD-only compatibility evidence, it participates in all three Rust profile test runs.
+0.9 adds a reusable `StorageBoxContract` test kit that runs the same semantic assertions against both frontends. It covers missing-key behavior, CRUD, overwrite, bulk put, `get_all` ordering/duplicates/misses, key enumeration, delete/delete-all, clear, and final empty state.
+
+0.9 also adds index lifecycle guards across Rust-native and FRB-adapter paths so startup work cannot silently introduce schema registration or alter dynamic create/drop/reopen semantics.
+
+## 11. Configuration fingerprint decision
+
+0.9 intentionally does **not** persist a schema/index fingerprint.
+
+The persisted `index_definitions` table is already the authoritative configuration and there is no independent consumer-supplied desired schema manifest at open time. Startup performs no expensive schema reconciliation/rebuild pass for a fingerprint to skip, so a second durable hash would duplicate state without a meaningful correctness discriminator.
+
+A future fingerprint is justified only if there is an independent expected configuration plus a measured reconciliation cost worth skipping.
+
+## 12. Startup/reopen path and benchmark
+
+The startup diagnostic runs through the public Rust-native facade and measures repeated open/reopen behavior against prepared boxes.
+
+Run:
+
+```bash
+bash tool/startup_benchmark.sh
+```
+
+Matrix:
+
+```text
+records = 0 | 1,000 | 10,000
+indexes = 0 | 1 | 4
+```
+
+Each case emits:
+
+```text
+first_open_us
+reopen_p50_us
+reopen_p95_us
+reopen_max_us
+```
+
+Hosted Linux x64 evidence showed reopen p95 remaining below 1 ms across the matrix with no material growth at 10,000 records and 4 persisted indexes. Therefore 0.9 introduces no startup fast path, no startup cache, and no persisted fingerprint metadata.
+
+Benchmark safety:
+
+- zero iterations are rejected;
+- a caller-provided startup root is treated only as a parent directory;
+- the benchmark removes only its dedicated `dxtr-box-startup-benchmark` child.
 
 ## 13. Multi-frontend benchmark path
 
@@ -268,11 +271,12 @@ Evidence output:
 ```text
 build/multi-frontend/rust-native.jsonl
 build/multi-frontend/dart-frb.jsonl
+build/multi-frontend/startup-open.jsonl
 ```
 
-The Rust number includes public Rust facade + shared core + storage work. Dart/FRB additionally includes Dart async/public API, codec work where applicable, generated bridge transport, and cross-runtime overhead. Treat the delta as diagnostic boundary evidence rather than a storage-engine speedup claim.
+Treat the measurements as diagnostic evidence rather than marketing speedup claims.
 
-## 14. Flutter-facing 0.7 ergonomics remain intact
+## 14. Flutter-facing ergonomics remain intact
 
 String-path fluent authoring remains first-class:
 
@@ -293,7 +297,7 @@ const status = BoxField<String>('status');
 final rows = await box.queryWhereField(status).equals('active').find();
 ```
 
-Both compile to the existing `BoxQuery` / `QueryFilter` AST and retain the same planner semantics.
+Both compile to the existing canonical query representation and retain the same planner semantics.
 
 ## 15. Package and merge validation
 
@@ -313,10 +317,12 @@ benchmark correctness/smoke
 Android/Linux/Windows/macOS/iOS staged consumers
 ```
 
-0.8 adds cross-frontend compatibility to the Rust all-target matrix and a reproducible two-frontend benchmark runner without weakening any existing gate.
+0.9 adds reusable cross-frontend conformance and reproducible startup evidence without weakening any existing gate.
 
-## 16. 0.8 boundary
+## 16. 0.9 boundary
 
-0.8 stops at the multi-frontend storage foundation. It does not add GPUI integration, Tokio, ORM/schema/model generation, cloud sync/networking, storage-format redesign, a fourth native profile, or a new encryption/query engine.
+0.9 closes with a conservative evidence-backed outcome: improve semantic conformance and startup observability, but do not add speculative runtime state.
 
-See `docs/RELEASE_AUDIT_08.md` for closure evidence and `docs/PROJECT_HANDOFF.md` for current milestone state.
+It does not add GPUI integration, Tokio, ORM/schema/model generation, cloud sync/networking, storage-format redesign, a fourth native profile, or a new encryption/query engine.
+
+See `docs/RELEASE_AUDIT_09.md` for closure evidence and `docs/PROJECT_HANDOFF.md` for the current project state.
