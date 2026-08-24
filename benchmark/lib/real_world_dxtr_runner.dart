@@ -92,6 +92,7 @@ Future<RealWorldResult> _settingsScenario(
       operationsPerSample: 800,
       elapsedUs: elapsed,
       nativeBuildMode: nativeBuildMode,
+      extra: const <String, Object>{'operation_unit': 'logical_records'},
     );
   } finally {
     await box.close();
