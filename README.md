@@ -182,7 +182,7 @@ Equivalent logical workloads run through native Rust and Dart/FRB and emit:
 ```text
 build/multi-frontend/rust-native.jsonl
 build/multi-frontend/dart-frb.jsonl
-build/multi-frontend/startup.jsonl
+build/multi-frontend/startup-open.jsonl
 ```
 
 The matrix covers point `get`, 100-key batch read, indexed equality query with sort/limit, and startup/reopen diagnostics. Treat results as diagnostic boundary evidence, not marketing claims.
