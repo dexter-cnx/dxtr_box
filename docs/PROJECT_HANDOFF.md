@@ -188,7 +188,7 @@ Evidence files:
 ```text
 build/multi-frontend/rust-native.jsonl
 build/multi-frontend/dart-frb.jsonl
-build/multi-frontend/startup.jsonl
+build/multi-frontend/startup-open.jsonl
 ```
 
 Treat benchmark results as diagnostic boundary evidence, not marketing claims. Do not compare runs from different machines, build modes, record counts, or workload settings as direct speedup ratios.
