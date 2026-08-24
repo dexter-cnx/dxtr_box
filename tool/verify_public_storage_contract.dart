@@ -52,8 +52,7 @@ const _storageFormatMarker = 'dxtr_box/1';
 const _storageFormatMetaKey = 'format_version';
 const _rustIdentity = 'rust_lib_dxtr_box';
 const _rustCrateType = 'crate-type = ["cdylib", "staticlib", "rlib"]';
-const _queryExport =
-    'pub use native::{QueryBuilder, QueryValue, SortOrder};';
+const _queryExport = 'pub use native::{QueryBuilder, QueryValue, SortOrder};';
 const _fullCfg = '#[cfg(feature = "full")]';
 
 void main() {
@@ -73,37 +72,28 @@ void verifyPublicStorageContract() {
 }
 
 void _verifyPackageIdentity() {
-  final pubspecLines = File('pubspec.yaml')
-      .readAsLinesSync()
-      .map((line) => line.trim())
-      .toSet();
+  final pubspecLines = _trimmedLines('pubspec.yaml').toSet();
   const required = <String>{
     'name: dxtr_box',
     "sdk: '>=3.4.0 <4.0.0'",
     "flutter: '>=3.22.0'",
     'flutter_rust_bridge: 2.8.0',
   };
-
   final missing = required.difference(pubspecLines);
   if (missing.isNotEmpty) {
     throw StateError(
-      '1.0 package identity/compatibility contract changed; '
-      'missing=$missing',
+      '1.0 package identity/compatibility contract changed; missing=$missing',
     );
   }
 }
 
 void _verifyPublicExports() {
-  final entrypoint = File('lib/dxtr_box.dart').readAsLinesSync();
-  final exports = entrypoint
-      .map((line) => line.trim())
+  final exports = _trimmedLines('lib/dxtr_box.dart')
       .where((line) => line.startsWith('export '))
       .toSet();
-
-  if (exports.length != _expectedExports.length ||
-      !exports.containsAll(_expectedExports)) {
-    final missing = _expectedExports.difference(exports);
-    final added = exports.difference(_expectedExports);
+  final missing = _expectedExports.difference(exports);
+  final added = exports.difference(_expectedExports);
+  if (missing.isNotEmpty || added.isNotEmpty) {
     throw StateError(
       'public export boundary changed without a 1.0 contract update; '
       'missing=$missing added=$added',
@@ -127,25 +117,9 @@ void _verifyRustCrateBoundary() {
     throw StateError('native crate-type contract changed');
   }
 
-  const requiredCargo = <String>[
-    'default = ["full"]',
-    'redb = "=2.1.0"',
-    'flutter_rust_bridge = "=2.8.0"',
-  ];
-  final missingCargo = requiredCargo
-      .where((entry) => !cargo.contains(entry))
-      .toList();
-  if (missingCargo.isNotEmpty) {
-    throw StateError(
-      'native profile/dependency contract changed; '
-      'missing=$missingCargo',
-    );
-  }
+  _verifyCargoRequirements(cargo);
 
-  final rustRootLines = File('rust/src/lib.rs')
-      .readAsLinesSync()
-      .map((line) => line.trim())
-      .toList();
+  final rustRootLines = _trimmedLines('rust/src/lib.rs');
   final rustRootExports = rustRootLines
       .where((line) => line.startsWith('pub use '))
       .toSet();
@@ -166,22 +140,41 @@ void _verifyRustCrateBoundary() {
   _verifyWildcardApiSurface();
 }
 
+void _verifyCargoRequirements(String cargo) {
+  const required = <String>{
+    'default = ["full"]',
+    'redb = "=2.1.0"',
+    'flutter_rust_bridge = "=2.8.0"',
+  };
+  final cargoLines = cargo.split('\n').map((line) => line.trim()).toSet();
+  final missing = required.difference(cargoLines);
+  if (missing.isNotEmpty) {
+    throw StateError(
+      'native profile/dependency contract changed; missing=$missing',
+    );
+  }
+}
+
 void _verifyWildcardApiSurface() {
-  final apiLines = File('rust/src/api.rs')
-      .readAsLinesSync()
-      .map((line) => line.trim())
-      .where((line) =>
-          line.startsWith('pub enum ') ||
-          line.startsWith('pub struct ') ||
-          line.startsWith('pub fn '))
-      .toSet();
-  final missing = _expectedApiDeclarations.difference(apiLines);
-  final added = apiLines.difference(_expectedApiDeclarations);
+  final apiLines = _trimmedLines('rust/src/api.rs');
+  final declarations = apiLines.where(_isPublicApiDeclaration).toSet();
+  final missing = _expectedApiDeclarations.difference(declarations);
+  final added = declarations.difference(_expectedApiDeclarations);
   if (missing.isNotEmpty || added.isNotEmpty) {
     throw StateError(
       'api::* public surface changed; missing=$missing added=$added',
     );
   }
+}
+
+bool _isPublicApiDeclaration(String line) {
+  return line.startsWith('pub enum ') ||
+      line.startsWith('pub struct ') ||
+      line.startsWith('pub fn ');
+}
+
+List<String> _trimmedLines(String path) {
+  return File(path).readAsLinesSync().map((line) => line.trim()).toList();
 }
 
 Set<String> _tomlSectionLines(String source, String section) {
@@ -210,7 +203,6 @@ void _verifyStorageFormatIdentity() {
   final metaKeyPattern = RegExp(
     r'const META_FORMAT_VERSION: &str = "([^"]+)";',
   );
-
   final format = formatPattern.firstMatch(dbSource)?.group(1);
   final metaKey = metaKeyPattern.firstMatch(dbSource)?.group(1);
 
