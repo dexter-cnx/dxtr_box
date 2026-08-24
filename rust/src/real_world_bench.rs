@@ -204,7 +204,7 @@ fn encoded_catalog_record(index: usize, score: i64) -> Vec<u8> {
         ("name", Value::from(format!("item-{index}"))),
         (
             "status",
-            Value::from(if index % 10 == 0 {
+            Value::from(if index.is_multiple_of(10) {
                 "archived"
             } else {
                 "active"
