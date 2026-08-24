@@ -114,7 +114,11 @@ void _verifyRustCrateBoundary() {
   final rootExports = rootLines
       .where((line) => line.startsWith('pub use '))
       .toSet();
-  _requireExactSet('Rust root export boundary', _expectedRustRootExports, rootExports);
+  _requireExactSet(
+    'Rust root export boundary',
+    _expectedRustRootExports,
+    rootExports,
+  );
 
   final queryIndex = rootLines.indexOf(_queryExport);
   final guarded = queryIndex > 0 && rootLines[queryIndex - 1] == _fullCfg;
@@ -152,7 +156,10 @@ void _verifyWildcardApiSurface() {
 String? _publicApiName(String line) {
   for (final prefix in const ['pub enum ', 'pub struct ', 'pub fn ']) {
     if (line.startsWith(prefix)) {
-      return line.substring(prefix.length).split(RegExp(r'[^A-Za-z0-9_]')).first;
+      return line
+          .substring(prefix.length)
+          .split(RegExp(r'[^A-Za-z0-9_]'))
+          .first;
     }
   }
   return null;
