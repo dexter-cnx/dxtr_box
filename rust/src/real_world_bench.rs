@@ -254,7 +254,10 @@ fn encoded_catalog_record(index: usize, score: i64) -> Vec<u8> {
         (
             "metadata",
             map_value(vec![
-                ("workspace_id", Value::from(format!("workspace-{}", index % 5))),
+                (
+                    "workspace_id",
+                    Value::from(format!("workspace-{}", index % 5)),
+                ),
                 (
                     "source",
                     Value::from(if index.is_multiple_of(2) {
