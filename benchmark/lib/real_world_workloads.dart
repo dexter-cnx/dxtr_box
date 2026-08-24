@@ -2,30 +2,31 @@ typedef WorkloadRecord = Map<String, Object?>;
 
 const int _baseTimestampMs = 1700000000000;
 
-Map<String, WorkloadRecord> settingsSessionFixture() => <String, WorkloadRecord>{
-  'theme': <String, Object?>{'value': 'dark', 'updated_at': 1},
-  'locale': <String, Object?>{'value': 'th_TH', 'updated_at': 2},
-  'feature_flags': <String, Object?>{
-    'value': <String, Object?>{
-      'fast_search': true,
-      'compact_cards': false,
-      'offline_mode': true,
-    },
-    'updated_at': 3,
-  },
-  'active_workspace': <String, Object?>{
-    'value': 'workspace-0003',
-    'updated_at': 4,
-  },
-  'session': <String, Object?>{
-    'value': <String, Object?>{
-      'user_id': 'user-local',
-      'last_route': '/workspace',
-      'launch_count': 42,
-    },
-    'updated_at': 5,
-  },
-};
+Map<String, WorkloadRecord> settingsSessionFixture() =>
+    <String, WorkloadRecord>{
+      'theme': <String, Object?>{'value': 'dark', 'updated_at': 1},
+      'locale': <String, Object?>{'value': 'th_TH', 'updated_at': 2},
+      'feature_flags': <String, Object?>{
+        'value': <String, Object?>{
+          'fast_search': true,
+          'compact_cards': false,
+          'offline_mode': true,
+        },
+        'updated_at': 3,
+      },
+      'active_workspace': <String, Object?>{
+        'value': 'workspace-0003',
+        'updated_at': 4,
+      },
+      'session': <String, Object?>{
+        'value': <String, Object?>{
+          'user_id': 'user-local',
+          'last_route': '/workspace',
+          'launch_count': 42,
+        },
+        'updated_at': 5,
+      },
+    };
 
 Map<String, WorkloadRecord> catalogWorkspaceFixture(int count) {
   if (count < 0) {
