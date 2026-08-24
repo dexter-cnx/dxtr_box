@@ -11,12 +11,13 @@ Dxtr_Box is a compact Rust/redb local database engine with a Flutter/Dart fronte
 ```text
 Flutter package/plugin: dxtr_box
 Rust crate/native lib:  rust_lib_dxtr_box
-Dart:                   >= 3.4.0 < 4.0.0
-Flutter:                >= 3.22.0
-flutter_rust_bridge:    2.8.0 exactly
+Package version:         0.9.0-dev.1
+Dart:                    >= 3.4.0 < 4.0.0
+Flutter:                 >= 3.22.0
+flutter_rust_bridge:     2.8.0 exactly
 redb:                    2.1.0
-durable format:         meta[format_version] = dxtr_box/1
-native profiles:        minimal | encryption | full
+durable format:          meta[format_version] = dxtr_box/1
+native profiles:         minimal | encryption | full
 ```
 
 `full` remains the default. Do not add a fourth native profile. Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly reprioritized.
@@ -31,32 +32,32 @@ Completed:
 - **0.6 Query / Index + Encryption Hardening**
 - **0.7 Query Ergonomics**
 - **0.8 Rust-native API / Multi-frontend Foundation**
+- **0.9 Conformance & Startup Maturity**
 
-0.8 closure is recorded in `docs/RELEASE_AUDIT_08.md`.
+0.8 closure: `docs/RELEASE_AUDIT_08.md`.
+0.9 closure: `docs/RELEASE_AUDIT_09.md`.
 
-### 0.9 Conformance & Startup Maturity
-
-Current sequence:
+### 0.9 completed sequence
 
 ```text
-PR1 — reusable cross-frontend storage conformance test kit                   merged
-PR2 — schema/index config fingerprint design + correctness guards            current
-PR3 — cold-open/reopen benchmark; runtime fast path only if evidence justifies
-PR4 — cross-frontend closure audit + docs/version sync
+PR1 — reusable cross-frontend storage conformance test kit                    merged
+PR2 — schema/index config fingerprint decision + correctness guards           merged
+PR3 — cold-open/reopen benchmark evidence; no runtime fast path justified     merged
+PR4 — closure audit + docs/version synchronization                            current closure PR
 ```
 
-PR2's current design conclusion is intentionally conservative: do not persist a configuration fingerprint merely to hash the already-authoritative `index_definitions` table. Dxtr_Box has no consumer-supplied desired schema/index manifest at open time and currently performs no automatic schema/index reconciliation or rebuild pass that such a hash could skip.
-
-PR3 must therefore profile the existing startup/reopen path before introducing durable metadata or runtime shortcuts. An evidence-backed no-op runtime decision is acceptable and preferable to speculative state.
+0.9 conclusion: do **not** persist a schema/index fingerprint or add startup caching/fast-path machinery. There is no independent desired schema manifest to compare against persisted index definitions, and measured reopen cost remained below 1 ms p95 across the hosted Linux x64 matrix up to 10,000 records and 4 persisted indexes.
 
 See:
 
 - `docs/CONFORMANCE_09.md`
 - `docs/CONFIG_FINGERPRINT_DECISION_09.md`
+- `docs/STARTUP_BENCHMARK_09.md`
+- `docs/RELEASE_AUDIT_09.md`
 
-## Architecture after 0.8
+## Architecture
 
-Required dependency direction is implemented:
+Required dependency direction:
 
 ```text
 Dart API -> FRB adapter ----┐
@@ -90,19 +91,7 @@ BoxField<T>
 
 `DxtrBox` remains exported in Dart only as a deprecated source-compatibility shim that forwards to `BoxStore`.
 
-Dart query authoring remains dynamic-first with optional typed metadata:
-
-```dart
-final rows = await box
-    .queryWhere('status').equals('active')
-    .and('profile.age').gte(18)
-    .orderBy('name')
-    .offset(10)
-    .limit(20)
-    .find();
-```
-
-`BoxField<T>` is metadata only. It does not introduce schema registration, code generation, reflection, automatic indexes, or a second query AST.
+`BoxField<T>` is authoring metadata only. It does not introduce schema registration, code generation, reflection, automatic indexes, or a second query AST.
 
 ## Public native Rust API
 
@@ -117,31 +106,7 @@ DxtrBoxError
 QueryBuilder / QueryValue / SortOrder under full
 ```
 
-Representative use:
-
-```rust
-let db = DxtrBox::open(path)?;
-let assets = db.box_("assets")?;
-assets.put("asset-1", encoded_value)?;
-
-let rows = assets
-    .query()
-    .where_("workplace_id")
-    .equals("cnx")
-    .order_by("captured_at", SortOrder::Descending)
-    .limit(200)
-    .find()?;
-```
-
-Rust conventions are intentional:
-
-- structured `Result<T, DxtrBoxError>`;
-- `Path` / `PathBuf` root handling;
-- explicit handle ownership/close behavior;
-- `Send + Sync` validation for native handles;
-- synchronous API today, with no forced Tokio commitment.
-
-External-consumer example: `rust/examples/native_consumer.rs`.
+The Rust API is synchronous today, uses structured `Result<T, DxtrBoxError>`, and has no Tokio commitment.
 
 ## Shared query/index contract
 
@@ -153,26 +118,56 @@ Dart BoxQuery/Builder ----┐
 Rust QueryBuilder --------┘
 ```
 
-They share predicate semantics, index selection, encrypted equality behavior, encrypted range scan fallback, authoritative primary rechecks, deterministic sorting, offset, and limit.
+Primary records are authoritative. Persisted indexes are derived state and are maintained in the same redb write transaction as primary mutations.
 
-Primary `data` remains authoritative. Persisted indexes are derived state and are maintained in the same redb write transaction as primary mutations.
-
-Encrypted reads always retain full AEAD authentication. Encrypted ordered/range predicates remain scan-backed; only deterministic keyed equality tokens may narrow candidates under `full`.
+Encrypted equality indexes may narrow candidates using deterministic keyed BLAKE2b MAC tokens under `full`; encrypted ordered/range predicates remain scan-backed. Authoritative primary decrypt/authenticate and predicate recheck remain mandatory.
 
 ## Cross-frontend conformance
 
-0.8 established bidirectional same-file compatibility with `rust/tests/cross_frontend_compat.rs`:
+0.8 established bidirectional same-file compatibility:
 
 ```text
 Rust-native write -> close -> FRB-adapter read
 FRB-adapter write -> close -> Rust-native read
 ```
 
-0.9 PR1 adds a reusable internal `StorageBoxContract` under `rust/tests/support/` and runs the same CRUD/batch/deletion semantics against both frontends. The initial contract covers missing-key behavior, put/get/contains, overwrite, bulk put, `get_all` ordering/duplicate/miss behavior, key enumeration, delete/delete-all, clear, and final empty state.
+0.9 adds reusable `StorageBoxContract` assertions against both frontends for missing keys, CRUD, overwrite, bulk put, ordered/duplicate-aware `get_all`, key enumeration, deletion, clear, and final empty state.
 
-PR2 adds full-profile index-configuration guards across both frontends so future startup work cannot accidentally replace the dynamic-first index lifecycle with implicit schema registration.
+0.9 also adds full-profile index lifecycle guards proving dynamic create/list/drop/reopen semantics across Rust-native and FRB-adapter paths without schema registration.
 
-## 0.8 benchmark evidence
+## Startup evidence
+
+Run standalone startup diagnostics with:
+
+```bash
+bash tool/startup_benchmark.sh
+```
+
+Matrix:
+
+```text
+records = 0 | 1,000 | 10,000
+indexes = 0 | 1 | 4
+```
+
+Recorded metrics:
+
+```text
+first_open_us
+reopen_p50_us
+reopen_p95_us
+reopen_max_us
+```
+
+Hosted Linux x64 evidence showed no material scale-linked startup regression and sub-1 ms reopen p95 across the matrix. Therefore no 0.9 runtime fast path was introduced.
+
+Safety rules for the benchmark:
+
+- `DXTR_BOX_STARTUP_ITERATIONS` must be positive;
+- `DXTR_BOX_STARTUP_ROOT` is treated only as a parent directory;
+- the runner removes only its dedicated `dxtr-box-startup-benchmark` child.
+
+## Multi-frontend benchmark evidence
 
 Run:
 
@@ -193,22 +188,14 @@ Evidence files:
 ```text
 build/multi-frontend/rust-native.jsonl
 build/multi-frontend/dart-frb.jsonl
+build/multi-frontend/startup.jsonl
 ```
 
-These results are diagnostic boundary evidence, not marketing claims. Rust-native timing includes the Rust facade, shared core, validation/encryption/storage work. Dart/FRB timing additionally includes Dart async/public API work, codec work where applicable, generated bridge transport, and cross-runtime overhead.
+Treat benchmark results as diagnostic boundary evidence, not marketing claims. Do not compare runs from different machines, build modes, record counts, or workload settings as direct speedup ratios.
 
-Do not compare runs from different machines, build modes, record counts, or workload settings as a speedup ratio.
+## Retained read-path evidence
 
-## Retained 0.5 read-path evidence
-
-Controlled point-read bridge work remains relevant:
-
-```text
-generated FRB get        ~226 us -> 4.312 us   ~52x faster
-generated FRB contains   ~197 us -> 2.570 us   ~77x faster
-```
-
-`Box.getAll` still uses one native crossing and one redb read snapshot. Do not regress these paths opportunistically.
+`Box.getAll` still uses one native crossing and one redb read snapshot. Point reads remain synchronous at the generated FRB boundary where established by 0.5. Do not regress these paths opportunistically.
 
 ## CI topology
 
@@ -237,24 +224,22 @@ Full merge validation preserves:
 - benchmark correctness/smoke;
 - staged Android/iOS/macOS/Linux/Windows consumers.
 
-## 0.9 fingerprint/startup rule
+## Fingerprint/startup rule after 0.9
 
 Do not introduce a schema/index fingerprint unless there is an independently meaningful expected configuration to compare with durable state and a measured reconciliation cost to skip.
 
-A future fingerprint must never bypass:
+A future fingerprint or startup optimization must never bypass:
 
 - `dxtr_box/1` format validation;
 - encryption metadata/key validation;
 - reduced-profile safety checks;
 - authoritative fallback on missing/unknown/mismatched metadata.
 
-Any durable fingerprint must be deterministic, versioned, transactionally updated with the configuration it summarizes, compatible with old boxes that lack it, and justified by cold-open/reopen evidence.
-
 ## Non-goals retained
 
-Do not turn 0.9 into:
+Do not turn post-0.9 work into:
 
-- GPUI integration;
+- GPUI integration inside the core package;
 - a GUI framework package;
 - Tokio/runtime commitment;
 - ORM/schema/model code generation;
