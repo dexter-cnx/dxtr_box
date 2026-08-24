@@ -13,17 +13,15 @@ The benchmark remains diagnostic evidence, not a marketing leaderboard.
 ## Sequence
 
 ```text
-PR1 — deterministic real-world workload contract + fixtures
-PR2 — Dxtr_Box Dart/FRB scenario runner + JSONL evidence
-PR3 — equivalent Rust-native scenario runner + cross-frontend interpretation
-PR4 — CI evidence, docs/version sync, and 0.10 closure
+PR1 — deterministic real-world workload contract + fixtures                         complete
+PR2 — Dxtr_Box Dart/FRB scenario runner + JSONL evidence                           complete
+PR3 — equivalent Rust-native scenario runner + cross-frontend interpretation       complete
+PR4 — CI evidence, docs/version sync, and 0.10 closure                             current closure PR
 ```
 
-Do not add runtime optimizations in PR1. Later PRs may propose an optimization only when the scenario evidence identifies a concrete bottleneck and existing conformance tests remain green.
+## Workload contract
 
-## PR1 workload contract
-
-PR1 defines three deterministic application-shaped datasets under `benchmark/lib/real_world_workloads.dart`.
+Three deterministic application-shaped datasets live under `benchmark/lib/real_world_workloads.dart`.
 
 ### 1. Settings/session workload
 
@@ -35,8 +33,6 @@ Small keyspace with frequent point reads and overwrites:
 - repeated reads of hot keys;
 - periodic overwrite of existing keys.
 
-This workload is intentionally small. It represents app startup and settings access rather than bulk storage.
-
 ### 2. Catalog/workspace workload
 
 Medium record set representing items in a local catalog or media workspace:
@@ -45,10 +41,8 @@ Medium record set representing items in a local catalog or media workspace:
 - status/category fields;
 - timestamps and numeric sort fields;
 - nested metadata;
-- payload text large enough to avoid measuring only trivial scalars;
+- deterministic payload text;
 - deterministic active/archive distribution.
-
-This workload is suitable for mixed point reads, batch reads, updates, deletes, and query/index scenarios in later PRs.
 
 ### 3. Activity/event workload
 
@@ -56,56 +50,87 @@ Append-heavy records with a bounded hot window:
 
 - monotonically increasing sequence IDs;
 - event type and timestamp;
-- actor/source metadata;
-- small structured payload;
+- nested actor/source metadata;
+- deterministic structured payload;
 - deterministic retention boundary for delete batches.
-
-This represents audit/event/history-style local data without introducing time-dependent randomness.
 
 ## Determinism rules
 
-Fixtures must be reproducible across machines and runs:
+Fixtures are reproducible across machines and runs:
 
-- no wall-clock timestamps;
-- no random number generator unless a fixed seed is part of the public workload contract;
+- no wall-clock timestamps in fixture content;
+- no random drift;
 - stable keys and record ordering;
 - stable field/value distribution;
-- stable payload sizes for a given fixture size.
+- stable payload sizes for a given fixture size;
+- Rust-native fixture shapes and deterministic values mirror the Dart fixtures.
 
-Scenario runners may vary iteration count, but fixture content must not change when the same record count is requested.
+## Measurement contract
 
-## Measurement rules for later PRs
-
-Every scenario result must record enough context to be interpretable:
+Every scenario result records enough context to be interpretable:
 
 ```text
 frontend
 scenario
 records
-iterations/samples where applicable
-operation counts
-elapsed time / latency summary
+samples
+operations_per_sample
+operation_unit
+elapsed_us
+median_us
+min_us
+max_us
 build mode
-runner/toolchain metadata in CI artifact
 ```
 
-Cold-open/reopen remains covered by the 0.9 startup benchmark and should not be duplicated unless a scenario needs startup as part of an end-to-end path.
+CI artifacts additionally contain runner/toolchain metadata.
+
+Cold-open/reopen remains covered by the 0.9 startup benchmark and is not duplicated here.
 
 ## Correctness before timing
 
-A workload runner must validate its final state before emitting benchmark evidence. Examples:
+A workload runner validates state before evidence is accepted:
 
 - overwritten settings expose the latest value;
+- catalog batch-read ordering matches requested keys;
+- catalog records preserve stable identity fields;
 - deleted catalog records are absent;
-- retained catalog records preserve expected IDs and fields;
-- event retention deletes only the intended prefix/window;
-- batch-read hit/miss ordering follows the established storage contract.
+- event retention removes only the intended prefix/window;
+- the first retained activity record remains present.
 
 A fast incorrect result is not benchmark evidence.
 
+## Reproducible evidence
+
+Run locally:
+
+```bash
+bash tool/real_world_workloads.sh
+```
+
+Outputs:
+
+```text
+build/real-world/rust-native.jsonl
+build/real-world/dart-frb.jsonl
+build/real-world/rust-native.log
+build/real-world/dart-frb.log
+build/real-world/toolchain.txt
+```
+
+Each frontend must emit exactly three records:
+
+```text
+settings_session
+catalog_workspace
+activity_event
+```
+
+The `Real-world Workloads` GitHub Actions workflow runs the same script on Ubuntu and uploads the complete `build/real-world` directory as an artifact.
+
 ## Preserved invariants
 
-0.10 must preserve:
+0.10 preserves:
 
 - one authoritative Rust/redb engine;
 - `dxtr_box/1` durable format;
@@ -133,4 +158,14 @@ A fast incorrect result is not benchmark evidence.
 
 ## Interpretation rule
 
-Use real-world workload evidence to locate costs and regressions. Do not describe cross-engine or cross-frontend deltas as pure storage-engine speedups when the measured boundaries differ.
+Use real-world workload evidence to locate costs and regressions. Do not describe cross-frontend deltas as pure storage-engine speedups: Dart/FRB includes frontend and FFI-boundary cost that Rust-native does not.
+
+Only compare evidence when record counts, sample counts, build modes, and runner/toolchain context match.
+
+## 0.10 closure
+
+0.10 closes with evidence infrastructure rather than a speculative optimization. No new cache, fast path, storage metadata, query engine, or durable format is introduced.
+
+Package version at closure: `0.10.0-dev.1`.
+
+See `docs/RELEASE_AUDIT_010.md` for the closure audit. The next active milestone after this PR merges is 1.0 stabilization/release readiness.

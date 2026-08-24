@@ -1,3 +1,13 @@
+## 0.10.0-dev.1
+
+- Added deterministic application-shaped workload fixtures for settings/session, catalog/workspace, and activity/event scenarios.
+- Added equivalent Dart/FRB and Rust-native real-world scenario runners with correctness validation before timing and machine-readable JSONL output.
+- Mirrored fixture shapes and deterministic payloads across frontends so cross-frontend evidence measures equivalent records and logical operation mixes.
+- Added a reproducible `tool/real_world_workloads.sh` evidence runner that records Rust/Cargo/Flutter/Dart toolchain metadata and emits three scenario records per frontend.
+- Added the `Real-world Workloads` CI workflow with retained evidence artifacts and production-path triggers for `lib/**` and `rust/src/**` changes.
+- Kept real-world workload results diagnostic rather than marketing leaderboard claims and preserved the authoritative Rust/redb engine, `dxtr_box/1`, Dart >=3.4, Flutter >=3.22, flutter_rust_bridge 2.8.0, redb 2.1.0, and exactly `minimal | encryption | full` native profiles.
+- Synchronized README, project handoff, code walkthrough, release audit, workload documentation, and package version for the 0.10 closure.
+
 ## 0.9.0-dev.1
 
 - Added a reusable cross-frontend `StorageBoxContract` conformance kit covering shared CRUD, batch-read ordering/duplicate/miss semantics, key enumeration, deletion, clear, and final empty-state behavior across Rust-native and FRB-adapter frontends.
@@ -15,7 +25,7 @@
 - Preserved one `dxtr_box/1` durable format and the existing `.dxtr` files across both frontends; no Rust-only storage format or conversion layer was introduced.
 - Validated `minimal`, `encryption`, and `full` native profiles plus `Send + Sync`, multi-threaded same-box mutations, shared-handle lifecycle, encrypted reopen behavior, and full-profile query/index behavior.
 - Added an external-consumer-style native Rust example and kept the native API synchronous without imposing Tokio or adding GPUI as a dependency.
-- Added bidirectional cross-frontend compatibility tests: Rust-native write -> FRB-adapter read and FRB-adapter write -> Rust-native read on the same physical database files.
+- Added bidirectional cross-frontend compatibility tests: Rust-native write -> FRB-adapter read and FRB-adapter put -> Rust-native read on the same physical database files.
 - Added reproducible Rust-native vs Dart/FRB diagnostic workloads for point `get`, 100-key batch reads, and indexed query + sort + limit, emitting JSONL evidence with explicit non-marketing interpretation rules.
 - Synchronized README, project handoff, code walkthrough, release audit, and package version for the 0.8 closure.
 - Preserved Dart >=3.4 / Flutter >=3.22, flutter_rust_bridge 2.8.0, redb 2.1.0, native library `rust_lib_dxtr_box`, and exactly `minimal | encryption | full` native profiles.

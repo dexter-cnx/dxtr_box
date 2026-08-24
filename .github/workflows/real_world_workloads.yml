@@ -1,0 +1,41 @@
+name: Real-world Workloads
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'benchmark/lib/real_world_*.dart'
+      - 'benchmark/test/real_world_*.dart'
+      - 'rust/src/**'
+      - 'tool/real_world_workloads.sh'
+      - '.github/workflows/real_world_workloads.yml'
+      - 'docs/REAL_WORLD_WORKLOADS_010.md'
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - name: Run deterministic real-world evidence
+        run: bash tool/real_world_workloads.sh
+      - name: Upload real-world evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxtr-box-real-world-${{ github.run_id }}
+          path: build/real-world
+          if-no-files-found: error
+          retention-days: 30
