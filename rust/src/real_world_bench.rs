@@ -30,8 +30,7 @@ fn rust_native_real_world_scenarios() {
 fn run_settings(db: &DxtrBox, samples: usize) {
     let box_ = db.box_("rw_settings").expect("open settings box");
     box_.clear().expect("clear settings box");
-    box_
-        .put_all(settings_fixture())
+    box_.put_all(settings_fixture())
         .expect("seed settings fixture");
 
     let mut elapsed = Vec::with_capacity(samples);
@@ -41,15 +40,14 @@ fn run_settings(db: &DxtrBox, samples: usize) {
             black_box(box_.get("theme").expect("read theme"));
             black_box(box_.get("locale").expect("read locale"));
             black_box(box_.get("session").expect("read session"));
-            box_
-                .put(
-                    "active_workspace",
-                    encoded_map(vec![
-                        ("value", Value::from(format!("workspace-{}", iteration % 5))),
-                        ("updated_at", Value::from(1000 + iteration as i64)),
-                    ]),
-                )
-                .expect("update active workspace");
+            box_.put(
+                "active_workspace",
+                encoded_map(vec![
+                    ("value", Value::from(format!("workspace-{}", iteration % 5))),
+                    ("updated_at", Value::from(1000 + iteration as i64)),
+                ]),
+            )
+            .expect("update active workspace");
         }
         elapsed.push(started.elapsed().as_micros());
     }
@@ -70,11 +68,12 @@ fn run_catalog(db: &DxtrBox, records: usize, samples: usize) {
     let fixture = catalog_fixture(records);
     box_.put_all(fixture.clone()).expect("seed catalog fixture");
 
-    let hot_keys = (0..records.min(100))
+    let hot_keys = (0..records.min(100)).map(catalog_key).collect::<Vec<_>>();
+    let update_keys = hot_keys.iter().take(25).cloned().collect::<Vec<_>>();
+    let delete_keys = (0..records)
+        .step_by(20)
         .map(catalog_key)
         .collect::<Vec<_>>();
-    let update_keys = hot_keys.iter().take(25).cloned().collect::<Vec<_>>();
-    let delete_keys = (0..records).step_by(20).map(catalog_key).collect::<Vec<_>>();
 
     let mut elapsed = Vec::with_capacity(samples);
     for _ in 0..samples {
@@ -87,12 +86,11 @@ fn run_catalog(db: &DxtrBox, records: usize, samples: usize) {
                 .expect("catalog hot record exists");
             let score = decode_map_i64(&raw, "score").expect("catalog score");
             let id = decode_map_i64(&raw, "id").expect("catalog id");
-            box_
-                .put(
-                    key.clone(),
-                    encoded_catalog_record(id as usize, (score + 1) % 1000),
-                )
-                .expect("catalog update");
+            box_.put(
+                key.clone(),
+                encoded_catalog_record(id as usize, (score + 1) % 1000),
+            )
+            .expect("catalog update");
         }
         elapsed.push(started.elapsed().as_micros());
 
@@ -103,7 +101,8 @@ fn run_catalog(db: &DxtrBox, records: usize, samples: usize) {
         }
     }
 
-    box_.delete_all(&delete_keys).expect("delete catalog retention set");
+    box_.delete_all(&delete_keys)
+        .expect("delete catalog retention set");
     for key in &delete_keys {
         assert!(!box_.contains_key(key).expect("check deleted catalog key"));
     }
@@ -123,8 +122,7 @@ fn run_catalog(db: &DxtrBox, records: usize, samples: usize) {
 fn run_activity(db: &DxtrBox, records: usize, samples: usize) {
     let box_ = db.box_("rw_activity").expect("open activity box");
     box_.clear().expect("clear activity box");
-    box_
-        .put_all(activity_fixture(records))
+    box_.put_all(activity_fixture(records))
         .expect("seed activity fixture");
 
     let read_count = records.min(100);
@@ -141,15 +139,16 @@ fn run_activity(db: &DxtrBox, records: usize, samples: usize) {
         elapsed.push(started.elapsed().as_micros());
     }
 
-    box_
-        .delete_all(&delete_keys)
+    box_.delete_all(&delete_keys)
         .expect("delete activity retention window");
     for key in &delete_keys {
         assert!(!box_.contains_key(key).expect("check deleted activity key"));
     }
     if delete_count < records {
         let retained = activity_key(delete_count);
-        assert!(box_.contains_key(&retained).expect("check retained activity key"));
+        assert!(box_
+            .contains_key(&retained)
+            .expect("check retained activity key"));
     }
 
     emit_result(
@@ -165,8 +164,14 @@ fn run_activity(db: &DxtrBox, records: usize, samples: usize) {
 
 fn settings_fixture() -> Vec<(String, Vec<u8>)> {
     vec![
-        ("theme".into(), encoded_map(vec![("value", Value::from("system"))])),
-        ("locale".into(), encoded_map(vec![("value", Value::from("en"))])),
+        (
+            "theme".into(),
+            encoded_map(vec![("value", Value::from("system"))]),
+        ),
+        (
+            "locale".into(),
+            encoded_map(vec![("value", Value::from("en"))]),
+        ),
         (
             "feature_flags".into(),
             encoded_map(vec![("value", Value::from("stable"))]),
@@ -184,7 +189,12 @@ fn settings_fixture() -> Vec<(String, Vec<u8>)> {
 
 fn catalog_fixture(records: usize) -> Vec<(String, Vec<u8>)> {
     (0..records)
-        .map(|index| (catalog_key(index), encoded_catalog_record(index, ((index * 37) % 1000) as i64)))
+        .map(|index| {
+            (
+                catalog_key(index),
+                encoded_catalog_record(index, ((index * 37) % 1000) as i64),
+            )
+        })
         .collect()
 }
 
@@ -192,10 +202,20 @@ fn encoded_catalog_record(index: usize, score: i64) -> Vec<u8> {
     encoded_map(vec![
         ("id", Value::from(index as i64)),
         ("name", Value::from(format!("item-{index}"))),
-        ("status", Value::from(if index % 10 == 0 { "archived" } else { "active" })),
+        (
+            "status",
+            Value::from(if index % 10 == 0 {
+                "archived"
+            } else {
+                "active"
+            }),
+        ),
         ("category", Value::from(format!("category-{}", index % 8))),
         ("score", Value::from(score)),
-        ("captured_at", Value::from(BASE_TIMESTAMP_MS + index as i64 * 1000)),
+        (
+            "captured_at",
+            Value::from(BASE_TIMESTAMP_MS + index as i64 * 1000),
+        ),
         ("payload", Value::from("x".repeat(192))),
     ])
 }
@@ -208,7 +228,10 @@ fn activity_fixture(records: usize) -> Vec<(String, Vec<u8>)> {
                 encoded_map(vec![
                     ("sequence", Value::from(index as i64)),
                     ("event_type", Value::from(format!("event-{}", index % 4))),
-                    ("timestamp", Value::from(BASE_TIMESTAMP_MS + index as i64 * 250)),
+                    (
+                        "timestamp",
+                        Value::from(BASE_TIMESTAMP_MS + index as i64 * 250),
+                    ),
                     ("actor", Value::from(format!("actor-{}", index % 8))),
                     ("payload", Value::from("e".repeat(96))),
                 ]),
@@ -237,14 +260,20 @@ fn decode_map_i64(bytes: &[u8], field: &str) -> Option<i64> {
 }
 
 fn decode_map_string(bytes: &[u8], field: &str) -> Option<String> {
-    decode_map_field(bytes, field)?.as_str().map(ToOwned::to_owned)
+    decode_map_field(bytes, field)?
+        .as_str()
+        .map(ToOwned::to_owned)
 }
 
 fn decode_map_field(bytes: &[u8], field: &str) -> Option<Value> {
     let mut cursor = std::io::Cursor::new(bytes);
     let value = rmpv::decode::read_value(&mut cursor).ok()?;
-    let Value::Array(root) = value else { return None };
-    let Value::Array(entries) = root.get(1)? else { return None };
+    let Value::Array(root) = value else {
+        return None;
+    };
+    let Value::Array(entries) = root.get(1)? else {
+        return None;
+    };
     for entry in entries {
         let Value::Array(pair) = entry else { continue };
         if pair.first()?.as_str() == Some(field) {
