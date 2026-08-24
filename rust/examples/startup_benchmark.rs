@@ -1,5 +1,7 @@
+#[cfg(feature = "full")]
 use std::{env, fs, path::PathBuf, time::Instant};
 
+#[cfg(feature = "full")]
 use rust_lib_dxtr_box::DxtrBox;
 
 #[cfg(feature = "full")]
@@ -110,12 +112,14 @@ fn record(seed: usize) -> Vec<u8> {
     bytes
 }
 
+#[cfg(feature = "full")]
 fn benchmark_root() -> PathBuf {
     env::var_os("DXTR_BOX_STARTUP_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| env::temp_dir().join("dxtr-box-startup-benchmark"))
 }
 
+#[cfg(feature = "full")]
 fn env_usize(name: &str, default: usize) -> usize {
     env::var(name)
         .ok()
