@@ -271,7 +271,7 @@ Evidence output:
 ```text
 build/multi-frontend/rust-native.jsonl
 build/multi-frontend/dart-frb.jsonl
-build/multi-frontend/startup.jsonl
+build/multi-frontend/startup-open.jsonl
 ```
 
 Treat the measurements as diagnostic evidence rather than marketing speedup claims.
