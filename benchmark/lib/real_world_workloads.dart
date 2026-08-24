@@ -1,6 +1,6 @@
 typedef WorkloadRecord = Map<String, Object?>;
 
-const int _baseTimestampMs = 1_700_000_000_000;
+const int _baseTimestampMs = 1700000000000;
 
 Map<String, WorkloadRecord> settingsSessionFixture() => <String, WorkloadRecord>{
       'theme': <String, Object?>{'value': 'dark', 'updated_at': 1},
