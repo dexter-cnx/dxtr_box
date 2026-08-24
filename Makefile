@@ -60,7 +60,7 @@ format: pub-get
 	$(CARGO) fmt --manifest-path rust/Cargo.toml
 
 format-check: pub-get
-	dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test
+	@dart format --output=none --set-exit-if-changed lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test || { status=$$?; git diff -- lib test example benchmark/lib benchmark/test tool/validate_published_consumer.dart tool/verify_public_storage_contract.dart tool/hive_ce_migration_fixture/test; exit $$status; }
 	$(CARGO) fmt --manifest-path rust/Cargo.toml -- --check
 
 analyze: pub-get
