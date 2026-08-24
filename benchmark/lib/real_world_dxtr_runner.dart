@@ -211,8 +211,7 @@ Future<RealWorldResult> _activityScenario(
     }
     final retainedIndex = deleteKeys.length;
     if (retainedIndex < records) {
-      final retainedKey =
-          'event-${retainedIndex.toString().padLeft(8, '0')}';
+      final retainedKey = 'event-${retainedIndex.toString().padLeft(8, '0')}';
       if (!await box.containsKey(retainedKey)) {
         throw StateError('activity retention removed first retained record');
       }
