@@ -13,6 +13,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&root)?;
 
     let iterations = env_usize("DXTR_BOX_STARTUP_ITERATIONS", 100);
+    if iterations == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "DXTR_BOX_STARTUP_ITERATIONS must be greater than zero",
+        )
+        .into());
+    }
+
     let record_counts = [0usize, 1_000, 10_000];
     let index_counts = [0usize, 1, 4];
 
@@ -116,7 +124,8 @@ fn record(seed: usize) -> Vec<u8> {
 fn benchmark_root() -> PathBuf {
     env::var_os("DXTR_BOX_STARTUP_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| env::temp_dir().join("dxtr-box-startup-benchmark"))
+        .unwrap_or_else(env::temp_dir)
+        .join("dxtr-box-startup-benchmark")
 }
 
 #[cfg(feature = "full")]
