@@ -17,10 +17,44 @@ const _expectedRustRootExports = <String>{
   'pub use native::{QueryBuilder, QueryValue, SortOrder};',
 };
 
+const _expectedApiDeclarations = <String>{
+  'pub enum NativeBoxEventType {',
+  'pub struct NativeBoxEvent {',
+  'pub struct NativeQueryRecord {',
+  'pub struct NativeBatchRecord {',
+  'pub struct NativeIndexDefinition {',
+  'pub fn init_db(path: String) -> Result<(), String> {',
+  'pub fn open_box(name: String, encryption_key: Option<String>) -> Result<(), String> {',
+  'pub fn close_box(name: String) -> Result<(), String> {',
+  'pub fn delete_box(name: String) -> Result<(), String> {',
+  'pub fn encrypt_box(name: String, encryption_key: String) -> Result<(), String> {',
+  'pub fn box_exists(name: String) -> Result<bool, String> {',
+  'pub fn watch_box(',
+  'pub fn unwatch_box(box_name: String, watcher_id: String) -> Result<(), String> {',
+  'pub fn put(box_name: String, key: String, value: Vec<u8>) -> Result<(), String> {',
+  'pub fn put_all(box_name: String, entries: Vec<(String, Vec<u8>)>) -> Result<(), String> {',
+  'pub fn get(box_name: String, key: String) -> Result<Option<Vec<u8>>, String> {',
+  'pub fn contains_key(box_name: String, key: String) -> Result<bool, String> {',
+  'pub fn get_all(box_name: String, keys: Vec<String>) -> Result<Vec<NativeBatchRecord>, String> {',
+  'pub fn delete(box_name: String, key: String) -> Result<(), String> {',
+  'pub fn delete_all(box_name: String, keys: Vec<String>) -> Result<Vec<String>, String> {',
+  'pub fn clear(box_name: String) -> Result<(), String> {',
+  'pub fn compact(box_name: String) -> Result<bool, String> {',
+  'pub fn scan_query(',
+  'pub fn create_index(box_name: String, name: String, field: String) -> Result<(), String> {',
+  'pub fn list_indexes(box_name: String) -> Result<Vec<NativeIndexDefinition>, String> {',
+  'pub fn drop_index(box_name: String, name: String) -> Result<bool, String> {',
+  'pub fn get_all_keys(box_name: String) -> Result<Vec<String>, String> {',
+  'pub fn length(box_name: String) -> Result<u64, String> {',
+};
+
 const _storageFormatMarker = 'dxtr_box/1';
 const _storageFormatMetaKey = 'format_version';
 const _rustIdentity = 'rust_lib_dxtr_box';
 const _rustCrateType = 'crate-type = ["cdylib", "staticlib", "rlib"]';
+const _queryExport =
+    'pub use native::{QueryBuilder, QueryValue, SortOrder};';
+const _fullCfg = '#[cfg(feature = "full")]';
 
 void main() {
   verifyPublicStorageContract();
@@ -39,18 +73,22 @@ void verifyPublicStorageContract() {
 }
 
 void _verifyPackageIdentity() {
-  final pubspec = File('pubspec.yaml').readAsStringSync();
-  const required = <String>[
+  final pubspecLines = File('pubspec.yaml')
+      .readAsLinesSync()
+      .map((line) => line.trim())
+      .toSet();
+  const required = <String>{
     'name: dxtr_box',
     "sdk: '>=3.4.0 <4.0.0'",
     "flutter: '>=3.22.0'",
     'flutter_rust_bridge: 2.8.0',
-  ];
+  };
 
-  final missing = required.where((entry) => !pubspec.contains(entry)).toList();
+  final missing = required.difference(pubspecLines);
   if (missing.isNotEmpty) {
     throw StateError(
-      '1.0 package identity/compatibility contract changed; missing=$missing',
+      '1.0 package identity/compatibility contract changed; '
+      'missing=$missing',
     );
   }
 }
@@ -80,16 +118,10 @@ void _verifyRustCrateBoundary() {
   const expectedName = 'name = "$_rustIdentity"';
 
   if (!packageLines.contains(expectedName)) {
-    throw StateError(
-      'Cargo package identity changed; expected '
-      '[package].name = "$_rustIdentity"',
-    );
+    throw StateError('Cargo package identity changed: $expectedName');
   }
   if (!libraryLines.contains(expectedName)) {
-    throw StateError(
-      'Cargo library identity changed; expected '
-      '[lib].name = "$_rustIdentity"',
-    );
+    throw StateError('Cargo library identity changed: $expectedName');
   }
   if (!libraryLines.contains(_rustCrateType)) {
     throw StateError('native crate-type contract changed');
@@ -105,29 +137,50 @@ void _verifyRustCrateBoundary() {
       .toList();
   if (missingCargo.isNotEmpty) {
     throw StateError(
-      'native profile/dependency contract changed; missing=$missingCargo',
+      'native profile/dependency contract changed; '
+      'missing=$missingCargo',
     );
   }
 
   final rustRootLines = File('rust/src/lib.rs')
       .readAsLinesSync()
       .map((line) => line.trim())
-      .toSet();
+      .toList();
   final rustRootExports = rustRootLines
       .where((line) => line.startsWith('pub use '))
       .toSet();
-
   final missingExports = _expectedRustRootExports.difference(rustRootExports);
   final addedExports = rustRootExports.difference(_expectedRustRootExports);
   if (missingExports.isNotEmpty || addedExports.isNotEmpty) {
     throw StateError(
-      'Rust root public export boundary changed without a 1.0 contract update; '
+      'Rust root public export boundary changed; '
       'missing=$missingExports added=$addedExports',
     );
   }
 
-  if (!rustRootLines.contains('#[cfg(feature = "full")]')) {
-    throw StateError('full-profile cfg guard unexpectedly missing from Rust root');
+  final queryIndex = rustRootLines.indexOf(_queryExport);
+  if (queryIndex <= 0 || rustRootLines[queryIndex - 1] != _fullCfg) {
+    throw StateError('full-profile cfg must guard the query root export');
+  }
+
+  _verifyWildcardApiSurface();
+}
+
+void _verifyWildcardApiSurface() {
+  final apiLines = File('rust/src/api.rs')
+      .readAsLinesSync()
+      .map((line) => line.trim())
+      .where((line) =>
+          line.startsWith('pub enum ') ||
+          line.startsWith('pub struct ') ||
+          line.startsWith('pub fn '))
+      .toSet();
+  final missing = _expectedApiDeclarations.difference(apiLines);
+  final added = apiLines.difference(_expectedApiDeclarations);
+  if (missing.isNotEmpty || added.isNotEmpty) {
+    throw StateError(
+      'api::* public surface changed; missing=$missing added=$added',
+    );
   }
 }
 
