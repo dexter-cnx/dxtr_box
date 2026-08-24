@@ -8,6 +8,7 @@ const DEFAULT_CATALOG_RECORDS: usize = 1_000;
 const DEFAULT_ACTIVITY_RECORDS: usize = 2_000;
 const DEFAULT_SAMPLES: usize = 5;
 const BASE_TIMESTAMP_MS: i64 = 1_700_000_000_000;
+const PAYLOAD_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 
 #[test]
 #[ignore = "purpose-built 0.10 Rust-native real-world diagnostic"]
@@ -98,6 +99,11 @@ fn run_catalog(db: &DxtrBox, records: usize, samples: usize) {
         for (index, record) in batch.iter().enumerate() {
             assert_eq!(record.key, hot_keys[index]);
             assert_eq!(decode_map_i64(&record.value, "id"), Some(index as i64));
+            let expected_name = format!("Asset {index:06}");
+            assert_eq!(
+                decode_map_string(&record.value, "name").as_deref(),
+                Some(expected_name.as_str())
+            );
         }
     }
 
@@ -166,23 +172,52 @@ fn settings_fixture() -> Vec<(String, Vec<u8>)> {
     vec![
         (
             "theme".into(),
-            encoded_map(vec![("value", Value::from("system"))]),
+            encoded_map(vec![
+                ("value", Value::from("dark")),
+                ("updated_at", Value::from(1)),
+            ]),
         ),
         (
             "locale".into(),
-            encoded_map(vec![("value", Value::from("en"))]),
+            encoded_map(vec![
+                ("value", Value::from("th_TH")),
+                ("updated_at", Value::from(2)),
+            ]),
         ),
         (
             "feature_flags".into(),
-            encoded_map(vec![("value", Value::from("stable"))]),
+            encoded_map(vec![
+                (
+                    "value",
+                    map_value(vec![
+                        ("fast_search", Value::from(true)),
+                        ("compact_cards", Value::from(false)),
+                        ("offline_mode", Value::from(true)),
+                    ]),
+                ),
+                ("updated_at", Value::from(3)),
+            ]),
         ),
         (
             "active_workspace".into(),
-            encoded_map(vec![("value", Value::from("workspace-0"))]),
+            encoded_map(vec![
+                ("value", Value::from("workspace-0003")),
+                ("updated_at", Value::from(4)),
+            ]),
         ),
         (
             "session".into(),
-            encoded_map(vec![("value", Value::from("session-0"))]),
+            encoded_map(vec![
+                (
+                    "value",
+                    map_value(vec![
+                        ("user_id", Value::from("user-local")),
+                        ("last_route", Value::from("/workspace")),
+                        ("launch_count", Value::from(42)),
+                    ]),
+                ),
+                ("updated_at", Value::from(5)),
+            ]),
         ),
     ]
 }
@@ -201,7 +236,7 @@ fn catalog_fixture(records: usize) -> Vec<(String, Vec<u8>)> {
 fn encoded_catalog_record(index: usize, score: i64) -> Vec<u8> {
     encoded_map(vec![
         ("id", Value::from(index as i64)),
-        ("name", Value::from(format!("item-{index}"))),
+        ("name", Value::from(format!("Asset {index:06}"))),
         (
             "status",
             Value::from(if index.is_multiple_of(10) {
@@ -216,7 +251,22 @@ fn encoded_catalog_record(index: usize, score: i64) -> Vec<u8> {
             "captured_at",
             Value::from(BASE_TIMESTAMP_MS + index as i64 * 1000),
         ),
-        ("payload", Value::from("x".repeat(192))),
+        (
+            "metadata",
+            map_value(vec![
+                ("workspace_id", Value::from(format!("workspace-{}", index % 5))),
+                (
+                    "source",
+                    Value::from(if index.is_multiple_of(2) {
+                        "camera"
+                    } else {
+                        "import"
+                    }),
+                ),
+                ("favorite", Value::from(index.is_multiple_of(17))),
+            ]),
+        ),
+        ("payload", Value::from(deterministic_payload(index, 192))),
     ])
 }
 
@@ -227,21 +277,59 @@ fn activity_fixture(records: usize) -> Vec<(String, Vec<u8>)> {
                 activity_key(index),
                 encoded_map(vec![
                     ("sequence", Value::from(index as i64)),
-                    ("event_type", Value::from(format!("event-{}", index % 4))),
+                    ("event_type", Value::from(event_type(index))),
                     (
                         "timestamp",
                         Value::from(BASE_TIMESTAMP_MS + index as i64 * 250),
                     ),
-                    ("actor", Value::from(format!("actor-{}", index % 8))),
-                    ("payload", Value::from("e".repeat(96))),
+                    (
+                        "actor",
+                        map_value(vec![
+                            ("id", Value::from(format!("actor-{}", index % 7))),
+                            (
+                                "source",
+                                Value::from(if index.is_multiple_of(3) {
+                                    "background"
+                                } else {
+                                    "foreground"
+                                }),
+                            ),
+                        ]),
+                    ),
+                    (
+                        "payload",
+                        map_value(vec![
+                            (
+                                "target_id",
+                                Value::from(format!("item-{:06}", index % 1000)),
+                            ),
+                            ("revision", Value::from((index % 13) as i64)),
+                            ("note", Value::from(deterministic_payload(index, 48))),
+                        ]),
+                    ),
                 ]),
             )
         })
         .collect()
 }
 
-fn encoded_map(entries: Vec<(&str, Value)>) -> Vec<u8> {
-    let value = Value::Array(vec![
+fn event_type(index: usize) -> &'static str {
+    match index % 4 {
+        0 => "created",
+        1 => "updated",
+        2 => "viewed",
+        _ => "synced_local",
+    }
+}
+
+fn deterministic_payload(seed: usize, length: usize) -> String {
+    (0..length)
+        .map(|index| PAYLOAD_ALPHABET[(seed + index) % PAYLOAD_ALPHABET.len()] as char)
+        .collect()
+}
+
+fn map_value(entries: Vec<(&str, Value)>) -> Value {
+    Value::Array(vec![
         Value::from("@dxtr:map"),
         Value::Array(
             entries
@@ -249,7 +337,11 @@ fn encoded_map(entries: Vec<(&str, Value)>) -> Vec<u8> {
                 .map(|(key, value)| Value::Array(vec![Value::from(key), value]))
                 .collect(),
         ),
-    ]);
+    ])
+}
+
+fn encoded_map(entries: Vec<(&str, Value)>) -> Vec<u8> {
+    let value = map_value(entries);
     let mut bytes = Vec::new();
     rmpv::encode::write_value(&mut bytes, &value).expect("encode real-world record");
     bytes
