@@ -68,10 +68,10 @@ jobs:
           DXTR_BOX_READ_BOUNDARY_MATRIX_BENCHMARK: '1'
           DXTR_BOX_READ_BOUNDARY_MATRIX_ITERATIONS: '250'
           DXTR_BOX_READ_BOUNDARY_MATRIX_SAMPLES: '5'
-          DXTR_BOX_READ_BOUNDARY_MATRIX_OUTPUT: 'build/read-path/dart-boundary-matrix.jsonl'
+          DXTR_BOX_READ_BOUNDARY_MATRIX_OUTPUT: '${{ github.workspace }}/build/read-path/dart-boundary-matrix.jsonl'
           DXTR_BOX_READ_BOUNDARY_MATRIX_RUST_ITERATIONS: '250'
           DXTR_BOX_READ_BOUNDARY_MATRIX_RUST_SAMPLES: '5'
-          DXTR_BOX_READ_BOUNDARY_MATRIX_RUST_OUTPUT: 'build/read-path/rust-boundary-matrix.jsonl'
+          DXTR_BOX_READ_BOUNDARY_MATRIX_RUST_OUTPUT: '${{ github.workspace }}/build/read-path/rust-boundary-matrix.jsonl'
         run: |
           cargo test --manifest-path rust/Cargo.toml --release \
             read_boundary_matrix_bench::read_boundary_matrix_microbench -- --ignored --nocapture
