@@ -70,7 +70,7 @@ test: pub-get
 	$(FLUTTER) test
 
 test-fast: pub-get
-	$(FLUTTER) test test/codec_test.dart test/box_test.dart test/public_api_contract_test.dart --reporter expanded
+	$(FLUTTER) test test/codec_test.dart test/box_test.dart test/public_api_contract_test.dart test/public_api_semantic_regression_test.dart --reporter expanded
 
 contract-check:
 	dart run tool/verify_public_storage_contract.dart
