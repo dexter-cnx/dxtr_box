@@ -50,14 +50,22 @@ Map<String, dynamic> _casesForScale(int scale) {
     },
     'nested_map': _nestedMap(scale),
     'list_heavy': <String, dynamic>{
-      'items': List<int>.generate(16 * scale, (index) => index, growable: false),
+      'items': List<int>.generate(
+        16 * scale,
+        (index) => index,
+        growable: false,
+      ),
     },
     'string_heavy': <String, dynamic>{
       'text': List<String>.filled(scale, 'dxtr-box-messagepack-payload').join('-'),
     },
     'bytes_heavy': <String, dynamic>{
       'bytes': Uint8List.fromList(
-        List<int>.generate(32 * scale, (index) => index & 0xff, growable: false),
+        List<int>.generate(
+          32 * scale,
+          (index) => index & 0xff,
+          growable: false,
+        ),
       ),
     },
   };
