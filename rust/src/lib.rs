@@ -19,6 +19,8 @@ mod multi_frontend_bench;
 pub mod native;
 #[cfg(feature = "full")]
 mod query;
+#[cfg(all(test, feature = "full"))]
+mod read_boundary_matrix_bench;
 #[cfg(test)]
 mod read_path_bench;
 #[cfg(all(test, feature = "full"))]
