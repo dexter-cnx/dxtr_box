@@ -116,7 +116,7 @@ The production adapter returns FRB-owned payload lists directly for batch/query 
 encode(value)
   -> _toWire(value)
   -> msgpack.serialize(...)
-  -> Uint8List
+  -> Uint8List (returned directly; no second copy)
 
 decode(bytes)
   -> normalize byte-view boundary when required
@@ -140,7 +140,9 @@ The current diagnostics establish these decisions:
 - fixed-length public result construction is used for `getAll` and query results;
 - query request wire building/encoding is small relative to the native query operation and is not the current optimization target;
 - for a representative 100-record batch decode, MessagePack deserialization accounts for the majority of codec time, while tagged `_fromWire` conversion is still a meaningful minority;
-- the current follow-up diagnostic compares the existing map-comprehension `_fromWire` shape against explicit loop-based map construction before any production codec change is considered.
+- explicit-loop `_fromWire` map construction measured only a small improvement over the current comprehension shape, so production map conversion remains unchanged;
+- `msgpack_dart 1.0.1` already returns `Uint8List` from `serialize`, so `BoxCodec.encode` now returns that buffer directly instead of cloning it through `Uint8List.fromList`;
+- CI retains a codec encode-copy diagnostic so the direct-return decision has same-run evidence alongside the existing read-path decomposition.
 
 Hosted absolute timings are diagnostic and noisy. Same-run layer ratios and component decomposition are the primary evidence used to justify a production optimization.
 
