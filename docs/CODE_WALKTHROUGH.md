@@ -143,7 +143,7 @@ The current diagnostics establish these decisions:
 - explicit-loop `_fromWire` map construction measured only a small improvement over the current comprehension shape, so production map conversion remains unchanged;
 - `msgpack_dart 1.0.1` already returns `Uint8List` from `serialize`, so `BoxCodec.encode` now returns that buffer directly instead of cloning it through `Uint8List.fromList`;
 - CI retains a codec encode-copy diagnostic so the direct-return decision has same-run evidence alongside the existing read-path decomposition;
-- the MessagePack deserialize-shape diagnostic compares flat maps, nested maps, list-heavy values, string-heavy values, and byte-heavy values, recording both `ns/op` and `ns/byte` so future codec decisions can distinguish payload-size cost from structural parsing cost without changing `dxtr_box/1`.
+- the MessagePack deserialize-shape diagnostic compares flat maps, nested maps, list-heavy values, string-heavy values, and byte-heavy values at multiple scales. It records encoded bytes, `ns/op`, and `ns/byte`; conclusions about structural parsing cost must be based on scaling behavior and similarly sized cases rather than `ns/byte` alone.
 
 Hosted absolute timings are diagnostic and noisy. Same-run layer ratios and component decomposition are the primary evidence used to justify a production optimization. Codec-library replacement or wire-layout changes require separate compatibility evidence; this diagnostic does not authorize a storage-format change.
 
