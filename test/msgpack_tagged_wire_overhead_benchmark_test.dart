@@ -30,7 +30,11 @@ void main() {
               <dynamic>['field-$index', index],
           ],
         ];
-        final nativeList = List<int>.generate(size, (index) => index, growable: false);
+        final nativeList = List<int>.generate(
+          size,
+          (index) => index,
+          growable: false,
+        );
         final taggedList = <dynamic>['@dxtr:list', nativeList];
 
         final cases = <String, dynamic>{
