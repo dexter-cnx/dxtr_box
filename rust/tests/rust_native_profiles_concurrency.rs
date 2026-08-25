@@ -1,4 +1,7 @@
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Barrier, Mutex,
+};
 
 use rust_lib_dxtr_box::{BoxHandle, DxtrBox, DxtrBoxError};
 
@@ -68,18 +71,34 @@ fn independent_handles_support_concurrent_readers_and_writers() {
     let reader_a = Arc::new(db.box_("items").unwrap());
     let reader_b = Arc::new(db.box_("items").unwrap());
     let start = Arc::new(Barrier::new(3));
+    let first_write_visible = Arc::new(Barrier::new(3));
+    let writer_active = Arc::new(AtomicBool::new(false));
+    let readers_while_active = Arc::new(AtomicUsize::new(0));
 
     writer.put("seed", vec![0]).unwrap();
 
     let writer_thread = {
         let writer = Arc::clone(&writer);
         let start = Arc::clone(&start);
+        let first_write_visible = Arc::clone(&first_write_visible);
+        let writer_active = Arc::clone(&writer_active);
+        let readers_while_active = Arc::clone(&readers_while_active);
         std::thread::spawn(move || {
             start.wait();
-            for value in 1u8..=64 {
+            writer_active.store(true, Ordering::SeqCst);
+            writer.put("shared", vec![1]).unwrap();
+            writer.put("write-1", vec![1]).unwrap();
+            first_write_visible.wait();
+
+            while readers_while_active.load(Ordering::SeqCst) < 2 {
+                std::thread::yield_now();
+            }
+
+            for value in 2u8..=64 {
                 writer.put("shared", vec![value]).unwrap();
                 writer.put(format!("write-{value}"), vec![value]).unwrap();
             }
+            writer_active.store(false, Ordering::SeqCst);
         })
     };
 
@@ -87,8 +106,18 @@ fn independent_handles_support_concurrent_readers_and_writers() {
         .into_iter()
         .map(|reader| {
             let start = Arc::clone(&start);
+            let first_write_visible = Arc::clone(&first_write_visible);
+            let writer_active = Arc::clone(&writer_active);
+            let readers_while_active = Arc::clone(&readers_while_active);
             std::thread::spawn(move || {
                 start.wait();
+                first_write_visible.wait();
+
+                assert!(writer_active.load(Ordering::SeqCst));
+                assert_eq!(reader.get("seed").unwrap(), Some(vec![0]));
+                assert_eq!(reader.get("shared").unwrap(), Some(vec![1]));
+                readers_while_active.fetch_add(1, Ordering::SeqCst);
+
                 for _ in 0..128 {
                     assert_eq!(reader.get("seed").unwrap(), Some(vec![0]));
                     if let Some(value) = reader.get("shared").unwrap() {
@@ -105,6 +134,7 @@ fn independent_handles_support_concurrent_readers_and_writers() {
         thread.join().unwrap();
     }
 
+    assert_eq!(readers_while_active.load(Ordering::SeqCst), 2);
     assert_eq!(writer.get("shared").unwrap(), Some(vec![64]));
     assert_eq!(writer.len().unwrap(), 66);
 }
@@ -139,14 +169,8 @@ fn concurrent_mutations_remain_durable_after_all_handles_close_and_reopen() {
 
     let reopened = db.box_("items").unwrap();
     assert_eq!(reopened.len().unwrap(), 64);
-    assert_eq!(
-        reopened.get("worker-0-31").unwrap(),
-        Some(vec![0, 31])
-    );
-    assert_eq!(
-        reopened.get("worker-1-31").unwrap(),
-        Some(vec![1, 31])
-    );
+    assert_eq!(reopened.get("worker-0-31").unwrap(), Some(vec![0, 31]));
+    assert_eq!(reopened.get("worker-1-31").unwrap(), Some(vec![1, 31]));
     reopened.close().unwrap();
 }
 
