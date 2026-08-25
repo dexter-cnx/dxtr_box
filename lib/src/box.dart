@@ -214,14 +214,17 @@ final class Box {
       name,
       BoxCodec.encode(_queryWire(query)),
     );
-    return records
-        .map(
-          (record) => MapEntry<String, dynamic>(
-            record.key,
-            BoxCodec.decode(record.value),
-          ),
-        )
-        .toList(growable: false);
+    return List<MapEntry<String, dynamic>>.generate(
+      records.length,
+      (index) {
+        final record = records[index];
+        return MapEntry<String, dynamic>(
+          record.key,
+          BoxCodec.decode(record.value),
+        );
+      },
+      growable: false,
+    );
   }
 
   Future<void> createIndex(IndexDefinition definition) async {
