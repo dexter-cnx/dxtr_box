@@ -36,7 +36,7 @@ Completed:
 - 0.10 Real-world Workload Evidence
 - **1.0 Stabilization / Release Readiness**
 
-1.0 sequence:
+1.0 / post-release sequence:
 
 ```text
 PR1 contract-freeze audit + stronger guards                              merged (#57)
@@ -45,6 +45,7 @@ PR3 release-candidate published-consumer / migration / upgrade evidence  merged 
 PR4 final release audit, docs sync, version 1.0.0                         merged (#63)
 post-release handoff sync                                                  merged (#64)
 1.1 planning baseline                                                     merged (#65)
+1.1 PR1 registry-resolved external consumer verification                  merged (#66)
 ```
 
 See:
@@ -55,6 +56,7 @@ See:
 - `docs/RELEASE_AUDIT_100.md`
 - `docs/ROADMAP_11.md`
 - `docs/POST_RELEASE_REGISTRY_VERIFICATION_11.md`
+- `docs/CONCURRENCY_EVIDENCE_11.md`
 
 ## Architecture
 
@@ -135,13 +137,15 @@ Do not turn post-1.0 maintenance into:
 - a fourth native profile;
 - broad Dart API redesign.
 
-## Next active work: 1.1 PR1 registry verification
+## Next active work: 1.1 PR2 concurrency evidence
 
-The first 1.1 step is external release verification, not a new runtime feature. PR1 adds a manual five-platform `Registry Consumer Verification` workflow and `tool/validate_registry_consumer.dart` so the package can be resolved from the hosted registry at an exact version and compiled as an external consumer.
+PR1 added registry-resolved external consumer verification infrastructure. Registry publication itself remains an external release step and must not be inferred merely from repository version `1.0.0`.
 
-At PR preparation time, public pub.dev search did not return `dxtr_box`, so repository version `1.0.0` must not be described as registry-published yet. After publication, run the manual workflow for version `1.0.0`; all five platform jobs must resolve from hosted cache, compile representative stable APIs, build successfully, and retain JSON evidence before external publication verification is considered complete.
+PR2 strengthens native concurrency evidence without changing the stable contract. Existing `Send + Sync`, shared-handle concurrent mutation, multi-handle lifecycle, and encrypted reopen coverage is extended with independent concurrent readers/writer coverage and close/reopen durability after concurrent mutations.
 
-After registry verification, use `docs/ROADMAP_11.md` to select only evidence-backed work. Current candidate buckets are reliability/concurrency validation, Dart/native tree-shaking investigation, platform/tooling decisions, and migration/interoperability hardening. None is automatically committed scope.
+This does **not** declare Dart isolate semantics stable. A Dart isolate claim requires an executable isolate/FRB harness proving initialization, cross-isolate visibility, lifecycle, and failure behavior. Until then, the supported evidence statement is limited to native Rust thread safety under the tested conditions.
+
+After PR2, use `docs/ROADMAP_11.md` to select only evidence-backed work. Dart/native tree-shaking evaluation, platform/tooling decisions, and migration/interoperability hardening remain conditional candidates rather than committed scope.
 
 ## Post-1.0 rule
 
