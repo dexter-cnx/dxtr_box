@@ -1,0 +1,45 @@
+name: Dart Isolate Concurrency
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'rust/**'
+      - 'test/isolate_native_integration_test.dart'
+      - 'pubspec.yaml'
+      - 'cargokit/**'
+      - 'cargokit_options.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dart-isolate-concurrency-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolate-frb:
+    name: Dart isolates / FRB shared storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: true
+          cache-workspaces: rust
+      - run: flutter pub get
+      - run: cargo build --manifest-path rust/Cargo.toml --release
+      - name: Run isolate concurrency evidence
+        env:
+          LD_LIBRARY_PATH: rust/target/release
+          DYLD_LIBRARY_PATH: rust/target/release
+          DXTR_BOX_NATIVE_TEST: '1'
+        run: flutter test test/isolate_native_integration_test.dart --reporter expanded
