@@ -111,9 +111,8 @@ void _verifyRustCrateBoundary() {
   _verifyCargoRequirements(cargo);
 
   final rootLines = _trimmedLines('rust/src/lib.rs');
-  final rootExports = rootLines
-      .where((line) => line.startsWith('pub use '))
-      .toSet();
+  final rootExports =
+      rootLines.where((line) => line.startsWith('pub use ')).toSet();
   _requireExactSet(
     'Rust root export boundary',
     _expectedRustRootExports,
