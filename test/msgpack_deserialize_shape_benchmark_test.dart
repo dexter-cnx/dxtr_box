@@ -57,7 +57,10 @@ Map<String, dynamic> _casesForScale(int scale) {
       ),
     },
     'string_heavy': <String, dynamic>{
-      'text': List<String>.filled(scale, 'dxtr-box-messagepack-payload').join('-'),
+      'text': List<String>.filled(
+        scale,
+        'dxtr-box-messagepack-payload',
+      ).join('-'),
     },
     'bytes_heavy': <String, dynamic>{
       'bytes': Uint8List.fromList(
