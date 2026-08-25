@@ -20,8 +20,18 @@ jobs:
           toolchain: stable
       - name: Capture native size baseline
         run: |
-          DXTR_BOX_SIZE_OUT_DIR="$RUNNER_TEMP/dxtr-box-native-size" bash tool/native_size_baseline.sh
+          OUT_DIR="$RUNNER_TEMP/dxtr-box-native-size"
+          DXTR_BOX_SIZE_OUT_DIR="$OUT_DIR" bash tool/native_size_baseline.sh
+          cp rust/Cargo.lock "$OUT_DIR/Cargo.lock"
+          cargo metadata \
+            --manifest-path rust/Cargo.toml \
+            --locked \
+            --format-version 1 \
+            > "$OUT_DIR/cargo-metadata.json"
       - uses: actions/upload-artifact@v5
         with:
           name: native-size-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/dxtr-box-native-size/native-size-baseline.tsv
+          path: |
+            ${{ runner.temp }}/dxtr-box-native-size/native-size-baseline.tsv
+            ${{ runner.temp }}/dxtr-box-native-size/Cargo.lock
+            ${{ runner.temp }}/dxtr-box-native-size/cargo-metadata.json
