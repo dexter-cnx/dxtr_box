@@ -4,14 +4,14 @@
 
 **dxtr_box — Native local database for Flutter and Rust, forged in Rust. By Dxtr.**
 
-Dxtr_Box is a compact Rust/redb local database engine with a Flutter/Dart frontend and a first-class native Rust frontend. It is not positioned as a Hive/Hive CE replacement; Hive CE remains optional migration tooling, compatibility reference, and a benchmark peer.
+`dxtr_box` is a compact Rust/redb local database engine with a Flutter/Dart frontend and a first-class native Rust frontend. It is not positioned as a Hive/Hive CE replacement; Hive CE remains optional migration tooling, compatibility reference, and benchmark peer.
 
-## Stable runtime/package contract
+## Stable 1.0 runtime/package contract
 
 ```text
 Flutter package/plugin: dxtr_box
 Rust crate/native lib:  rust_lib_dxtr_box
-Package version:         0.10.0-dev.1
+Package version:         1.0.0
 Dart:                    >= 3.4.0 < 4.0.0
 Flutter:                 >= 3.22.0
 flutter_rust_bridge:     2.8.0 exactly
@@ -33,22 +33,24 @@ Completed:
 - 0.7 Query Ergonomics
 - 0.8 Rust-native API / Multi-frontend Foundation
 - 0.9 Conformance & Startup Maturity
-- **0.10 Real-world Workload Evidence** — closure is PR #60
+- 0.10 Real-world Workload Evidence
+- **1.0 Stabilization / Release Readiness**
 
-0.10 sequence:
+1.0 sequence:
 
 ```text
-PR1  deterministic real-world fixtures                                      merged
-PR2  Dart/FRB workload runner + JSONL evidence                              merged
-PR3  Rust-native equivalent runner + cross-frontend interpretation          merged
-PR4  reproducible CI artifact + docs/version synchronization                current closure PR (#60)
+PR1 contract-freeze audit + stronger guards                              merged (#57)
+PR2 public API semantic regression inventory + compatibility tests       merged (#61)
+PR3 release-candidate published-consumer / migration / upgrade evidence  merged (#62)
+PR4 final release audit, docs sync, version 1.0.0                         current
 ```
 
 See:
 
-- `docs/REAL_WORLD_WORKLOADS_010.md`
-- `docs/REAL_WORLD_CROSS_FRONTEND_010.md`
-- `docs/RELEASE_AUDIT_010.md`
+- `docs/RELEASE_READINESS_10.md`
+- `docs/PUBLIC_API_SEMANTIC_REGRESSION_10.md`
+- `docs/RELEASE_CANDIDATE_EVIDENCE_10.md`
+- `docs/RELEASE_AUDIT_100.md`
 
 ## Architecture
 
@@ -60,7 +62,7 @@ Dart API -> FRB adapter ----┐
 Rust API -------------------┘
 ```
 
-The Rust frontend does not wrap Dart or FRB. GPUI is only a potential downstream consumer and is not a Dxtr_Box dependency.
+The Rust frontend does not wrap Dart or FRB. GPUI is only a potential downstream consumer and is not a `dxtr_box` dependency.
 
 One canonical storage engine means one durable contract:
 
@@ -80,35 +82,24 @@ Native Rust consumers use `DxtrBox`, `BoxHandle`, `Record`, `IndexDefinition`, `
 
 Both frontends converge onto the same canonical query representation, planner, redb storage path, encryption path, and persisted indexes.
 
-## 0.10 evidence path
+## 1.0 release evidence
 
-Run:
+The 1.0 release is guarded by executable evidence rather than documentation-only claims:
 
-```bash
-bash tool/real_world_workloads.sh
-```
+- exact Dart export and Rust root/wildcard contract guards;
+- query model and fluent-builder semantic regression tests;
+- native persistence and reopen coverage;
+- encrypted reopen and wrong/missing-key rejection;
+- Hive CE migration destination reservation/lifecycle coverage;
+- staged published payload validation;
+- generated consumer builds on Android, iOS, macOS, Linux, and Windows;
+- FRB generated binding reproducibility;
+- exact `minimal | encryption | full` Rust profile testing;
+- native-size regression policy;
+- package docs + pub dry-run;
+- benchmark correctness and diagnostic smoke.
 
-The same deterministic settings/session, catalog/workspace, and activity/event workloads run through both frontends.
-
-Outputs:
-
-```text
-build/real-world/rust-native.jsonl
-build/real-world/dart-frb.jsonl
-build/real-world/rust-native.log
-build/real-world/dart-frb.log
-build/real-world/toolchain.txt
-```
-
-The `Real-world Workloads` GitHub Actions workflow runs the same evidence script and uploads the directory as a retained artifact.
-
-Evidence rules:
-
-- correctness before timing;
-- Rust and Dart fixture shapes/values must remain equivalent;
-- exactly three scenario records per frontend;
-- record/sample/build/toolchain context must match before comparison;
-- cross-frontend deltas are boundary diagnostics, not pure storage-engine speedups or marketing claims.
+The durable format remains `dxtr_box/1`; 1.0 introduces no storage migration.
 
 ## CI / local preflight
 
@@ -128,39 +119,20 @@ Full merge validation retains format/analyze/tests, minimum SDK, all three Rust 
 
 ## Preserved non-goals
 
-Do not turn stabilization work into:
+Do not turn post-1.0 maintenance into:
 
 - GPUI integration inside core;
 - Tokio/runtime commitment;
 - ORM/schema/model code generation;
 - cloud sync/CRDT/network database functionality;
-- storage-format redesign;
+- storage-format redesign without an explicit migration plan;
 - query-engine rewrite;
 - encryption redesign;
 - a fourth native profile;
 - broad Dart API redesign.
 
-## Next active milestone: 1.0 stabilization
+## Post-1.0 rule
 
-After PR #60 merges, resume PR #57 (`1.0 PR1: contract freeze audit and stronger release guards`).
-
-Required first steps:
-
-1. rebase/rebuild #57 cleanly on current `main`;
-2. fix Cargo contract parsing so `[package].name` and `[lib].name` are independently guarded;
-3. make the Rust root export guard reject unexpected additions as well as missing exports;
-4. run format/preflight and resolve review threads;
-5. continue the 1.0 readiness sequence without adding unrelated features.
-
-Planned 1.0 sequence:
-
-```text
-PR1 contract-freeze audit + stronger guards
-PR2 public API semantic regression inventory + missing compatibility tests
-PR3 release-candidate published-consumer / migration / upgrade evidence
-PR4 final release audit, docs sync, version 1.0.0
-```
-
-## Working rule
+Treat the Dart public API, Rust root API, package identities, native profiles, and `dxtr_box/1` durable format as compatibility-sensitive contracts. Breaking changes require an explicit versioning/migration decision rather than incidental refactoring.
 
 Correctness, durability, authenticated encryption, cross-process/cross-frontend visibility, compatibility, and evidence quality take priority over feature count or benchmark wins.
