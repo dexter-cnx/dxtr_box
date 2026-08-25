@@ -143,7 +143,8 @@ void main() {
   );
 }
 
-Map<String, dynamic> _queryWireForBenchmark(BoxQuery query) => <String, dynamic>{
+Map<String, dynamic> _queryWireForBenchmark(BoxQuery query) =>
+    <String, dynamic>{
       'where': _filterWireForBenchmark(query.where),
       'sortBy': query.sortBy
           .map(
