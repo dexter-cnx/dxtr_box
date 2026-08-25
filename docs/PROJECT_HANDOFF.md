@@ -42,7 +42,7 @@ Completed:
 PR1 contract-freeze audit + stronger guards                              merged (#57)
 PR2 public API semantic regression inventory + compatibility tests       merged (#61)
 PR3 release-candidate published-consumer / migration / upgrade evidence  merged (#62)
-PR4 final release audit, docs sync, version 1.0.0                         current
+PR4 final release audit, docs sync, version 1.0.0                         merged (#63)
 ```
 
 See:
@@ -134,5 +134,7 @@ Do not turn post-1.0 maintenance into:
 ## Post-1.0 rule
 
 Treat the Dart public API, Rust root API, package identities, native profiles, and `dxtr_box/1` durable format as compatibility-sensitive contracts. Breaking changes require an explicit versioning/migration decision rather than incidental refactoring.
+
+Next work should begin with post-release verification and a separately justified 1.1 backlog. New features must be evaluated against the stable 1.0 contract before implementation.
 
 Correctness, durability, authenticated encryption, cross-process/cross-frontend visibility, compatibility, and evidence quality take priority over feature count or benchmark wins.
