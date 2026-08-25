@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 
 use rust_lib_dxtr_box::{BoxHandle, DxtrBox, DxtrBoxError};
 
@@ -57,6 +57,97 @@ fn rust_native_same_box_mutations_are_safe_across_threads() {
     assert_eq!(items.get("worker-7-15").unwrap(), Some(vec![0x92, 7, 15]));
 
     drop(items);
+}
+
+#[test]
+fn independent_handles_support_concurrent_readers_and_writers() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let db = DxtrBox::open(dir.path()).unwrap();
+    let writer = Arc::new(db.box_("items").unwrap());
+    let reader_a = Arc::new(db.box_("items").unwrap());
+    let reader_b = Arc::new(db.box_("items").unwrap());
+    let start = Arc::new(Barrier::new(3));
+
+    writer.put("seed", vec![0]).unwrap();
+
+    let writer_thread = {
+        let writer = Arc::clone(&writer);
+        let start = Arc::clone(&start);
+        std::thread::spawn(move || {
+            start.wait();
+            for value in 1u8..=64 {
+                writer.put("shared", vec![value]).unwrap();
+                writer.put(format!("write-{value}"), vec![value]).unwrap();
+            }
+        })
+    };
+
+    let reader_threads = [reader_a, reader_b]
+        .into_iter()
+        .map(|reader| {
+            let start = Arc::clone(&start);
+            std::thread::spawn(move || {
+                start.wait();
+                for _ in 0..128 {
+                    assert_eq!(reader.get("seed").unwrap(), Some(vec![0]));
+                    if let Some(value) = reader.get("shared").unwrap() {
+                        assert_eq!(value.len(), 1);
+                        assert!((1..=64).contains(&value[0]));
+                    }
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    writer_thread.join().unwrap();
+    for thread in reader_threads {
+        thread.join().unwrap();
+    }
+
+    assert_eq!(writer.get("shared").unwrap(), Some(vec![64]));
+    assert_eq!(writer.len().unwrap(), 66);
+}
+
+#[test]
+fn concurrent_mutations_remain_durable_after_all_handles_close_and_reopen() {
+    let _guard = TEST_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let db = DxtrBox::open(dir.path()).unwrap();
+    let first = Arc::new(db.box_("items").unwrap());
+    let second = Arc::new(db.box_("items").unwrap());
+
+    let threads = [Arc::clone(&first), Arc::clone(&second)]
+        .into_iter()
+        .enumerate()
+        .map(|(worker, handle)| {
+            std::thread::spawn(move || {
+                for offset in 0..32 {
+                    let key = format!("worker-{worker}-{offset}");
+                    handle.put(key, vec![worker as u8, offset as u8]).unwrap();
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    first.close().unwrap();
+    second.close().unwrap();
+
+    let reopened = db.box_("items").unwrap();
+    assert_eq!(reopened.len().unwrap(), 64);
+    assert_eq!(
+        reopened.get("worker-0-31").unwrap(),
+        Some(vec![0, 31])
+    );
+    assert_eq!(
+        reopened.get("worker-1-31").unwrap(),
+        Some(vec![1, 31])
+    );
+    reopened.close().unwrap();
 }
 
 #[test]
