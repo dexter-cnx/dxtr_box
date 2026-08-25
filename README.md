@@ -180,6 +180,10 @@ bash tool/multi_frontend_benchmark.sh
 
 Equivalent logical workloads run through native Rust and Dart/FRB. Treat results as diagnostic boundary evidence, not marketing claims.
 
+Latest hosted Linux x64 evidence on the 1.1 release line measured median point `get` at about **0.93 µs** through the public Rust-native frontend versus about **47.7 µs** through Dart/FRB. The same run measured `get_all(100)` at about **57.3 µs** versus **367.8 µs**, while an indexed query + sort + limit measured about **1.01 ms** versus **1.31 ms**.
+
+This shape indicates that the main bottleneck for very small Flutter/Dart point reads is the **Dart async + generated FRB cross-runtime boundary**, not the underlying redb point lookup. As more useful work is performed per call, such as batch reads or indexed queries, that fixed boundary cost is amortized and the frontend gap narrows substantially. These numbers are diagnostic observations from one controlled runner/workload and must not be presented as a general storage-engine speedup or as an apples-to-apples comparison across different machines/build modes.
+
 ## Real-world workload evidence
 
 Run:
