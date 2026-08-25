@@ -145,8 +145,9 @@ The current diagnostics establish these decisions:
 - CI retains a codec encode-copy diagnostic so the direct-return decision has same-run evidence alongside the existing read-path decomposition;
 - the MessagePack deserialize-shape diagnostic compares flat maps, nested maps, list-heavy values, string-heavy values, and byte-heavy values at multiple scales. It records encoded bytes, `ns/op`, and `ns/byte`; conclusions about structural parsing cost must be based on scaling behavior and similarly sized cases rather than `ns/byte` alone;
 - the tagged-wire diagnostic shows the current `@dxtr:*` list-based representation is not a demonstrated deserialize bottleneck by itself, so no `dxtr_box/1` wire-layout change is justified from this evidence;
-- `test/codec_compatibility_corpus_test.dart` pins exact MessagePack bytes for primitives plus `@dxtr:bytes`, `@dxtr:datetime`, `@dxtr:list`, `@dxtr:map`, and nested tagged values. Any alternative decoder or encoder benchmark must consume unchanged `dxtr_box/1` bytes before production adoption is considered;
-- `tool/decoder_benchmark` is deliberately isolated from the root package dependency graph. Candidate codecs with newer Dart minimums can be benchmarked there without raising the package contract above Dart 3.4. The comparison first checks that each candidate decodes the same production-generated wire object as `msgpack_dart`, then measures both decoders on identical payload bytes. A favorable benchmark alone is not authorization to replace the production codec.
+- `test/codec_compatibility_corpus_test.dart` pins exact MessagePack bytes for primitives plus `@dxtr:bytes`, `@dxtr:datetime`, `@dxtr:list`, `@dxtr:map`, nested tagged values, and MessagePack width boundaries. Any alternative decoder or encoder benchmark must consume unchanged `dxtr_box/1` bytes before production adoption is considered;
+- `tool/decoder_benchmark` is deliberately isolated from the root package dependency graph. Candidate codecs with newer Dart minimums can be benchmarked there without raising the package contract above Dart 3.4;
+- the `pro_mpack 3.2.0` comparison passed the pinned compatibility corpus but produced mixed performance: it was faster for `flat_map_16` and `list_256`, while `msgpack_dart 1.0.1` was faster for `flat_map_64`, `nested`, and `bytes_4096`. Because there is no consistent representative win and `pro_mpack 3.2.0` requires Dart 3.10+, production remains on `msgpack_dart 1.0.1`. See `docs/DECODER_EVALUATION_11.md`.
 
 Hosted absolute timings are diagnostic and noisy. Same-run layer ratios and component decomposition are the primary evidence used to justify a production optimization. Codec-library replacement or wire-layout changes require separate compatibility evidence; this diagnostic does not authorize a storage-format change.
 
@@ -208,7 +209,7 @@ CI runs that staged path for Android, iOS, macOS, Linux, and Windows. A separate
 meta[format_version] = dxtr_box/1
 ```
 
-No 1.1 storage migration is introduced. Existing persistence/reopen, encrypted reopen, cross-frontend same-file, migration destination, crash-reopen, native concurrency, and Dart isolate tests remain executable compatibility evidence.
+No 1.1 storage migration is introduced. Existing persistence/reopen, encrypted reopen, cross-frontend same-file, migration destination, crash-reopen, native concurrency, Dart isolate, codec byte-corpus, and candidate-decoder compatibility tests remain executable compatibility evidence.
 
 ## 10. Merge quality bar
 
@@ -228,6 +229,7 @@ package/pub dry-run
 benchmark correctness/smoke
 Android/Linux/Windows/macOS/iOS staged consumers
 Dart isolate / FRB concurrency evidence
+codec byte-level compatibility corpus
 ```
 
-See `docs/RELEASE_AUDIT_110.md`, `docs/NATIVE_SIZE_DECISION_11.md`, `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md`, and `docs/PROJECT_HANDOFF.md` for the 1.1 evidence boundary and maintenance rules.
+See `docs/RELEASE_AUDIT_110.md`, `docs/NATIVE_SIZE_DECISION_11.md`, `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md`, `docs/DECODER_EVALUATION_11.md`, and `docs/PROJECT_HANDOFF.md` for the 1.1 evidence boundary and maintenance rules.
