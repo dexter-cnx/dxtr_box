@@ -180,9 +180,13 @@ final class FrbNativeBoxApi
   }
 
   @override
-  Future<Uint8List?> get(String boxName, String key) async {
-    await _ensureInitialized();
-    return frb.get_(boxName: boxName, key: key);
+  Future<Uint8List?> get(String boxName, String key) {
+    // BoxStore.init/openBox guarantee RustLib has completed initialization
+    // before point reads can be issued. Avoid adding an async state machine
+    // around the already-synchronous FRB get hot path.
+    return Future<Uint8List?>.value(
+      frb.get_(boxName: boxName, key: key),
+    );
   }
 
   @override
