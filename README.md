@@ -6,7 +6,7 @@
 
 `dxtr_box` is a Rust/redb-backed local database engine with a Flutter/Dart frontend and a first-class native Rust frontend. Both frontends share the same authoritative Rust storage/query core, `dxtr_box/1` durable format, ACID persistence, authenticated encryption, native queries, persisted indexes, and batch reads. No model code generation is required.
 
-> Status: **1.0.0 stable.** The 1.0 release freezes the existing public/package/durable contracts after contract guards, semantic regression coverage, staged five-platform published-consumer validation, migration/reopen evidence, and the 0.10 real-world workload evidence milestone. The durable format remains `dxtr_box/1`; 1.0 introduces no storage migration.
+> Status: **1.1.0 stable.** 1.1 is a compatibility-preserving post-1.0 evidence release: stronger native concurrency/reopen coverage, Dart isolate/FRB concurrency evidence, hosted-registry consumer verification infrastructure, and reproducible native-size decision evidence. The durable format remains `dxtr_box/1`; 1.1 introduces no storage migration or SDK-floor increase.
 
 ## Key features
 
@@ -23,12 +23,13 @@
 - Android, iOS, macOS, Linux, and Windows staged Flutter consumer validation.
 - Rust `rlib` consumer support with no Dart/FRB dependency direction.
 - Bidirectional same-file compatibility tests plus reusable cross-frontend conformance tests.
-- Reproducible multi-frontend, startup/reopen, and real-world workload diagnostics.
+- Native concurrent reader/writer and Dart isolate/FRB shared-storage evidence.
+- Reproducible multi-frontend, startup/reopen, native-size, and real-world workload diagnostics.
 
 ## Compatibility
 
 ```text
-package version = 1.0.0
+package version = 1.1.0
 Dart >= 3.4.0 < 4.0.0
 Flutter >= 3.22.0
 flutter_rust_bridge = 2.8.0
@@ -144,9 +145,20 @@ Rust-native write -> close -> FRB-adapter read
 FRB-adapter write -> close -> Rust-native read
 ```
 
-0.9 added a reusable internal `StorageBoxContract` that runs the same CRUD/batch/deletion semantics against both frontends. It covers missing keys, put/get/contains, overwrite, bulk put, ordered `get_all` with duplicate preservation and miss omission, key enumeration, delete/delete-all, clear, and final empty state.
+0.9 added a reusable internal `StorageBoxContract` that runs the same CRUD/batch/deletion semantics against both frontends. Full-profile guards verify that dynamic index create/list/drop/reopen behavior remains shared across Rust-native and FRB-adapter paths without schema registration.
 
-Full-profile guards also verify that dynamic index create/list/drop/reopen behavior remains shared across Rust-native and FRB-adapter paths without schema registration.
+## Concurrency evidence
+
+1.1 strengthens executable concurrency evidence at both frontend boundaries:
+
+- Rust-native tests guarantee reader/writer overlap across independent handles and verify concurrent mutations remain durable after reopen.
+- Dart isolate tests require each isolate to initialize/open the same path independently, observe a committed peer write while both handles are active, close successfully, and only then allow the parent to reopen and verify all records.
+
+This does not make `Box` instances transferable between isolates or define cross-isolate watch ordering, fairness, or lock-free semantics.
+
+## Native-size decision evidence
+
+The manual `Native Size Evaluation` workflow records Linux/macOS `minimal | encryption | full` artifacts together with generated `rust/Cargo.lock`, locked Cargo metadata, commit, and toolchain context. Tree-shaking or SDK-floor changes remain deferred until like-for-like evidence demonstrates both >=64 KiB absolute and >=3% relative savings while preserving compatibility/correctness gates.
 
 ## Startup/reopen evidence
 
@@ -156,18 +168,7 @@ Run:
 bash tool/startup_benchmark.sh
 ```
 
-Matrix:
-
-```text
-records = 0 | 1,000 | 10,000
-indexes = 0 | 1 | 4
-```
-
-Each case records `first_open_us`, `reopen_p50_us`, `reopen_p95_us`, and `reopen_max_us`.
-
-Hosted Linux x64 evidence showed reopen p95 remaining below 1 ms across the matrix, including 10,000 records / 4 persisted indexes. Therefore 0.9 intentionally adds **no startup fast path, no startup cache, and no persisted configuration fingerprint**.
-
-The benchmark rejects zero iterations and only removes its own dedicated child directory under any caller-supplied root.
+The benchmark records first-open and reopen percentiles across 0/1,000/10,000 records and 0/1/4 indexes. Hosted Linux x64 evidence remained below 1 ms reopen p95 across the tested matrix, so no speculative startup cache or persisted fingerprint was added.
 
 ## Multi-frontend benchmark evidence
 
@@ -177,15 +178,7 @@ Run:
 bash tool/multi_frontend_benchmark.sh
 ```
 
-Equivalent logical workloads run through native Rust and Dart/FRB and emit:
-
-```text
-build/multi-frontend/rust-native.jsonl
-build/multi-frontend/dart-frb.jsonl
-build/multi-frontend/startup-open.jsonl
-```
-
-The matrix covers point `get`, 100-key batch read, indexed equality query with sort/limit, and startup/reopen diagnostics. Treat results as diagnostic boundary evidence, not marketing claims.
+Equivalent logical workloads run through native Rust and Dart/FRB. Treat results as diagnostic boundary evidence, not marketing claims.
 
 ## Real-world workload evidence
 
@@ -195,9 +188,7 @@ Run:
 bash tool/real_world_workloads.sh
 ```
 
-The 0.10 evidence suite runs deterministic `settings_session`, `catalog_workspace`, and `activity_event` scenarios through both Dart/FRB and Rust-native frontends. It emits three JSONL records per frontend plus logs and toolchain metadata under `build/real-world/`. CI reruns this evidence when benchmark definitions or production paths under `lib/**` or `rust/src/**` change.
-
-Treat these results as diagnostic cross-frontend boundary evidence, not direct storage-engine speedup claims.
+The deterministic `settings_session`, `catalog_workspace`, and `activity_event` scenarios run through both Dart/FRB and Rust-native frontends. Treat these results as diagnostic cross-frontend boundary evidence, not direct storage-engine speedup claims.
 
 ## Hive CE migration
 
@@ -213,6 +204,7 @@ The merge quality bar covers:
 - public/storage contract and semantic regression guards;
 - native integration;
 - cross-frontend compatibility/conformance;
+- native and Dart-isolate concurrency evidence;
 - migration/query/index/crash-reopen regressions;
 - generated FRB reproducibility;
 - native-size regression policy;
@@ -229,16 +221,15 @@ bash tool/install_git_hooks.sh
 
 ## Documentation
 
-- `docs/RELEASE_AUDIT_100.md` — stable 1.0.0 release audit and compatibility boundary.
-- `docs/RELEASE_CANDIDATE_EVIDENCE_10.md` — published-consumer, migration, and upgrade evidence matrix.
-- `docs/PUBLIC_API_SEMANTIC_REGRESSION_10.md` — public query/API semantic regression inventory.
-- `docs/RELEASE_READINESS_10.md` — 1.0 contract-freeze readiness policy.
-- `docs/RELEASE_AUDIT_010.md` — 0.10 closure and real-world workload evidence.
-- `docs/REAL_WORLD_WORKLOADS_010.md` — deterministic application-shaped workload contract.
-- `docs/REAL_WORLD_CROSS_FRONTEND_010.md` — Dart/FRB vs Rust-native interpretation rules.
+- `docs/RELEASE_AUDIT_110.md` — 1.1 closure audit and compatibility boundary.
+- `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md` — Dart isolate / FRB evidence.
+- `docs/NATIVE_SIZE_DECISION_11.md` — native-size/tree-shaking decision evidence.
+- `docs/CONCURRENCY_EVIDENCE_11.md` — native Rust concurrency evidence.
+- `docs/POST_RELEASE_REGISTRY_VERIFICATION_11.md` — hosted-registry consumer verification policy.
+- `docs/RELEASE_AUDIT_100.md` — stable 1.0 release audit.
 - `docs/PROJECT_HANDOFF.md` — current project state and maintenance rules.
 - `docs/CODE_WALKTHROUGH.md` — current Dart/FRB/Rust execution paths.
 
-## Direction after 1.0
+## Direction after 1.1
 
-Treat public Dart semantics, Rust root API, package/native identities, native profiles, and `dxtr_box/1` as compatibility-sensitive contracts. GPUI integration belongs in downstream consumer projects rather than the core package. ORM/model generation, cloud sync/networking, storage-format redesign without an explicit migration plan, a fourth native profile, speculative startup caching/fingerprinting, and broad query/encryption rewrites remain out of scope unless separately justified.
+Treat public Dart semantics, Rust root API, package/native identities, native profiles, and `dxtr_box/1` as compatibility-sensitive contracts. Further runtime/tooling work should start from observed consumer or reliability needs with executable evidence. GPUI integration belongs in downstream consumer projects rather than the core package; speculative tree-shaking, Web support, migration extensions, or stronger cross-isolate semantics remain separate decisions rather than automatic scope.
