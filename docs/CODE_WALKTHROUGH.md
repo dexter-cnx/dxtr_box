@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the current **0.10** architecture: one authoritative Rust/redb engine with a Flutter/Dart frontend through flutter_rust_bridge and a first-class native Rust frontend.
+This walkthrough describes the **1.0** architecture: one authoritative Rust/redb engine with a Flutter/Dart frontend through flutter_rust_bridge and a first-class native Rust frontend.
 
 ## 1. Package and durable boundary
 
@@ -14,7 +14,7 @@ dxtr_box/
   example/             Flutter consumer
 ```
 
-Stable contract:
+Stable 1.0 contract:
 
 ```text
 Dart >= 3.4
@@ -23,7 +23,7 @@ flutter_rust_bridge = 2.8.0
 redb = 2.1.0
 native profiles = minimal | encryption | full
 format_version = dxtr_box/1
-package version = 0.10.0-dev.1
+package version = 1.0.0
 ```
 
 Each box maps to `{base_path}/{box_name}.dxtr`. There is no Dart-only or Rust-only storage format.
@@ -50,9 +50,9 @@ rust/src/index*.rs    persisted index implementation
 rust/src/error.rs     structured Rust errors
 ```
 
-## 3. Mutation path
+## 3. Mutation and read paths
 
-Dart:
+Dart mutation path:
 
 ```text
 Box.put / putAll / delete / deleteAll / clear
@@ -67,23 +67,11 @@ Box.put / putAll / delete / deleteAll / clear
   -> watch event after commit
 ```
 
-Rust-native:
-
-```text
-DxtrBox / BoxHandle mutation
-  -> shared Rust core
-  -> same redb/encryption/index transaction path
-```
-
-Primary records remain authoritative and indexes remain derived state.
-
-## 4. Reads and queries
-
-Point and batch reads converge on shared core operations and fresh redb read transactions. `getAll/get_all` preserves hit order, omits misses, and preserves duplicate input hits.
+Rust-native mutations enter the same shared Rust core. Point and batch reads use fresh authoritative redb read transactions. `getAll/get_all` preserves hit order, omits misses, and preserves duplicate input hits.
 
 There is no Dart whole-box cache or long-lived stale read snapshot.
 
-Query authoring converges before execution:
+## 4. Queries and indexes
 
 ```text
 Dart BoxQuery/BoxQueryBuilder ----┐
@@ -93,111 +81,39 @@ Rust QueryBuilder ----------------┘
 
 Persisted indexes narrow candidates only; authoritative primary records are still read and predicates rechecked. Encrypted equality narrowing uses keyed tokens under `full`; encrypted ordered/range predicates remain scan-backed.
 
-## 5. Native profiles
+Exactly three profiles remain: `minimal`, `encryption`, and `full`. `full` is default.
 
-Exactly three profiles remain:
+## 5. Compatibility and conformance
 
-```text
-minimal
-encryption
-full
-```
+0.8 established bidirectional same-file compatibility. 0.9 added reusable conformance tests for CRUD, overwrite, batch ordering/duplicates/misses, enumeration, deletion, clear, and index lifecycle behavior. 0.10 added deterministic real-world workload evidence through equivalent Dart/FRB and Rust-native fixtures.
 
-`full` is default. Do not add a fourth profile to support benchmark or frontend-specific behavior.
+1.0 adds release-stability guards around those foundations:
 
-## 6. Cross-frontend conformance
+- exact public Dart export boundary;
+- exact Rust root exports and wildcard-exported symbol set;
+- semantic regression coverage for query AST/builders;
+- staged published-consumer compilation against the principal public API surfaces;
+- durable reopen, encrypted reopen, migration lifecycle, FRB generation, profile, package, and platform-consumer evidence.
 
-0.8 established bidirectional same-file compatibility. 0.9 added reusable conformance tests for CRUD, overwrite, batch ordering/duplicates/misses, enumeration, deletion, clear, and index lifecycle behavior.
+## 6. Release candidate consumer path
 
-Both frontends therefore share one durable contract before 0.10 workload timing is accepted.
+`tool/validate_published_consumer.dart` stages the package according to `.pubignore`, rejects repository-only leakage, generates a fresh Flutter host app, wires the staged package as a path dependency, compiles representative public APIs, then builds the target platform.
 
-## 7. 0.10 deterministic workload fixtures
+CI runs that path for Android, iOS, macOS, Linux, and Windows. This validates the publishable payload rather than only the repository checkout.
 
-`benchmark/lib/real_world_workloads.dart` defines three deterministic application-shaped datasets:
+## 7. Durable upgrade boundary
 
-```text
-settings_session
-catalog_workspace
-activity_event
-```
-
-Fixture rules:
-
-- fixed timestamps;
-- stable keys/order;
-- deterministic payload generation;
-- stable nested metadata;
-- no random or wall-clock drift.
-
-The Rust-native benchmark fixture generation in `rust/src/real_world_bench.rs` mirrors the Dart fixture shapes and deterministic values so the frontends are not timed against materially different records.
-
-## 8. Dart/FRB workload runner
-
-`benchmark/lib/real_world_dxtr_runner.dart` executes the three scenarios through the public Dart API and generated FRB boundary.
-
-Each emitted result includes:
+The 1.0 release keeps:
 
 ```text
-frontend = dart_frb
-scenario
-records
-samples
-operations_per_sample
-operation_unit = logical_records
-elapsed_us
-median_us
-min_us
-max_us
-dart_build_mode
-native_build_mode
+meta[format_version] = dxtr_box/1
 ```
 
-Correctness checks execute before accepting the evidence.
+No 1.0 storage migration is introduced. Existing persistence/reopen, encrypted reopen, cross-frontend same-file, migration destination, and crash-reopen tests remain the executable upgrade evidence.
 
-## 9. Rust-native workload runner
+## 8. Merge quality bar
 
-`rust/src/real_world_bench.rs` runs equivalent logical scenarios through the public Rust-native facade and emits `DXTR_BOX_REAL_WORLD_RUST` JSONL records.
-
-It validates batch ordering/identity, catalog deletion, activity retention, and settings overwrite behavior while keeping untimed cleanup outside the timed sample loops.
-
-## 10. Reproducible 0.10 evidence
-
-Run:
-
-```bash
-bash tool/real_world_workloads.sh
-```
-
-The script:
-
-1. builds the release native library;
-2. runs the ignored Rust-native real-world benchmark;
-3. extracts exactly three Rust JSONL records;
-4. runs the Dart/FRB benchmark with the same record/sample counts and release native library;
-5. extracts exactly three Dart JSONL records;
-6. records Rust/Cargo/Flutter/Dart toolchain metadata.
-
-Outputs:
-
-```text
-build/real-world/rust-native.jsonl
-build/real-world/dart-frb.jsonl
-build/real-world/rust-native.log
-build/real-world/dart-frb.log
-build/real-world/toolchain.txt
-```
-
-`.github/workflows/real_world_workloads.yml` runs the same script on Ubuntu and uploads the evidence directory as a GitHub Actions artifact.
-
-## 11. Interpretation rule
-
-0.10 evidence is diagnostic, not a leaderboard. Cross-frontend deltas include Dart runtime, serialization, generated FRB, and FFI boundary costs. They must not be described as pure redb/storage-engine speedups.
-
-Compare only runs with matching fixture sizes, sample counts, build modes, and toolchain context.
-
-## 12. Merge quality bar
-
-Full validation continues to cover:
+Full validation covers:
 
 ```text
 format + analyze
@@ -206,6 +122,7 @@ Flutter 3.22 / Dart 3.4 minimum SDK
 Rust minimal/encryption/full tests
 native integration
 migration/query/index/crash-reopen regression
+public contract + semantic regression guards
 FRB generated bindings
 native-size policy
 package/pub dry-run
@@ -213,17 +130,4 @@ benchmark correctness/smoke
 Android/Linux/Windows/macOS/iOS staged consumers
 ```
 
-0.10 adds evidence infrastructure without weakening these gates.
-
-## 13. 0.10 boundary and next step
-
-0.10 closes without adding a runtime cache, startup fast path, storage metadata, query-engine rewrite, encryption redesign, ORM, sync layer, GPUI dependency, Tokio commitment, or fourth native profile.
-
-See:
-
-- `docs/REAL_WORLD_WORKLOADS_010.md`
-- `docs/REAL_WORLD_CROSS_FRONTEND_010.md`
-- `docs/RELEASE_AUDIT_010.md`
-- `docs/PROJECT_HANDOFF.md`
-
-After 0.10 closure, work returns to 1.0 stabilization starting with PR #57 contract-freeze audit and stronger release guards.
+See `docs/RELEASE_AUDIT_100.md`, `docs/RELEASE_CANDIDATE_EVIDENCE_10.md`, and `docs/PROJECT_HANDOFF.md` for the release boundary and maintenance rules.

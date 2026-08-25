@@ -6,7 +6,7 @@
 
 `dxtr_box` is a Rust/redb-backed local database engine with a Flutter/Dart frontend and a first-class native Rust frontend. Both frontends share the same authoritative Rust storage/query core, `dxtr_box/1` durable format, ACID persistence, authenticated encryption, native queries, persisted indexes, and batch reads. No model code generation is required.
 
-> Status: **0.10 Real-world Workload Evidence is complete.** 0.10 adds deterministic application-shaped workload fixtures, equivalent Dart/FRB and Rust-native scenario runners, machine-readable JSONL evidence, and CI artifacts with toolchain metadata. Results are diagnostic boundary evidence, not marketing leaderboard claims. The package remains pre-1.0; public API and storage format are not yet declared stable.
+> Status: **1.0.0 stable.** The 1.0 release freezes the existing public/package/durable contracts after contract guards, semantic regression coverage, staged five-platform published-consumer validation, migration/reopen evidence, and the 0.10 real-world workload evidence milestone. The durable format remains `dxtr_box/1`; 1.0 introduces no storage migration.
 
 ## Key features
 
@@ -28,7 +28,7 @@
 ## Compatibility
 
 ```text
-package version = 0.10.0-dev.1
+package version = 1.0.0
 Dart >= 3.4.0 < 4.0.0
 Flutter >= 3.22.0
 flutter_rust_bridge = 2.8.0
@@ -210,6 +210,7 @@ The merge quality bar covers:
 - format/analyze/tests;
 - Flutter 3.22 / Dart 3.4 minimum compatibility;
 - exact `minimal | encryption | full` Rust profiles;
+- public/storage contract and semantic regression guards;
 - native integration;
 - cross-frontend compatibility/conformance;
 - migration/query/index/crash-reopen regressions;
@@ -228,17 +229,16 @@ bash tool/install_git_hooks.sh
 
 ## Documentation
 
+- `docs/RELEASE_AUDIT_100.md` — stable 1.0.0 release audit and compatibility boundary.
+- `docs/RELEASE_CANDIDATE_EVIDENCE_10.md` — published-consumer, migration, and upgrade evidence matrix.
+- `docs/PUBLIC_API_SEMANTIC_REGRESSION_10.md` — public query/API semantic regression inventory.
+- `docs/RELEASE_READINESS_10.md` — 1.0 contract-freeze readiness policy.
 - `docs/RELEASE_AUDIT_010.md` — 0.10 closure and real-world workload evidence.
 - `docs/REAL_WORLD_WORKLOADS_010.md` — deterministic application-shaped workload contract.
 - `docs/REAL_WORLD_CROSS_FRONTEND_010.md` — Dart/FRB vs Rust-native interpretation rules.
-- `docs/RELEASE_AUDIT_09.md` — 0.9 conformance/startup closure.
-- `docs/STARTUP_BENCHMARK_09.md` — startup/reopen benchmark contract and result.
-- `docs/CONFIG_FINGERPRINT_DECISION_09.md` — why no persisted config fingerprint was added.
-- `docs/CONFORMANCE_09.md` — reusable cross-frontend conformance contract.
-- `docs/RELEASE_AUDIT_08.md` — 0.8 Rust-native/multi-frontend closure.
-- `docs/PROJECT_HANDOFF.md` — current project state and next work.
+- `docs/PROJECT_HANDOFF.md` — current project state and maintenance rules.
 - `docs/CODE_WALKTHROUGH.md` — current Dart/FRB/Rust execution paths.
 
-## Direction after 0.10
+## Direction after 1.0
 
-Next is 1.0 stabilization/release readiness. GPUI integration belongs in a downstream consumer project rather than the core package. ORM/model generation, cloud sync/networking, storage-format redesign, a fourth native profile, speculative startup caching/fingerprinting, and a new query/encryption engine remain out of scope unless separately justified.
+Treat public Dart semantics, Rust root API, package/native identities, native profiles, and `dxtr_box/1` as compatibility-sensitive contracts. GPUI integration belongs in downstream consumer projects rather than the core package. ORM/model generation, cloud sync/networking, storage-format redesign without an explicit migration plan, a fourth native profile, speculative startup caching/fingerprinting, and broad query/encryption rewrites remain out of scope unless separately justified.
