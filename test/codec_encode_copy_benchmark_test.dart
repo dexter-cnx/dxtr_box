@@ -43,22 +43,26 @@ void main() {
         ],
       ];
       final serialized = msgpack.serialize(wire);
+      final payloadBytes = serialized.lengthInBytes;
 
       Object? sink;
       _measure(
         operation: 'serialized_reuse_control',
+        payloadBytes: payloadBytes,
         action: () {
           sink = serialized;
         },
       );
       _measure(
         operation: 'serialized_copy_only',
+        payloadBytes: payloadBytes,
         action: () {
           sink = Uint8List.fromList(serialized);
         },
       );
       _measure(
         operation: 'box_codec_encode',
+        payloadBytes: payloadBytes,
         action: () {
           sink = BoxCodec.encode(value);
         },
@@ -69,7 +73,11 @@ void main() {
   );
 }
 
-void _measure({required String operation, required void Function() action}) {
+void _measure({
+  required String operation,
+  required int payloadBytes,
+  required void Function() action,
+}) {
   for (var index = 0; index < _warmup; index++) {
     action();
   }
@@ -89,12 +97,10 @@ void _measure({required String operation, required void Function() action}) {
     'operation': operation,
     'iterations': _iterations,
     'samples': _samples,
-    'payload_bytes': serializedLength,
+    'payload_bytes': payloadBytes,
     'median_ns_per_op': _median(sampleNs) / _iterations,
   });
 }
-
-int serializedLength = 0;
 
 void _emit(Map<String, Object> result) {
   final line = jsonEncode(result);
