@@ -143,38 +143,44 @@ void main() {
   );
 }
 
-Map<String, dynamic> _queryWireForBenchmark(BoxQuery query) =>
-    <String, dynamic>{
-      'where': _filterWireForBenchmark(query.where),
-      'sortBy': query.sortBy
-          .map(
-            (sort) => <String, dynamic>{
-              'field': sort.field,
-              'direction': sort.direction.name,
-              'nulls': sort.nulls.name,
-            },
-          )
-          .toList(growable: false),
-      'limit': query.limit,
-      'offset': query.offset,
-    };
+Map<String, dynamic> _queryWireForBenchmark(BoxQuery query) {
+  final sortBy = <dynamic>[];
+  for (final sort in query.sortBy) {
+    sortBy.add(<String, dynamic>{
+      'field': sort.field,
+      'direction': sort.direction.name,
+      'nulls': sort.nulls.name,
+    });
+  }
+
+  return <String, dynamic>{
+    'where': _filterWireForBenchmark(query.where),
+    'sortBy': sortBy,
+    'limit': query.limit,
+    'offset': query.offset,
+  };
+}
 
 Map<String, dynamic> _filterWireForBenchmark(QueryFilter filter) {
-  return switch (filter) {
-    QueryComparison comparison => <String, dynamic>{
-        'type': 'comparison',
-        'field': comparison.field,
-        'operator': comparison.operator.name,
-        'value': comparison.value,
-        'upperValue': comparison.upperValue,
-      },
-    QueryGroup group => <String, dynamic>{
-        'type': 'group',
-        'operator': group.operator.name,
-        'filters': group.filters
-            .map(_filterWireForBenchmark)
-            .toList(growable: false),
-      },
+  if (filter is QueryComparison) {
+    return <String, dynamic>{
+      'type': 'comparison',
+      'field': filter.field,
+      'operator': filter.operator.name,
+      'value': filter.value,
+      'upperValue': filter.upperValue,
+    };
+  }
+
+  final group = filter as QueryGroup;
+  final filters = <dynamic>[];
+  for (final child in group.filters) {
+    filters.add(_filterWireForBenchmark(child));
+  }
+  return <String, dynamic>{
+    'type': 'group',
+    'operator': group.operator.name,
+    'filters': filters,
   };
 }
 
