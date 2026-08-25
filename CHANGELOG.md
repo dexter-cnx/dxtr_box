@@ -1,3 +1,12 @@
+## 1.1.0
+
+- Added hosted-registry external-consumer verification infrastructure so post-release validation can resolve an actual published package rather than only a staged repository payload.
+- Strengthened native Rust concurrency evidence with guaranteed reader/writer overlap across independent handles and durability verification after concurrent mutations and reopen.
+- Added reproducible Linux/macOS native-size evaluation evidence with retained generated `rust/Cargo.lock` and locked Cargo metadata for like-for-like future tree-shaking/toolchain decisions.
+- Added executable Dart isolate concurrency coverage through the public Dart API -> FRB -> shared Rust/redb path, including peer committed-write visibility and parent reopen only after both worker handles close successfully.
+- Kept Dart >=3.4, Flutter >=3.22, flutter_rust_bridge 2.8.0, redb 2.1.0, exactly `minimal | encryption | full`, and durable format `dxtr_box/1` unchanged.
+- Added no storage migration, public API redesign, SDK-floor increase, mandatory native tree shaking, GPUI dependency, Tokio commitment, ORM/codegen layer, sync layer, or fourth native profile.
+
 ## 1.0.0
 
 - Declared the existing `dxtr_box` public/package/durable contracts stable after the 0.10 evidence milestone and the 1.0 stabilization sequence.
