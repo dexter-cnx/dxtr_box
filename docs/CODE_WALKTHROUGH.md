@@ -1,6 +1,6 @@
 # dxtr_box Code Walkthrough
 
-This walkthrough describes the **1.0** architecture: one authoritative Rust/redb engine with a Flutter/Dart frontend through flutter_rust_bridge and a first-class native Rust frontend.
+This walkthrough describes the **1.1** architecture: one authoritative Rust/redb engine with a Flutter/Dart frontend through flutter_rust_bridge and a first-class native Rust frontend.
 
 ## 1. Package and durable boundary
 
@@ -14,7 +14,7 @@ dxtr_box/
   example/             Flutter consumer
 ```
 
-Stable 1.0 contract:
+Stable contract:
 
 ```text
 Dart >= 3.4
@@ -23,7 +23,7 @@ flutter_rust_bridge = 2.8.0
 redb = 2.1.0
 native profiles = minimal | encryption | full
 format_version = dxtr_box/1
-package version = 1.0.0
+package version = 1.1.0
 ```
 
 Each box maps to `{base_path}/{box_name}.dxtr`. There is no Dart-only or Rust-only storage format.
@@ -83,11 +83,11 @@ Persisted indexes narrow candidates only; authoritative primary records are stil
 
 Exactly three profiles remain: `minimal`, `encryption`, and `full`. `full` is default.
 
-## 5. Compatibility and conformance
+## 5. Compatibility, conformance, and concurrency evidence
 
 0.8 established bidirectional same-file compatibility. 0.9 added reusable conformance tests for CRUD, overwrite, batch ordering/duplicates/misses, enumeration, deletion, clear, and index lifecycle behavior. 0.10 added deterministic real-world workload evidence through equivalent Dart/FRB and Rust-native fixtures.
 
-1.0 adds release-stability guards around those foundations:
+1.0 added release-stability guards around those foundations:
 
 - exact public Dart export boundary;
 - exact Rust root exports and wildcard-exported symbol set;
@@ -95,23 +95,43 @@ Exactly three profiles remain: `minimal`, `encryption`, and `full`. `full` is de
 - staged published-consumer compilation against the principal public API surfaces;
 - durable reopen, encrypted reopen, migration lifecycle, FRB generation, profile, package, and platform-consumer evidence.
 
-## 6. Release candidate consumer path
+1.1 adds post-release evidence without changing the runtime contract:
+
+- hosted-registry external-consumer verification infrastructure;
+- native concurrent reader/writer overlap through independent handles;
+- concurrent mutation durability after reopen;
+- reproducible Linux/macOS native-size evaluation with retained lockfile/metadata;
+- independent Dart isolate -> FRB -> Rust shared-storage visibility and close/reopen durability.
+
+## 6. Dart isolate path
+
+Each isolate owns its own Dart static state and calls `DxtrBox.init(path: ...)` / `DxtrBox.open(...)` independently. `Box` instances and native wrappers are not transferred between isolates.
+
+```text
+Dart isolate A -> public API -> FRB ----┐
+                                        ├-> shared Rust core -> same redb database
+Dart isolate B -> public API -> FRB ----┘
+```
+
+The 1.1 evidence harness proves committed peer-write visibility while both isolates remain active and only allows the parent to reopen after both worker handles close successfully. It does not define cross-isolate watch ordering, fairness, lock-free execution, or Box-transfer semantics.
+
+## 7. Release/consumer paths
 
 `tool/validate_published_consumer.dart` stages the package according to `.pubignore`, rejects repository-only leakage, generates a fresh Flutter host app, wires the staged package as a path dependency, compiles representative public APIs, then builds the target platform.
 
-CI runs that path for Android, iOS, macOS, Linux, and Windows. This validates the publishable payload rather than only the repository checkout.
+CI runs that staged path for Android, iOS, macOS, Linux, and Windows. A separate 1.1 registry-resolved workflow exists for validating an actually published hosted package; repository version metadata alone does not prove registry publication.
 
-## 7. Durable upgrade boundary
+## 8. Durable upgrade boundary
 
-The 1.0 release keeps:
+1.1 keeps:
 
 ```text
 meta[format_version] = dxtr_box/1
 ```
 
-No 1.0 storage migration is introduced. Existing persistence/reopen, encrypted reopen, cross-frontend same-file, migration destination, and crash-reopen tests remain the executable upgrade evidence.
+No 1.1 storage migration is introduced. Existing persistence/reopen, encrypted reopen, cross-frontend same-file, migration destination, crash-reopen, native concurrency, and Dart isolate tests remain executable compatibility evidence.
 
-## 8. Merge quality bar
+## 9. Merge quality bar
 
 Full validation covers:
 
@@ -128,6 +148,7 @@ native-size policy
 package/pub dry-run
 benchmark correctness/smoke
 Android/Linux/Windows/macOS/iOS staged consumers
+Dart isolate / FRB concurrency evidence
 ```
 
-See `docs/RELEASE_AUDIT_100.md`, `docs/RELEASE_CANDIDATE_EVIDENCE_10.md`, and `docs/PROJECT_HANDOFF.md` for the release boundary and maintenance rules.
+See `docs/RELEASE_AUDIT_110.md`, `docs/NATIVE_SIZE_DECISION_11.md`, `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md`, and `docs/PROJECT_HANDOFF.md` for the 1.1 evidence boundary and maintenance rules.
