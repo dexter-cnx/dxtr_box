@@ -141,6 +141,43 @@ void main() {
         },
       );
 
+      final batch100Records =
+          await (api as NativeBatchReadApi).getAll(box.name, batch100);
+      final batch100Decoded = List<dynamic>.generate(
+        batch100Records.length,
+        (index) => BoxCodec.decode(batch100Records[index].value),
+        growable: false,
+      );
+
+      _measureSync(
+        layer: 'public_dart_component',
+        operation: 'get_all_100_decode_only',
+        iterations: iterations,
+        samples: samples,
+        action: () {
+          for (var index = 0; index < batch100Records.length; index++) {
+            sink = BoxCodec.decode(batch100Records[index].value);
+          }
+        },
+      );
+
+      _measureSync(
+        layer: 'public_dart_component',
+        operation: 'get_all_100_materialize_predecoded',
+        iterations: iterations,
+        samples: samples,
+        action: () {
+          sink = List<MapEntry<String, dynamic>>.generate(
+            batch100Records.length,
+            (index) => MapEntry<String, dynamic>(
+              batch100Records[index].key,
+              batch100Decoded[index],
+            ),
+            growable: false,
+          );
+        },
+      );
+
       await _measureAsync(
         layer: 'public_dart',
         operation: 'get_all_100',
@@ -178,6 +215,45 @@ void main() {
         },
       );
       expect(sink, isA<List<NativeQueryRecord>>());
+
+      final queryRecords = await (api as NativeQueryApi).scanQuery(
+        box.name,
+        queryPayload,
+      );
+      final queryDecoded = List<dynamic>.generate(
+        queryRecords.length,
+        (index) => BoxCodec.decode(queryRecords[index].value),
+        growable: false,
+      );
+
+      _measureSync(
+        layer: 'public_dart_component',
+        operation: 'query_equal_limit_10_decode_only',
+        iterations: iterations,
+        samples: samples,
+        action: () {
+          for (var index = 0; index < queryRecords.length; index++) {
+            sink = BoxCodec.decode(queryRecords[index].value);
+          }
+        },
+      );
+
+      _measureSync(
+        layer: 'public_dart_component',
+        operation: 'query_equal_limit_10_materialize_predecoded',
+        iterations: iterations,
+        samples: samples,
+        action: () {
+          sink = List<MapEntry<String, dynamic>>.generate(
+            queryRecords.length,
+            (index) => MapEntry<String, dynamic>(
+              queryRecords[index].key,
+              queryDecoded[index],
+            ),
+            growable: false,
+          );
+        },
+      );
 
       await _measureAsync(
         layer: 'public_dart',
@@ -222,6 +298,53 @@ Future<void> _measureAsync({
   }
   sampleNs.sort();
 
+  _emitMeasurement(
+    layer: layer,
+    operation: operation,
+    iterations: iterations,
+    samples: samples,
+    sampleNs: sampleNs,
+  );
+}
+
+void _measureSync({
+  required String layer,
+  required String operation,
+  required int iterations,
+  required int samples,
+  required void Function() action,
+}) {
+  for (var i = 0; i < _warmupIterations; i++) {
+    action();
+  }
+
+  final sampleNs = <int>[];
+  for (var sample = 0; sample < samples; sample++) {
+    final watch = Stopwatch()..start();
+    for (var i = 0; i < iterations; i++) {
+      action();
+    }
+    watch.stop();
+    sampleNs.add(watch.elapsedMicroseconds * 1000);
+  }
+  sampleNs.sort();
+
+  _emitMeasurement(
+    layer: layer,
+    operation: operation,
+    iterations: iterations,
+    samples: samples,
+    sampleNs: sampleNs,
+  );
+}
+
+void _emitMeasurement({
+  required String layer,
+  required String operation,
+  required int iterations,
+  required int samples,
+  required List<int> sampleNs,
+}) {
   _emit(<String, Object>{
     'kind': 'measurement',
     'layer': layer,
