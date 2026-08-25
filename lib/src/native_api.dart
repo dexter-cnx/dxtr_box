@@ -207,7 +207,7 @@ final class FrbNativeBoxApi
         .map(
           (record) => NativeBatchRecord(
             key: record.key,
-            value: Uint8List.fromList(record.value),
+            value: record.value,
           ),
         )
         .toList(growable: false);
@@ -251,7 +251,7 @@ final class FrbNativeBoxApi
         .map(
           (record) => NativeQueryRecord(
             key: record.key,
-            value: Uint8List.fromList(record.value),
+            value: record.value,
           ),
         )
         .toList(growable: false);
