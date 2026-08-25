@@ -47,7 +47,8 @@ post-release handoff sync                                                  merge
 1.1 planning baseline                                                     merged (#65)
 1.1 PR1 registry-resolved external consumer verification                  merged (#66)
 1.1 PR2 native concurrency + reopen evidence                              merged (#67)
-1.1 PR3 native-size / tree-shaking decision evidence                      active
+1.1 PR3 native-size / tree-shaking decision evidence                      merged (#68)
+1.1 PR4 Dart isolate / FRB concurrency evidence                           current (#69)
 ```
 
 See:
@@ -60,6 +61,7 @@ See:
 - `docs/POST_RELEASE_REGISTRY_VERIFICATION_11.md`
 - `docs/CONCURRENCY_EVIDENCE_11.md`
 - `docs/NATIVE_SIZE_DECISION_11.md`
+- `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md`
 
 ## Architecture
 
@@ -126,6 +128,11 @@ bash tool/install_git_hooks.sh
 
 Full merge validation retains format/analyze/tests, minimum SDK, all three Rust profiles, native integration, migration/query/index/crash-reopen regression, FRB generation reproducibility, native-size policy, package/pub readiness, benchmark correctness, and staged Android/iOS/macOS/Linux/Windows consumers.
 
+1.1 additionally has:
+
+- manual `Native Size Evaluation` evidence on Linux/macOS, retaining TSV, generated `rust/Cargo.lock`, and locked Cargo metadata for reproducibility;
+- dedicated `Dart Isolate Concurrency` CI that builds the native library and runs `test/isolate_native_integration_test.dart` with `DXTR_BOX_NATIVE_TEST=1`.
+
 ## Preserved non-goals
 
 Do not turn post-1.0 maintenance into:
@@ -140,15 +147,19 @@ Do not turn post-1.0 maintenance into:
 - a fourth native profile;
 - broad Dart API redesign.
 
-## Next active work: 1.1 PR3 native-size decision evidence
+## Next active work: 1.1 PR4 Dart isolate / FRB evidence
 
 PR1 added registry-resolved external consumer verification infrastructure. Registry publication itself remains an external release step and must not be inferred merely from repository version `1.0.0`.
 
-PR2 strengthened native concurrency evidence with guaranteed reader/writer overlap and durable reopen after concurrent mutations. Dart isolate semantics remain intentionally unclaimed until an executable isolate/FRB harness exists.
+PR2 strengthened native Rust thread/concurrency and reopen evidence with guaranteed read/write overlap across independent handles.
 
-PR3 adds reproducible Linux/macOS native-size evidence before any future tree-shaking or SDK-floor decision. It does not enable tree shaking and does not raise the Dart or Flutter minimum. A future experiment must beat the existing 64 KiB / 3% materiality thresholds under like-for-like inputs and retain all compatibility/correctness gates before a toolchain change can be justified.
+PR3 (#68) established reproducible Linux/macOS native-size evidence before any future tree-shaking or SDK-floor decision. It does not enable tree shaking or raise SDK floors. A future experiment must clear both >=64 KiB absolute and >=3% relative savings under like-for-like inputs and retain all compatibility/correctness gates.
 
-After PR3, `docs/ROADMAP_11.md` should be used to decide whether 1.1 needs another runtime/tooling change at all. Platform/dev tooling and migration/interoperability hardening remain conditional rather than committed scope.
+PR4 (#69) closes the next evidence gap at the Dart frontend boundary. The harness starts independent Dart isolates that each call `DxtrBox.init` and `DxtrBox.open` for the same database path. The isolates do not exchange `Box` instances or native handles. Each commits an initial record, confirms visibility of the peer isolate's committed record while both handles remain open, completes its own mutations, closes successfully, and only then acknowledges completion. The parent reopens after both acknowledgements and verifies all durable records.
+
+This evidence does **not** create a cross-isolate `Box` transfer contract, cross-isolate watch-delivery contract, lock-free guarantee, or new synchronization API. Those remain separate decisions if a concrete consumer need appears.
+
+After PR4, use `docs/ROADMAP_11.md` to decide whether any measured need justifies another 1.1 runtime/tooling change. Platform/dev tooling and migration/interoperability hardening remain conditional rather than committed scope.
 
 ## Post-1.0 rule
 
