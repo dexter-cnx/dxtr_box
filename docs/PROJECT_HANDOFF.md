@@ -20,7 +20,7 @@ durable format:          meta[format_version] = dxtr_box/1
 native profiles:         minimal | encryption | full
 ```
 
-`full` remains the default. Do not add a fourth native profile. Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly reprioritized.
+`full` remains the default. Do not add a fourth native profile. Dart 3.13 recorded-use/native tree shaking remains deferred unless explicitly reprioritized with evidence.
 
 ## Milestone state
 
@@ -43,6 +43,7 @@ PR1 contract-freeze audit + stronger guards                              merged 
 PR2 public API semantic regression inventory + compatibility tests       merged (#61)
 PR3 release-candidate published-consumer / migration / upgrade evidence  merged (#62)
 PR4 final release audit, docs sync, version 1.0.0                         merged (#63)
+post-release handoff sync                                                  merged (#64)
 ```
 
 See:
@@ -51,6 +52,7 @@ See:
 - `docs/PUBLIC_API_SEMANTIC_REGRESSION_10.md`
 - `docs/RELEASE_CANDIDATE_EVIDENCE_10.md`
 - `docs/RELEASE_AUDIT_100.md`
+- `docs/ROADMAP_11.md`
 
 ## Architecture
 
@@ -131,10 +133,14 @@ Do not turn post-1.0 maintenance into:
 - a fourth native profile;
 - broad Dart API redesign.
 
+## Next active work: post-1.0 verification / 1.1 planning
+
+The first 1.1 step is external release verification, not a new runtime feature. Confirm the intended `1.0.0` artifact through the target package registry and build consumers from the registry-resolved package rather than a local/path payload before calling publication complete.
+
+After that, use `docs/ROADMAP_11.md` to select only evidence-backed work. Current candidate buckets are reliability/concurrency validation, Dart/native tree-shaking investigation, platform/tooling decisions, and migration/interoperability hardening. None is automatically committed scope.
+
 ## Post-1.0 rule
 
 Treat the Dart public API, Rust root API, package identities, native profiles, and `dxtr_box/1` durable format as compatibility-sensitive contracts. Breaking changes require an explicit versioning/migration decision rather than incidental refactoring.
-
-Next work should begin with post-release verification and a separately justified 1.1 backlog. New features must be evaluated against the stable 1.0 contract before implementation.
 
 Correctness, durability, authenticated encryption, cross-process/cross-frontend visibility, compatibility, and evidence quality take priority over feature count or benchmark wins.
