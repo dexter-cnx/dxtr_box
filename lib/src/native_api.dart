@@ -191,9 +191,14 @@ final class FrbNativeBoxApi
   }
 
   @override
-  Future<bool> containsKey(String boxName, String key) async {
-    await _ensureInitialized();
-    return frb.containsKey(boxName: boxName, key: key);
+  Future<bool> containsKey(String boxName, String key) {
+    // BoxStore.init/openBox guarantee RustLib has completed initialization
+    // before point reads can be issued. The generated FRB call is synchronous,
+    // so Future.sync avoids the redundant async state machine while preserving
+    // Future error semantics when the native call throws.
+    return Future<bool>.sync(
+      () => frb.containsKey(boxName: boxName, key: key),
+    );
   }
 
   @override
