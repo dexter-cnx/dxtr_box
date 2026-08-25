@@ -20,7 +20,7 @@ native profiles:       minimal | encryption | full
 
 The repository already has `tool/native_size_baseline.sh`, which builds the exact native profiles and records artifact bytes with git, OS, architecture, rustc, and cargo metadata.
 
-1.1 PR3 adds a manual `Native Size Evaluation` workflow that runs this harness on Linux and macOS and uploads the raw TSV evidence.
+1.1 PR3 adds a manual `Native Size Evaluation` workflow that runs this harness on Linux and macOS and uploads the raw TSV evidence together with the generated `Cargo.lock` and locked Cargo metadata. Historical comparisons therefore retain the exact dependency resolution as well as the commit and toolchain context.
 
 The workflow is intentionally manual. Native-size evaluation is diagnostic evidence, not a new merge-blocking requirement.
 
@@ -32,19 +32,21 @@ A future tree-shaking change requires all of the following:
 
 1. a reproducible baseline from the existing stable integration;
 2. an experimental build using the candidate SDK/tooling change;
-3. the same target OS/architecture and release/profile inputs;
+3. the same target OS/architecture, dependency resolution, and release/profile inputs;
 4. a material size reduction in the consumer-delivered native artifact or application bundle;
 5. no regression in startup, CRUD, query/index, encryption, migration, or cross-platform consumer gates;
 6. explicit documentation of the consumer compatibility cost of any SDK-floor increase.
 
 ## Materiality threshold
 
-Treat changes below both of these thresholds as insufficient evidence for raising the SDK floor:
+A reduction must clear the larger effective threshold before it can be used as evidence for raising the SDK floor:
 
-- less than 64 KiB absolute reduction; and
-- less than 3% relative reduction.
+- at least 64 KiB absolute reduction; **and**
+- at least 3% relative reduction.
 
-These thresholds align with the existing native-size regression budget and prevent toolchain churn for noise-level savings.
+Equivalently, the required reduction is `max(64 KiB, 3% of the baseline artifact)`.
+
+This aligns with the existing native-size regression budget and prevents toolchain churn for noise-level savings. A reduction that meets only one threshold is not material enough for an SDK-floor or build-topology change.
 
 A larger reduction is still not automatic approval. The compatibility cost must be evaluated separately.
 
