@@ -29,9 +29,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dart_version="$(awk '/^version:/ { print $2; exit }' pubspec.yaml)"
-          rust_version="$(awk -F'"' '/^version = "/ { print $2; exit }' rust/Cargo.toml)"
-          crate_name="$(awk -F'"' '/^name = "/ { print $2; exit }' rust/Cargo.toml)"
+          dart_version="$(sed -nE "s/^version:[[:space:]]*['\"]?([^'\"[:space:]]+)['\"]?[[:space:]]*$/\1/p" pubspec.yaml | head -n 1)"
+          rust_version="$(awk -F'\"' '/^version = "/ { print $2; exit }' rust/Cargo.toml)"
+          crate_name="$(awk -F'\"' '/^name = "/ { print $2; exit }' rust/Cargo.toml)"
 
           test "$crate_name" = "rust_lib_dxtr_box"
           test -n "$dart_version"
