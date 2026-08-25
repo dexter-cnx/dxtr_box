@@ -13,6 +13,7 @@ on:
       - 'rust/**'
       - 'test/read_path_benchmark_test.dart'
       - 'test/read_path_boundary_benchmark_test.dart'
+      - 'test/read_boundary_matrix_benchmark_test.dart'
       - 'test/multi_frontend_benchmark_test.dart'
       - 'tool/multi_frontend_benchmark.sh'
   workflow_dispatch:
@@ -62,6 +63,22 @@ jobs:
           DYLD_LIBRARY_PATH="rust/target/release:${DYLD_LIBRARY_PATH:-}" \
           PATH="rust/target/release:$PATH" \
           flutter test test/read_path_boundary_benchmark_test.dart --reporter expanded
+      - name: Run read boundary matrix
+        env:
+          DXTR_BOX_READ_BOUNDARY_MATRIX_BENCHMARK: '1'
+          DXTR_BOX_READ_BOUNDARY_MATRIX_ITERATIONS: '250'
+          DXTR_BOX_READ_BOUNDARY_MATRIX_SAMPLES: '5'
+          DXTR_BOX_READ_BOUNDARY_MATRIX_OUTPUT: 'build/read-path/dart-boundary-matrix.jsonl'
+          DXTR_BOX_READ_BOUNDARY_MATRIX_RUST_ITERATIONS: '250'
+          DXTR_BOX_READ_BOUNDARY_MATRIX_RUST_SAMPLES: '5'
+          DXTR_BOX_READ_BOUNDARY_MATRIX_RUST_OUTPUT: 'build/read-path/rust-boundary-matrix.jsonl'
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --release \
+            read_boundary_matrix_bench::read_boundary_matrix_microbench -- --ignored --nocapture
+          LD_LIBRARY_PATH="rust/target/release:${LD_LIBRARY_PATH:-}" \
+          DYLD_LIBRARY_PATH="rust/target/release:${DYLD_LIBRARY_PATH:-}" \
+          PATH="rust/target/release:$PATH" \
+          flutter test test/read_boundary_matrix_benchmark_test.dart --reporter expanded
       - name: Run 0.8 multi-frontend diagnostic
         env:
           DXTR_BOX_MULTI_FRONTEND_RUST_ITERATIONS: '200'
@@ -74,6 +91,8 @@ jobs:
           test -s build/read-path/rust-read-path.jsonl
           test -s build/read-path/dart-read-path.jsonl
           test -s build/read-path/dart-boundary.jsonl
+          test -s build/read-path/rust-boundary-matrix.jsonl
+          test -s build/read-path/dart-boundary-matrix.jsonl
           test -s build/multi-frontend/rust-native.jsonl
           test -s build/multi-frontend/dart-frb.jsonl
       - name: Toolchain metadata
