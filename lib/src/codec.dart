@@ -8,7 +8,7 @@ import 'package:msgpack_dart/msgpack_dart.dart' as msgpack;
 abstract final class BoxCodec {
   static Uint8List encode(dynamic value) {
     final normalized = _toWire(value);
-    return Uint8List.fromList(msgpack.serialize(normalized));
+    return msgpack.serialize(normalized);
   }
 
   static dynamic decode(List<int> bytes) {
