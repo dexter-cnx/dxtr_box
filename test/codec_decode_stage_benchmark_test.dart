@@ -11,18 +11,17 @@ const _defaultSamples = 5;
 const _warmupIterations = 25;
 const _getAllCount = 100;
 const _queryCount = 10;
+const _enabledEnv = 'DXTR_BOX_CODEC_DECODE_STAGE_BENCHMARK';
+const _iterationsEnv = 'DXTR_BOX_CODEC_DECODE_STAGE_ITERATIONS';
+const _samplesEnv = 'DXTR_BOX_CODEC_DECODE_STAGE_SAMPLES';
+const _outputEnv = 'DXTR_BOX_CODEC_DECODE_STAGE_OUTPUT';
+const _skipMessage = 'Set DXTR_BOX_CODEC_DECODE_STAGE_BENCHMARK=1 to run.';
 
 void main() {
-  final enabled =
-      Platform.environment['DXTR_BOX_CODEC_DECODE_STAGE_BENCHMARK'] == '1';
-  final iterations = _envInt(
-    'DXTR_BOX_CODEC_DECODE_STAGE_ITERATIONS',
-    _defaultIterations,
-  );
-  final samples = _envInt(
-    'DXTR_BOX_CODEC_DECODE_STAGE_SAMPLES',
-    _defaultSamples,
-  );
+  final enabled = Platform.environment[_enabledEnv] == '1';
+  final iterations = _envInt(_iterationsEnv, _defaultIterations);
+  final samples = _envInt(_samplesEnv, _defaultSamples);
+  final skip = enabled ? false : _skipMessage;
 
   test(
     'codec decode stage decomposition executes',
@@ -98,9 +97,7 @@ void main() {
 
       expect(sink, isNotNull);
     },
-    skip: enabled
-        ? false
-        : 'Set DXTR_BOX_CODEC_DECODE_STAGE_BENCHMARK=1 to run.',
+    skip: skip,
   );
 }
 
@@ -114,8 +111,9 @@ Uint8List _payloadForIndex(int index) {
 }
 
 Uint8List _normalizedInput(Uint8List bytes) {
-  if (bytes.offsetInBytes == 0 &&
-      bytes.lengthInBytes == bytes.buffer.lengthInBytes) {
+  final startsAtZero = bytes.offsetInBytes == 0;
+  final spansBuffer = bytes.lengthInBytes == bytes.buffer.lengthInBytes;
+  if (startsAtZero && spansBuffer) {
     return bytes;
   }
   return Uint8List.fromList(bytes);
@@ -157,8 +155,7 @@ void _emit(Map<String, Object> result) {
   final line = jsonEncode(result);
   // ignore: avoid_print
   print('DXTR_BOX_CODEC_DECODE_STAGE $line');
-  final outputPath =
-      Platform.environment['DXTR_BOX_CODEC_DECODE_STAGE_OUTPUT'];
+  final outputPath = Platform.environment[_outputEnv];
   if (outputPath == null || outputPath.isEmpty) return;
   final file = File(outputPath);
   file.parent.createSync(recursive: true);
