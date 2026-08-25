@@ -71,7 +71,80 @@ Rust-native mutations enter the same shared Rust core. Point and batch reads use
 
 There is no Dart whole-box cache or long-lived stale read snapshot.
 
-## 4. Queries and indexes
+### Dart point-read boundary
+
+The generated FRB point helpers for `get`, `containsKey`, and `boxExists` are synchronous. Their Dart adapter methods keep the public asynchronous contract with `Future.sync`, so synchronous native throws are captured into the returned future instead of escaping before a future exists.
+
+```text
+Box.get
+  -> NativeBoxApi.get
+  -> Future.sync(generated FRB get)
+  -> Uint8List payload
+  -> BoxCodec.decode
+```
+
+The adapter intentionally does not re-copy a payload that already arrives as a full-buffer `Uint8List`. A sliced/view-backed `Uint8List` is normalized before MessagePack deserialization so its visible byte range remains authoritative.
+
+### Dart batch/query read boundary
+
+`getAll` and `query` keep the FRB/native batch calls asynchronous. This avoids converting potentially longer native operations into synchronous UI-thread work merely to improve microbenchmark numbers.
+
+```text
+Box.getAll
+  -> NativeBatchReadApi.getAll
+  -> generated FRB getAll
+  -> NativeBatchRecord payloads
+  -> BoxCodec.decode for each value
+  -> fixed-length List<MapEntry<String, dynamic>>
+
+Box.query
+  -> build canonical query wire map
+  -> BoxCodec.encode query payload
+  -> NativeQueryApi.scanQuery
+  -> generated FRB scanQuery
+  -> BoxCodec.decode result payloads
+  -> fixed-length List<MapEntry<String, dynamic>>
+```
+
+The production adapter returns FRB-owned payload lists directly for batch/query records; it does not duplicate each byte payload. `watchBox` remains different: event payloads are copied intentionally because watch delivery has a longer-lived ownership/lifetime boundary.
+
+## 4. Codec and read-path performance evidence
+
+`BoxCodec` is the stable Dart-side wire codec around MessagePack plus dxtr-specific tagged values.
+
+```text
+encode(value)
+  -> _toWire(value)
+  -> msgpack.serialize(...)
+  -> Uint8List
+
+decode(bytes)
+  -> normalize byte-view boundary when required
+  -> msgpack.deserialize(...)
+  -> _fromWire(...)
+```
+
+Read-path optimization is evidence-driven. The benchmark matrix separates:
+
+```text
+Rust core
+-> generated FRB
+-> Dart native adapter
+-> public Dart API
+```
+
+The current diagnostics establish these decisions:
+
+- fixed async/FRB overhead is material for small reads, so synchronous generated helpers are wrapped only where their native operation is already synchronous;
+- duplicate adapter payload copies were removed from `getAll` and `scanQuery`;
+- fixed-length public result construction is used for `getAll` and query results;
+- query request wire building/encoding is small relative to the native query operation and is not the current optimization target;
+- for a representative 100-record batch decode, MessagePack deserialization accounts for the majority of codec time, while tagged `_fromWire` conversion is still a meaningful minority;
+- the current follow-up diagnostic compares the existing map-comprehension `_fromWire` shape against explicit loop-based map construction before any production codec change is considered.
+
+Hosted absolute timings are diagnostic and noisy. Same-run layer ratios and component decomposition are the primary evidence used to justify a production optimization.
+
+## 5. Queries and indexes
 
 ```text
 Dart BoxQuery/BoxQueryBuilder ----┐
@@ -83,7 +156,7 @@ Persisted indexes narrow candidates only; authoritative primary records are stil
 
 Exactly three profiles remain: `minimal`, `encryption`, and `full`. `full` is default.
 
-## 5. Compatibility, conformance, and concurrency evidence
+## 6. Compatibility, conformance, and concurrency evidence
 
 0.8 established bidirectional same-file compatibility. 0.9 added reusable conformance tests for CRUD, overwrite, batch ordering/duplicates/misses, enumeration, deletion, clear, and index lifecycle behavior. 0.10 added deterministic real-world workload evidence through equivalent Dart/FRB and Rust-native fixtures.
 
@@ -103,7 +176,7 @@ Exactly three profiles remain: `minimal`, `encryption`, and `full`. `full` is de
 - reproducible Linux/macOS native-size evaluation with retained lockfile/metadata;
 - independent Dart isolate -> FRB -> Rust shared-storage visibility and close/reopen durability.
 
-## 6. Dart isolate path
+## 7. Dart isolate path
 
 Each isolate owns its own Dart static state and calls `DxtrBox.init(path: ...)` / `DxtrBox.open(...)` independently. `Box` instances and native wrappers are not transferred between isolates.
 
@@ -115,13 +188,13 @@ Dart isolate B -> public API -> FRB ----┘
 
 The 1.1 evidence harness proves committed peer-write visibility while both isolates remain active and only allows the parent to reopen after both worker handles close successfully. It does not define cross-isolate watch ordering, fairness, lock-free execution, or Box-transfer semantics.
 
-## 7. Release/consumer paths
+## 8. Release/consumer paths
 
 `tool/validate_published_consumer.dart` stages the package according to `.pubignore`, rejects repository-only leakage, generates a fresh Flutter host app, wires the staged package as a path dependency, compiles representative public APIs, then builds the target platform.
 
 CI runs that staged path for Android, iOS, macOS, Linux, and Windows. A separate 1.1 registry-resolved workflow exists for validating an actually published hosted package; repository version metadata alone does not prove registry publication.
 
-## 8. Durable upgrade boundary
+## 9. Durable upgrade boundary
 
 1.1 keeps:
 
@@ -131,7 +204,7 @@ meta[format_version] = dxtr_box/1
 
 No 1.1 storage migration is introduced. Existing persistence/reopen, encrypted reopen, cross-frontend same-file, migration destination, crash-reopen, native concurrency, and Dart isolate tests remain executable compatibility evidence.
 
-## 9. Merge quality bar
+## 10. Merge quality bar
 
 Full validation covers:
 
