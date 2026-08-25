@@ -130,9 +130,11 @@ final class FrbNativeBoxApi
   }
 
   @override
-  Future<bool> boxExists(String name) async {
-    await _ensureInitialized();
-    return frb.boxExists(name: name);
+  Future<bool> boxExists(String name) {
+    // BoxStore.init guarantees RustLib initialization before metadata reads.
+    // The generated FRB call is synchronous, so Future.sync avoids a
+    // redundant async state machine while preserving Future error semantics.
+    return Future<bool>.sync(() => frb.boxExists(name: name));
   }
 
   @override
