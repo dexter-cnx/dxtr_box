@@ -6,12 +6,12 @@
 
 `dxtr_box` is a compact Rust/redb local database engine with a Flutter/Dart frontend and a first-class native Rust frontend. It is not positioned as a Hive/Hive CE replacement; Hive CE remains optional migration tooling, compatibility reference, and benchmark peer.
 
-## Stable 1.0 runtime/package contract
+## Stable runtime/package contract
 
 ```text
 Flutter package/plugin: dxtr_box
 Rust crate/native lib:  rust_lib_dxtr_box
-Package version:         1.0.0
+Package version:         1.1.0
 Dart:                    >= 3.4.0 < 4.0.0
 Flutter:                 >= 3.22.0
 flutter_rust_bridge:     2.8.0 exactly
@@ -34,34 +34,34 @@ Completed:
 - 0.8 Rust-native API / Multi-frontend Foundation
 - 0.9 Conformance & Startup Maturity
 - 0.10 Real-world Workload Evidence
-- **1.0 Stabilization / Release Readiness**
+- 1.0 Stabilization / Release Readiness
+- **1.1 Post-release Evidence / Reliability**
 
-1.0 / post-release sequence:
+1.0 / 1.1 sequence:
 
 ```text
-PR1 contract-freeze audit + stronger guards                              merged (#57)
-PR2 public API semantic regression inventory + compatibility tests       merged (#61)
-PR3 release-candidate published-consumer / migration / upgrade evidence  merged (#62)
-PR4 final release audit, docs sync, version 1.0.0                         merged (#63)
-post-release handoff sync                                                  merged (#64)
-1.1 planning baseline                                                     merged (#65)
-1.1 PR1 registry-resolved external consumer verification                  merged (#66)
-1.1 PR2 native concurrency + reopen evidence                              merged (#67)
-1.1 PR3 native-size / tree-shaking decision evidence                      merged (#68)
-1.1 PR4 Dart isolate / FRB concurrency evidence                           current (#69)
+1.0 PR1 contract-freeze audit + stronger guards                          merged (#57)
+1.0 PR2 public API semantic regression inventory + tests                 merged (#61)
+1.0 PR3 release-candidate consumer / migration / upgrade evidence        merged (#62)
+1.0 PR4 final release audit, docs sync, version 1.0.0                    merged (#63)
+post-release handoff sync                                                 merged (#64)
+1.1 planning baseline                                                    merged (#65)
+1.1 PR1 registry-resolved external consumer verification                 merged (#66)
+1.1 PR2 native concurrency + reopen evidence                             merged (#67)
+1.1 PR3 native-size / tree-shaking decision evidence                     merged (#68)
+1.1 PR4 Dart isolate / FRB concurrency evidence                          merged (#69)
+1.1 closure audit + docs + version 1.1.0                                 current
 ```
 
 See:
 
-- `docs/RELEASE_READINESS_10.md`
-- `docs/PUBLIC_API_SEMANTIC_REGRESSION_10.md`
-- `docs/RELEASE_CANDIDATE_EVIDENCE_10.md`
 - `docs/RELEASE_AUDIT_100.md`
 - `docs/ROADMAP_11.md`
 - `docs/POST_RELEASE_REGISTRY_VERIFICATION_11.md`
 - `docs/CONCURRENCY_EVIDENCE_11.md`
 - `docs/NATIVE_SIZE_DECISION_11.md`
 - `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md`
+- `docs/RELEASE_AUDIT_110.md`
 
 ## Architecture
 
@@ -93,9 +93,9 @@ Native Rust consumers use `DxtrBox`, `BoxHandle`, `Record`, `IndexDefinition`, `
 
 Both frontends converge onto the same canonical query representation, planner, redb storage path, encryption path, and persisted indexes.
 
-## 1.0 release evidence
+## 1.0 + 1.1 evidence
 
-The 1.0 release is guarded by executable evidence rather than documentation-only claims:
+The stable line is guarded by executable evidence rather than documentation-only claims:
 
 - exact Dart export and Rust root/wildcard contract guards;
 - query model and fluent-builder semantic regression tests;
@@ -106,11 +106,13 @@ The 1.0 release is guarded by executable evidence rather than documentation-only
 - generated consumer builds on Android, iOS, macOS, Linux, and Windows;
 - FRB generated binding reproducibility;
 - exact `minimal | encryption | full` Rust profile testing;
-- native-size regression policy;
+- native-size regression policy plus reproducible Linux/macOS evaluation evidence;
+- guaranteed native concurrent reader/writer overlap and durable reopen;
+- independent Dart isolate / FRB shared-storage visibility and close/reopen durability;
 - package docs + pub dry-run;
 - benchmark correctness and diagnostic smoke.
 
-The durable format remains `dxtr_box/1`; 1.0 introduces no storage migration.
+The durable format remains `dxtr_box/1`; 1.1 introduces no storage migration.
 
 ## CI / local preflight
 
@@ -128,14 +130,14 @@ bash tool/install_git_hooks.sh
 
 Full merge validation retains format/analyze/tests, minimum SDK, all three Rust profiles, native integration, migration/query/index/crash-reopen regression, FRB generation reproducibility, native-size policy, package/pub readiness, benchmark correctness, and staged Android/iOS/macOS/Linux/Windows consumers.
 
-1.1 additionally has:
+1.1 additionally retains:
 
-- manual `Native Size Evaluation` evidence on Linux/macOS, retaining TSV, generated `rust/Cargo.lock`, and locked Cargo metadata for reproducibility;
-- dedicated `Dart Isolate Concurrency` CI that builds the native library and runs `test/isolate_native_integration_test.dart` with `DXTR_BOX_NATIVE_TEST=1`.
+- manual `Native Size Evaluation` evidence on Linux/macOS, retaining TSV, generated `rust/Cargo.lock`, and locked Cargo metadata;
+- dedicated `Dart Isolate Concurrency` CI through the real Dart -> FRB -> Rust path.
 
 ## Preserved non-goals
 
-Do not turn post-1.0 maintenance into:
+Do not turn post-1.1 maintenance into:
 
 - GPUI integration inside core;
 - Tokio/runtime commitment;
@@ -147,21 +149,15 @@ Do not turn post-1.0 maintenance into:
 - a fourth native profile;
 - broad Dart API redesign.
 
-## Next active work: 1.1 PR4 Dart isolate / FRB evidence
+## Next work after 1.1
 
-PR1 added registry-resolved external consumer verification infrastructure. Registry publication itself remains an external release step and must not be inferred merely from repository version `1.0.0`.
+Do not manufacture a 1.2 feature list merely to continue development. Start from an observed consumer, reliability, maintenance, or interoperability need and require executable evidence before changing runtime behavior.
 
-PR2 strengthened native Rust thread/concurrency and reopen evidence with guaranteed read/write overlap across independent handles.
+Registry publication remains an external release step and must not be inferred merely from repository version `1.1.0`. If/when the package is published, run the registry-resolved consumer verification against the actual hosted `1.1.0` package.
 
-PR3 (#68) established reproducible Linux/macOS native-size evidence before any future tree-shaking or SDK-floor decision. It does not enable tree shaking or raise SDK floors. A future experiment must clear both >=64 KiB absolute and >=3% relative savings under like-for-like inputs and retain all compatibility/correctness gates.
+Platform/dev tooling, migration/interoperability extensions, recorded-use/native tree shaking, stronger cross-isolate watch/order semantics, and Web strategy remain conditional decisions rather than committed scope.
 
-PR4 (#69) closes the next evidence gap at the Dart frontend boundary. The harness starts independent Dart isolates that each call `DxtrBox.init` and `DxtrBox.open` for the same database path. The isolates do not exchange `Box` instances or native handles. Each commits an initial record, confirms visibility of the peer isolate's committed record while both handles remain open, completes its own mutations, closes successfully, and only then acknowledges completion. The parent reopens after both acknowledgements and verifies all durable records.
-
-This evidence does **not** create a cross-isolate `Box` transfer contract, cross-isolate watch-delivery contract, lock-free guarantee, or new synchronization API. Those remain separate decisions if a concrete consumer need appears.
-
-After PR4, use `docs/ROADMAP_11.md` to decide whether any measured need justifies another 1.1 runtime/tooling change. Platform/dev tooling and migration/interoperability hardening remain conditional rather than committed scope.
-
-## Post-1.0 rule
+## Compatibility rule
 
 Treat the Dart public API, Rust root API, package identities, native profiles, and `dxtr_box/1` durable format as compatibility-sensitive contracts. Breaking changes require an explicit versioning/migration decision rather than incidental refactoring.
 
