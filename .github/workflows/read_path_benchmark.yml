@@ -21,6 +21,7 @@ on:
       - 'test/msgpack_deserialize_shape_benchmark_test.dart'
       - 'test/msgpack_tagged_wire_overhead_benchmark_test.dart'
       - 'test/multi_frontend_benchmark_test.dart'
+      - 'tool/decoder_benchmark/**'
       - 'tool/multi_frontend_benchmark.sh'
   workflow_dispatch:
 
@@ -123,6 +124,15 @@ jobs:
           DXTR_BOX_MSGPACK_TAGGED_WIRE_BENCHMARK: '1'
           DXTR_BOX_MSGPACK_TAGGED_WIRE_OUTPUT: '${{ github.workspace }}/build/read-path/msgpack-tagged-wire.jsonl'
         run: flutter test test/msgpack_tagged_wire_overhead_benchmark_test.dart --reporter expanded
+      - name: Run decoder comparison diagnostic
+        working-directory: tool/decoder_benchmark
+        env:
+          DXTR_BOX_DECODER_COMPARISON_BENCHMARK: '1'
+          DXTR_BOX_DECODER_COMPARISON_OUTPUT: '${{ github.workspace }}/build/read-path/decoder-comparison.jsonl'
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test test/decoder_comparison_test.dart --reporter expanded
       - name: Run 0.8 multi-frontend diagnostic
         env:
           DXTR_BOX_MULTI_FRONTEND_RUST_ITERATIONS: '200'
@@ -143,6 +153,7 @@ jobs:
           test -s build/read-path/codec-encode-copy.jsonl
           test -s build/read-path/msgpack-deserialize-shape.jsonl
           test -s build/read-path/msgpack-tagged-wire.jsonl
+          test -s build/read-path/decoder-comparison.jsonl
           test -s build/multi-frontend/rust-native.jsonl
           test -s build/multi-frontend/dart-frb.jsonl
       - name: Toolchain metadata
