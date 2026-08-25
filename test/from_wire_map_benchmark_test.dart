@@ -101,7 +101,8 @@ void _measure({required String operation, required void Function() action}) {
     'operation': operation,
     'iterations': _iterations,
     'samples': _samples,
-    'median_ns_per_op': _median(sampleNs) / _iterations,
+    'records_per_iteration': _records,
+    'median_ns_per_record': _median(sampleNs) / (_iterations * _records),
   });
 }
 
