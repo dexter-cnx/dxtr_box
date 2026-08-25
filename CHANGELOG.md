@@ -1,3 +1,13 @@
+## 1.0.0
+
+- Declared the existing `dxtr_box` public/package/durable contracts stable after the 0.10 evidence milestone and the 1.0 stabilization sequence.
+- Added stronger release guards for the Dart export boundary, Rust root/wildcard API surface, Cargo package/lib identity, native crate type, exact dependency/profile requirements, and `dxtr_box/1` durable format markers.
+- Added public API semantic regression coverage for query-model validation, immutable AST snapshots, mixed AND/OR left associativity, explicit `andGroup`/`orGroup` grouping, sort/null ordering, and pagination validation.
+- Strengthened staged published-consumer validation so generated Android, iOS, macOS, Linux, and Windows host apps compile representative public `BoxStore`, compatibility `DxtrBox`, query/index, and Hive CE migration surfaces from the publishable payload.
+- Confirmed release-candidate persistence/reopen, encrypted reopen and key rejection, migration lifecycle, FRB reproducibility, native profile, native-size, package/pub dry-run, benchmark correctness, and platform-consumer evidence.
+- Kept the durable format at `dxtr_box/1`; 1.0.0 introduces no storage migration, query-engine rewrite, encryption redesign, runtime cache, GPUI dependency, Tokio commitment, ORM/codegen layer, sync layer, or fourth native profile.
+- Synchronized release audit, project handoff, code walkthrough, README status, and package version for the stable 1.0.0 release.
+
 ## 0.10.0-dev.1
 
 - Added deterministic application-shaped workload fixtures for settings/session, catalog/workspace, and activity/event scenarios.
