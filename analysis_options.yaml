@@ -9,6 +9,7 @@ analyzer:
     - linux/**
     - benchmark/**
     - tool/hive_ce_migration_fixture/**
+    - tool/decoder_benchmark/**
     - cargokit/**
   errors:
     deprecated_member_use_from_same_package: ignore
