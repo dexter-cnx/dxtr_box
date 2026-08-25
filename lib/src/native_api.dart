@@ -78,10 +78,13 @@ abstract interface class NativeIndexApi {
   Future<bool> dropIndex(String boxName, String name);
 }
 
+/// Optional maintenance capability for engines that can migrate plaintext
+/// storage into the encrypted dxtr_box format.
 abstract interface class NativeEncryptionMigrationApi {
   Future<void> encryptBox(String name, String encryptionKey);
 }
 
+/// Production adapter backed by generated flutter_rust_bridge bindings.
 final class FrbNativeBoxApi
     implements
         NativeBoxApi,
@@ -300,6 +303,7 @@ final class FrbNativeBoxApi
   }
 }
 
+/// Test/failure adapter retained so callers can explicitly disable native IO.
 final class UnavailableNativeBoxApi
     implements NativeBoxApi, NativeEncryptionMigrationApi {
   const UnavailableNativeBoxApi();
@@ -371,6 +375,7 @@ final class UnavailableNativeBoxApi
   Future<int> length(String boxName) async => _missing();
 }
 
+/// Legacy package-internal compatibility aliases. New code uses the Box names.
 @Deprecated('Use NativeBoxApi instead.')
 typedef NativeDxtrApi = NativeBoxApi;
 
