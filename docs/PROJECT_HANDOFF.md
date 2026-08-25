@@ -159,6 +159,31 @@ A candidate moves from investigation to implementation only when there is a conc
 
 Registry publication remains an external release step and must not be inferred merely from repository version `1.1.0`. If/when the package is published, run the registry-resolved consumer verification against the actual hosted `1.1.0` package.
 
+## Immediate execution plan after PR #73
+
+PR #73 is an isolated Flutter single-key read-path experiment and optimization. The diagnostic evidence showed that the main remaining point-read cost is on the Dart/FRB boundary rather than in the Rust/redb storage core. The production change remains intentionally narrow: remove the redundant adapter async state machine while preserving the existing `Future` contract and asynchronous error delivery.
+
+Execution order after PR #73:
+
+1. Close PR #73 only after the full merge gate is green, review threads are resolved, and the final diff contains only the intended optimization/evidence changes. Squash-merge and delete the experiment branch after merge.
+2. Finish Rust crate publication readiness for `rust_lib_dxtr_box`: verify package metadata/version alignment, run `cargo package`, and publish to crates.io only after the package is independently valid. Rust publication is separate from pub.dev publication.
+3. Continue evidence-driven read-boundary optimization for `Box.get`, `getAll`, and query paths. Preserve the public Future API and storage semantics; do not introduce a whole-box Dart cache merely to win benchmarks.
+4. Establish an authoritative boundary benchmark matrix covering direct Rust, generated FRB, Dart adapter, and public Dart API for single-key reads, batch reads, and indexed queries. Use normalized boundary overhead and same-run comparisons rather than treating hosted-runner absolute timings as stable.
+5. Perform release synchronization only after the optimization/publication work is stable: update changelog, README/handoff/code walkthrough as needed and issue a patch release rather than bumping versions for each internal optimization PR.
+
+Current point-read evidence from the experiment:
+
+- pre-change public `Box.get`: approximately 22.1 us/op;
+- pre-change async native adapter: approximately 15.8 us/op;
+- raw synchronous FRB get: approximately 2.1 us/op;
+- synchronous FRB get + MessagePack decode: approximately 3.0 us/op;
+- optimized public `Box.get` diagnostic: approximately 20.8 us/op;
+- optimized native adapter diagnostic: approximately 12.2 us/op.
+
+Interpret these as evidence that the adapter optimization is worthwhile and that substantial boundary overhead remains. Do not claim a 7x production `Box.get` speedup: the ~7x figure measured the diagnostic gap between the public async path and the raw synchronous boundary, not the exact improvement delivered by PR #73 itself.
+
+Priority after #73 is Rust crates.io publication readiness first, then a broader FRB read-boundary investigation. Further redb micro-optimization is lower priority unless profiling shows the Rust storage core has become the dominant cost.
+
 ## Compatibility rule
 
 Treat the Dart public API, Rust root API, package identities, native profiles, and `dxtr_box/1` durable format as compatibility-sensitive contracts. Breaking changes require an explicit versioning/migration decision rather than incidental refactoring.
