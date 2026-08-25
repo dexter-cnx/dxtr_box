@@ -143,8 +143,7 @@ void main() {
   );
 }
 
-Map<String, dynamic> _queryWireForBenchmark(BoxQuery query) =>
-    <String, dynamic>{
+Map<String, dynamic> _queryWireForBenchmark(BoxQuery query) => <String, dynamic>{
       'where': _filterWireForBenchmark(query.where),
       'sortBy': query.sortBy
           .map(
@@ -162,19 +161,19 @@ Map<String, dynamic> _queryWireForBenchmark(BoxQuery query) =>
 Map<String, dynamic> _filterWireForBenchmark(QueryFilter filter) {
   return switch (filter) {
     QueryComparison comparison => <String, dynamic>{
-      'type': 'comparison',
-      'field': comparison.field,
-      'operator': comparison.operator.name,
-      'value': comparison.value,
-      'upperValue': comparison.upperValue,
-    },
+        'type': 'comparison',
+        'field': comparison.field,
+        'operator': comparison.operator.name,
+        'value': comparison.value,
+        'upperValue': comparison.upperValue,
+      },
     QueryGroup group => <String, dynamic>{
-      'type': 'group',
-      'operator': group.operator.name,
-      'filters': group.filters
-          .map(_filterWireForBenchmark)
-          .toList(growable: false),
-    },
+        'type': 'group',
+        'operator': group.operator.name,
+        'filters': group.filters
+            .map(_filterWireForBenchmark)
+            .toList(growable: false),
+      },
   };
 }
 
