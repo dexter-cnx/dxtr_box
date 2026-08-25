@@ -1,0 +1,15 @@
+name: dxtr_box_decoder_benchmark
+publish_to: none
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+
+dependencies:
+  dxtr_box:
+    path: ../..
+  msgpack_dart: 1.0.1
+  pro_mpack: 3.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
