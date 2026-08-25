@@ -155,11 +155,9 @@ void main() {
         iterations: iterations,
         samples: samples,
         action: () {
-          sink = List<dynamic>.generate(
-            batch100Records.length,
-            (index) => BoxCodec.decode(batch100Records[index].value),
-            growable: false,
-          );
+          for (var index = 0; index < batch100Records.length; index++) {
+            sink = BoxCodec.decode(batch100Records[index].value);
+          }
         },
       );
 
@@ -234,11 +232,9 @@ void main() {
         iterations: iterations,
         samples: samples,
         action: () {
-          sink = List<dynamic>.generate(
-            queryRecords.length,
-            (index) => BoxCodec.decode(queryRecords[index].value),
-            growable: false,
-          );
+          for (var index = 0; index < queryRecords.length; index++) {
+            sink = BoxCodec.decode(queryRecords[index].value);
+          }
         },
       );
 
