@@ -19,6 +19,7 @@ on:
       - 'test/from_wire_map_benchmark_test.dart'
       - 'test/codec_encode_copy_benchmark_test.dart'
       - 'test/msgpack_deserialize_shape_benchmark_test.dart'
+      - 'test/msgpack_tagged_wire_overhead_benchmark_test.dart'
       - 'test/multi_frontend_benchmark_test.dart'
       - 'tool/multi_frontend_benchmark.sh'
   workflow_dispatch:
@@ -117,6 +118,11 @@ jobs:
           DXTR_BOX_MSGPACK_DESERIALIZE_SHAPE_BENCHMARK: '1'
           DXTR_BOX_MSGPACK_DESERIALIZE_SHAPE_OUTPUT: '${{ github.workspace }}/build/read-path/msgpack-deserialize-shape.jsonl'
         run: flutter test test/msgpack_deserialize_shape_benchmark_test.dart --reporter expanded
+      - name: Run MessagePack tagged-wire diagnostic
+        env:
+          DXTR_BOX_MSGPACK_TAGGED_WIRE_BENCHMARK: '1'
+          DXTR_BOX_MSGPACK_TAGGED_WIRE_OUTPUT: '${{ github.workspace }}/build/read-path/msgpack-tagged-wire.jsonl'
+        run: flutter test test/msgpack_tagged_wire_overhead_benchmark_test.dart --reporter expanded
       - name: Run 0.8 multi-frontend diagnostic
         env:
           DXTR_BOX_MULTI_FRONTEND_RUST_ITERATIONS: '200'
@@ -136,6 +142,7 @@ jobs:
           test -s build/read-path/from-wire-map.jsonl
           test -s build/read-path/codec-encode-copy.jsonl
           test -s build/read-path/msgpack-deserialize-shape.jsonl
+          test -s build/read-path/msgpack-tagged-wire.jsonl
           test -s build/multi-frontend/rust-native.jsonl
           test -s build/multi-frontend/dart-frb.jsonl
       - name: Toolchain metadata
