@@ -9,10 +9,12 @@ import 'package:msgpack_dart/msgpack_dart.dart' as msgpack;
 const _iterations = 500;
 const _samples = 5;
 const _warmup = 50;
+const _enabledEnv = 'DXTR_BOX_CODEC_ENCODE_COPY_BENCHMARK';
+const _outputEnv = 'DXTR_BOX_CODEC_ENCODE_COPY_OUTPUT';
+const _skipReason = 'Set DXTR_BOX_CODEC_ENCODE_COPY_BENCHMARK=1 to run.';
 
 void main() {
-  final enabled =
-      Platform.environment['DXTR_BOX_CODEC_ENCODE_COPY_BENCHMARK'] == '1';
+  final enabled = Platform.environment[_enabledEnv] == '1';
 
   test(
     'codec encode copy diagnostic executes',
@@ -62,7 +64,7 @@ void main() {
       );
       expect(sink, isNotNull);
     },
-    skip: enabled ? false : 'Set DXTR_BOX_CODEC_ENCODE_COPY_BENCHMARK=1 to run.',
+    skip: enabled ? false : _skipReason,
   );
 }
 
@@ -94,7 +96,7 @@ void _emit(Map<String, Object> result) {
   final line = jsonEncode(result);
   // ignore: avoid_print
   print('DXTR_BOX_CODEC_ENCODE_COPY $line');
-  final outputPath = Platform.environment['DXTR_BOX_CODEC_ENCODE_COPY_OUTPUT'];
+  final outputPath = Platform.environment[_outputEnv];
   if (outputPath == null || outputPath.isEmpty) return;
   final file = File(outputPath);
   file.parent.createSync(recursive: true);
