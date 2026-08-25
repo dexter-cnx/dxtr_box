@@ -42,18 +42,19 @@ void main() {
           ],
         ],
       ];
+      final serialized = msgpack.serialize(wire);
 
       Object? sink;
       _measure(
-        operation: 'msgpack_serialize_direct',
+        operation: 'serialized_reuse_control',
         action: () {
-          sink = msgpack.serialize(wire);
+          sink = serialized;
         },
       );
       _measure(
-        operation: 'msgpack_serialize_then_copy',
+        operation: 'serialized_copy_only',
         action: () {
-          sink = Uint8List.fromList(msgpack.serialize(wire));
+          sink = Uint8List.fromList(serialized);
         },
       );
       _measure(
@@ -88,9 +89,12 @@ void _measure({required String operation, required void Function() action}) {
     'operation': operation,
     'iterations': _iterations,
     'samples': _samples,
+    'payload_bytes': serializedLength,
     'median_ns_per_op': _median(sampleNs) / _iterations,
   });
 }
+
+int serializedLength = 0;
 
 void _emit(Map<String, Object> result) {
   final line = jsonEncode(result);
