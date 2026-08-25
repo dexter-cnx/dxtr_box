@@ -82,6 +82,10 @@ void main() {
         () => IndexDefinition(name: '1invalid', field: 'age'),
         throwsArgumentError,
       );
+      expect(
+        () => IndexDefinition(name: 'by-age', field: 'profile..age'),
+        throwsArgumentError,
+      );
     });
   });
 
@@ -119,6 +123,25 @@ void main() {
       expect(root.operator, QueryLogicalOperator.and);
       final grouped = root.filters[1] as QueryGroup;
       expect(grouped.operator, QueryLogicalOperator.or);
+      expect((grouped.filters[0] as QueryComparison).field, 'b');
+      expect((grouped.filters[1] as QueryComparison).field, 'c');
+    });
+
+    test('orGroup preserves OR at the outer AST boundary', () {
+      final query = BoxQueryBuilder.where('a')
+          .equals(1)
+          .orGroup(
+            (group) => group.where('b').equals(2).and('c').equals(3),
+          )
+          .build();
+
+      final root = query.where as QueryGroup;
+      expect(root.operator, QueryLogicalOperator.or);
+      expect(root.filters, hasLength(2));
+      expect((root.filters[0] as QueryComparison).field, 'a');
+
+      final grouped = root.filters[1] as QueryGroup;
+      expect(grouped.operator, QueryLogicalOperator.and);
       expect((grouped.filters[0] as QueryComparison).field, 'b');
       expect((grouped.filters[1] as QueryComparison).field, 'c');
     });
