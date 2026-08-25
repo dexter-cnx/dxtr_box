@@ -164,8 +164,8 @@ fn concurrent_mutations_remain_durable_after_all_handles_close_and_reopen() {
         thread.join().unwrap();
     }
 
-    first.close().unwrap();
-    second.close().unwrap();
+    drop(first);
+    drop(second);
 
     let reopened = db.box_("items").unwrap();
     assert_eq!(reopened.len().unwrap(), 64);
