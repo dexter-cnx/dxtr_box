@@ -131,6 +131,7 @@ jobs:
           DXTR_BOX_DECODER_COMPARISON_OUTPUT: '${{ github.workspace }}/build/read-path/decoder-comparison.jsonl'
         run: |
           flutter pub get
+          flutter analyze
           flutter test test/decoder_comparison_test.dart --reporter expanded
       - name: Run 0.8 multi-frontend diagnostic
         env:
