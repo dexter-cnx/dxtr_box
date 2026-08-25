@@ -208,7 +208,6 @@ final class FrbNativeBoxApi
     String boxName,
     List<String> keys,
   ) async {
-    await _ensureInitialized();
     final records = await frb.getAll(boxName: boxName, keys: keys);
     return records
         .map(
@@ -249,7 +248,6 @@ final class FrbNativeBoxApi
     String boxName,
     Uint8List queryPayload,
   ) async {
-    await _ensureInitialized();
     final records = await frb.scanQuery(
       boxName: boxName,
       queryPayload: queryPayload,
