@@ -46,6 +46,8 @@ PR4 final release audit, docs sync, version 1.0.0                         merged
 post-release handoff sync                                                  merged (#64)
 1.1 planning baseline                                                     merged (#65)
 1.1 PR1 registry-resolved external consumer verification                  merged (#66)
+1.1 PR2 native concurrency + reopen evidence                              merged (#67)
+1.1 PR3 native-size / tree-shaking decision evidence                      active
 ```
 
 See:
@@ -57,6 +59,7 @@ See:
 - `docs/ROADMAP_11.md`
 - `docs/POST_RELEASE_REGISTRY_VERIFICATION_11.md`
 - `docs/CONCURRENCY_EVIDENCE_11.md`
+- `docs/NATIVE_SIZE_DECISION_11.md`
 
 ## Architecture
 
@@ -137,15 +140,15 @@ Do not turn post-1.0 maintenance into:
 - a fourth native profile;
 - broad Dart API redesign.
 
-## Next active work: 1.1 PR2 concurrency evidence
+## Next active work: 1.1 PR3 native-size decision evidence
 
 PR1 added registry-resolved external consumer verification infrastructure. Registry publication itself remains an external release step and must not be inferred merely from repository version `1.0.0`.
 
-PR2 strengthens native concurrency evidence without changing the stable contract. Existing `Send + Sync`, shared-handle concurrent mutation, multi-handle lifecycle, and encrypted reopen coverage is extended with independent concurrent readers/writer coverage and close/reopen durability after concurrent mutations.
+PR2 strengthened native concurrency evidence with guaranteed reader/writer overlap and durable reopen after concurrent mutations. Dart isolate semantics remain intentionally unclaimed until an executable isolate/FRB harness exists.
 
-This does **not** declare Dart isolate semantics stable. A Dart isolate claim requires an executable isolate/FRB harness proving initialization, cross-isolate visibility, lifecycle, and failure behavior. Until then, the supported evidence statement is limited to native Rust thread safety under the tested conditions.
+PR3 adds reproducible Linux/macOS native-size evidence before any future tree-shaking or SDK-floor decision. It does not enable tree shaking and does not raise the Dart or Flutter minimum. A future experiment must beat the existing 64 KiB / 3% materiality thresholds under like-for-like inputs and retain all compatibility/correctness gates before a toolchain change can be justified.
 
-After PR2, use `docs/ROADMAP_11.md` to select only evidence-backed work. Dart/native tree-shaking evaluation, platform/tooling decisions, and migration/interoperability hardening remain conditional candidates rather than committed scope.
+After PR3, `docs/ROADMAP_11.md` should be used to decide whether 1.1 needs another runtime/tooling change at all. Platform/dev tooling and migration/interoperability hardening remain conditional rather than committed scope.
 
 ## Post-1.0 rule
 
