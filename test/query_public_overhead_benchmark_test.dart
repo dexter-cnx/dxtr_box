@@ -60,7 +60,7 @@ void main() {
       );
       final prebuiltWire = _queryWireForBenchmark(query);
       final preencodedPayload = BoxCodec.encode(prebuiltWire);
-      final queryApi = api as NativeQueryApi;
+      const queryApi = api as NativeQueryApi;
 
       _emit(<String, Object>{
         'kind': 'context',
