@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dxtr_box/src/codec.dart';
@@ -11,6 +12,16 @@ void main() {
         expect(_hex(encoded), fixture.hex);
 
         final decoded = BoxCodec.decode(_bytes(fixture.hex));
+        expect(_comparable(decoded), _comparable(fixture.value));
+      });
+    }
+
+    for (final fixture in _boundaryFixtures) {
+      test('${fixture.name} preserves MessagePack width boundary', () {
+        final encoded = BoxCodec.encode(fixture.value);
+        expect(encoded, orderedEquals(fixture.bytes));
+
+        final decoded = BoxCodec.decode(Uint8List.fromList(fixture.bytes));
         expect(_comparable(decoded), _comparable(fixture.value));
       });
     }
@@ -56,12 +67,79 @@ final _fixtures = <_Fixture>[
   ),
 ];
 
+final _boundaryFixtures = <_BoundaryFixture>[
+  for (final entry in <int, List<int>>{
+    127: <int>[0x7f],
+    128: <int>[0xcc, 0x80],
+    255: <int>[0xcc, 0xff],
+    256: <int>[0xcd, 0x01, 0x00],
+    65535: <int>[0xcd, 0xff, 0xff],
+    65536: <int>[0xce, 0x00, 0x01, 0x00, 0x00],
+    4294967295: <int>[0xce, 0xff, 0xff, 0xff, 0xff],
+    4294967296: <int>[0xcf, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
+    -32: <int>[0xe0],
+    -33: <int>[0xd0, 0xdf],
+    -128: <int>[0xd0, 0x80],
+    -129: <int>[0xd1, 0xff, 0x7f],
+    -32768: <int>[0xd1, 0x80, 0x00],
+    -32769: <int>[0xd2, 0xff, 0xff, 0x7f, 0xff],
+    -2147483648: <int>[0xd2, 0x80, 0x00, 0x00, 0x00],
+    -2147483649: <int>[
+      0xd3,
+      0xff,
+      0xff,
+      0xff,
+      0xff,
+      0x7f,
+      0xff,
+      0xff,
+      0xff,
+    ],
+  }.entries)
+    _BoundaryFixture('int_${entry.key}', entry.key, entry.value),
+  for (final length in <int>[31, 32, 255, 256, 65535, 65536])
+    _BoundaryFixture(
+      'string_length_$length',
+      's' * length,
+      _messagePackStringBytes(length, 0x73),
+    ),
+  for (final length in <int>[255, 256, 65535, 65536])
+    _BoundaryFixture(
+      'bytes_length_$length',
+      Uint8List(length),
+      <int>[
+        0x92,
+        ..._fixStringBytes('@dxtr:bytes'),
+        ..._messagePackBinaryBytes(length),
+      ],
+    ),
+  for (final length in <int>[15, 16, 65535, 65536])
+    _BoundaryFixture(
+      'list_length_$length',
+      List<int>.filled(length, 0, growable: false),
+      <int>[
+        0x92,
+        ..._fixStringBytes('@dxtr:list'),
+        ..._messagePackArrayPrefix(length),
+        ...List<int>.filled(length, 0, growable: false),
+      ],
+    ),
+];
+
 final class _Fixture {
   const _Fixture(this.name, this.value, this.hex);
 
   final String name;
   final dynamic value;
   final String hex;
+}
+
+final class _BoundaryFixture {
+  const _BoundaryFixture(this.name, this.value, this.bytes);
+
+  final String name;
+  final dynamic value;
+  final List<int> bytes;
 }
 
 String _hex(Uint8List bytes) {
@@ -79,12 +157,69 @@ Uint8List _bytes(String hex) {
   ]);
 }
 
+List<int> _fixStringBytes(String value) {
+  final bytes = utf8.encode(value);
+  if (bytes.length > 31) {
+    throw ArgumentError.value(value, 'value', 'Expected fixstr-sized value');
+  }
+  return <int>[0xa0 | bytes.length, ...bytes];
+}
+
+List<int> _messagePackStringBytes(int length, int byte) {
+  final prefix = switch (length) {
+    <= 31 => <int>[0xa0 | length],
+    <= 255 => <int>[0xd9, length],
+    <= 65535 => <int>[0xda, length >> 8, length & 0xff],
+    _ => <int>[
+        0xdb,
+        (length >> 24) & 0xff,
+        (length >> 16) & 0xff,
+        (length >> 8) & 0xff,
+        length & 0xff,
+      ],
+  };
+  return <int>[...prefix, ...List<int>.filled(length, byte, growable: false)];
+}
+
+List<int> _messagePackBinaryBytes(int length) {
+  final prefix = switch (length) {
+    <= 255 => <int>[0xc4, length],
+    <= 65535 => <int>[0xc5, length >> 8, length & 0xff],
+    _ => <int>[
+        0xc6,
+        (length >> 24) & 0xff,
+        (length >> 16) & 0xff,
+        (length >> 8) & 0xff,
+        length & 0xff,
+      ],
+  };
+  return <int>[...prefix, ...List<int>.filled(length, 0, growable: false)];
+}
+
+List<int> _messagePackArrayPrefix(int length) {
+  return switch (length) {
+    <= 15 => <int>[0x90 | length],
+    <= 65535 => <int>[0xdc, length >> 8, length & 0xff],
+    _ => <int>[
+        0xdd,
+        (length >> 24) & 0xff,
+        (length >> 16) & 0xff,
+        (length >> 8) & 0xff,
+        length & 0xff,
+      ],
+  };
+}
+
 dynamic _comparable(dynamic value) {
   if (value is Uint8List) {
     return <dynamic>['bytes', ...value];
   }
   if (value is DateTime) {
-    return <dynamic>['datetime', value.toUtc().microsecondsSinceEpoch];
+    return <dynamic>[
+      'datetime',
+      value.microsecondsSinceEpoch,
+      value.isUtc,
+    ];
   }
   if (value is List) {
     return value.map<dynamic>(_comparable).toList(growable: false);
