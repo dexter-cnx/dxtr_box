@@ -13,6 +13,7 @@ const _enabledEnv = 'DXTR_BOX_MSGPACK_DESERIALIZE_SHAPE_BENCHMARK';
 const _outputEnv = 'DXTR_BOX_MSGPACK_DESERIALIZE_SHAPE_OUTPUT';
 const _skipReason =
     'Set DXTR_BOX_MSGPACK_DESERIALIZE_SHAPE_BENCHMARK=1 to run.';
+const _scales = <int>[1, 4, 16];
 
 void main() {
   final enabled = Platform.environment[_enabledEnv] == '1';
@@ -20,46 +21,20 @@ void main() {
   test(
     'msgpack deserialize shape diagnostic executes',
     () {
-      final cases = <String, dynamic>{
-        'flat_map': <String, dynamic>{
-          'id': 42,
-          'group': 7,
-          'name': 'record-42',
-          'active': true,
-        },
-        'nested_map': <String, dynamic>{
-          'id': 42,
-          'profile': <String, dynamic>{
-            'name': 'record-42',
-            'flags': <String, dynamic>{'active': true, 'group': 7},
-          },
-        },
-        'list_heavy': <String, dynamic>{
-          'id': 42,
-          'items': List<int>.generate(64, (index) => index, growable: false),
-        },
-        'string_heavy': <String, dynamic>{
-          'id': 42,
-          'text': List<String>.filled(8, 'dxtr-box-messagepack').join('-'),
-        },
-        'bytes_heavy': <String, dynamic>{
-          'id': 42,
-          'bytes': Uint8List.fromList(
-            List<int>.generate(256, (index) => index & 0xff, growable: false),
-          ),
-        },
-      };
-
       Object? sink;
-      for (final entry in cases.entries) {
-        final payload = BoxCodec.encode(entry.value);
-        _measure(
-          operation: entry.key,
-          payloadBytes: payload.lengthInBytes,
-          action: () {
-            sink = msgpack.deserialize(payload);
-          },
-        );
+      for (final scale in _scales) {
+        final cases = _casesForScale(scale);
+        for (final entry in cases.entries) {
+          final payload = BoxCodec.encode(entry.value);
+          _measure(
+            operation: entry.key,
+            scale: scale,
+            payloadBytes: payload.lengthInBytes,
+            action: () {
+              sink = msgpack.deserialize(payload);
+            },
+          );
+        }
       }
       expect(sink, isNotNull);
     },
@@ -67,8 +42,42 @@ void main() {
   );
 }
 
+Map<String, dynamic> _casesForScale(int scale) {
+  return <String, dynamic>{
+    'flat_map': <String, dynamic>{
+      for (var index = 0; index < 4 * scale; index++)
+        'field-$index': index.isEven ? index : 'value-$index',
+    },
+    'nested_map': _nestedMap(scale),
+    'list_heavy': <String, dynamic>{
+      'items': List<int>.generate(16 * scale, (index) => index, growable: false),
+    },
+    'string_heavy': <String, dynamic>{
+      'text': List<String>.filled(scale, 'dxtr-box-messagepack-payload').join('-'),
+    },
+    'bytes_heavy': <String, dynamic>{
+      'bytes': Uint8List.fromList(
+        List<int>.generate(32 * scale, (index) => index & 0xff, growable: false),
+      ),
+    },
+  };
+}
+
+Map<String, dynamic> _nestedMap(int scale) {
+  dynamic node = <String, dynamic>{'leaf': 'value'};
+  for (var index = 0; index < scale; index++) {
+    node = <String, dynamic>{
+      'level': index,
+      'value': 'nested-$index',
+      'child': node,
+    };
+  }
+  return <String, dynamic>{'root': node};
+}
+
 void _measure({
   required String operation,
+  required int scale,
   required int payloadBytes,
   required void Function() action,
 }) {
@@ -92,6 +101,7 @@ void _measure({
     'kind': 'measurement',
     'layer': 'msgpack_deserialize_shape',
     'operation': operation,
+    'scale': scale,
     'iterations': _iterations,
     'samples': _samples,
     'payload_bytes': payloadBytes,
