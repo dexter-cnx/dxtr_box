@@ -37,8 +37,11 @@ Future<void> main(List<String> args) async {
   _wireConsumerDependency(consumer);
   _wireConsumerApiReference(consumer);
 
-  await _run('flutter', <String>['pub', 'get'],
-      workingDirectory: consumer.path);
+  await _run(
+    'flutter',
+    <String>['pub', 'get'],
+    workingDirectory: consumer.path,
+  );
 
   switch (platform) {
     case 'android':
@@ -158,7 +161,8 @@ Future<void> _copyPublishedPayload(
         await entity.copy(targetPath);
       } else if (entity is Link) {
         throw StateError(
-            'published payload may not contain symlinks: $relative');
+          'published payload may not contain symlinks: $relative',
+        );
       }
     }
   }
@@ -209,14 +213,16 @@ void _validateStagedPayload(Directory stagedPackage) {
     if (FileSystemEntity.typeSync(entityPath) !=
         FileSystemEntityType.notFound) {
       throw StateError(
-          'repository-only path leaked into published payload: $path');
+        'repository-only path leaked into published payload: $path',
+      );
     }
   }
 
   final pubspec = File('${stagedPackage.path}/pubspec.yaml').readAsStringSync();
   if (RegExp(r'^    path:\s+', multiLine: true).hasMatch(pubspec)) {
     throw StateError(
-        'published root pubspec may not contain path-source dependencies');
+      'published root pubspec may not contain path-source dependencies',
+    );
   }
 }
 
@@ -254,10 +260,32 @@ class _ConsumerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Type publicApiSmoke = DxtrBox;
+    final Type boxStoreType = BoxStore;
+    final Type compatibilityShimType = DxtrBox;
+    final query = BoxQueryBuilder.where('profile.age')
+        .gte(18)
+        .orderBy('profile.name')
+        .limit(20)
+        .build();
+    final index = IndexDefinition(name: 'by-age', field: 'profile.age');
+    const Future<HiveCeMigrationResult> Function(
+      HiveCeMigrationSource, {
+      required String destinationName,
+      String? destinationEncryptionKey,
+      HiveCeValueConverter? valueConverter,
+      HiveCeKeyConverter? keyConverter,
+    }) migration = migrateFromHiveCe;
+
+    final smoke = <Object>[
+      boxStoreType,
+      compatibilityShimType,
+      query,
+      index,
+      migration,
+    ];
     return MaterialApp(
       home: Scaffold(
-        body: Center(child: Text(publicApiSmoke.toString())),
+        body: Center(child: Text(smoke.join('|'))),
       ),
     );
   }
