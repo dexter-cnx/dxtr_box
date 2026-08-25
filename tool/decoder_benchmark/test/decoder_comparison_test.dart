@@ -17,6 +17,22 @@ void main() {
   final enabled = Platform.environment[_enabledEnv] == '1';
 
   test(
+    'candidate decoder matches the pinned dxtr_box/1 wire corpus',
+    () {
+      for (final fixture in _compatibilityPayloads) {
+        final current = msgpack.deserialize(fixture.bytes);
+        final candidate = pro_mpack.deserialize(fixture.bytes);
+        expect(
+          _comparable(candidate),
+          _comparable(current),
+          reason: fixture.name,
+        );
+      }
+    },
+    skip: enabled ? false : 'Set $_enabledEnv=1 to run.',
+  );
+
+  test(
     'decoder comparison uses identical dxtr_box/1 payload bytes',
     () {
       Object? sink;
@@ -49,6 +65,67 @@ void main() {
   );
 }
 
+final _compatibilityPayloads = <_WireFixture>[
+  for (final entry in <String, String>{
+    'null': 'c0',
+    'bool_true': 'c3',
+    'int_positive': '2a',
+    'int_negative': 'f9',
+    'double': 'cb400c000000000000',
+    'string': 'a464787472',
+    'bytes': '92ab40647874723a6279746573c4040001feff',
+    'datetime': '92ae40647874723a6461746574696d65cf00060dedc04fb580',
+    'list': '92aa40647874723a6c6973749301a374776fc3',
+    'map': '92a940647874723a6d61709292a269640792a46e616d65a3626f78',
+    'nested':
+        '92a940647874723a6d61709192a56974656d7392aa40647874723a6c697374920192a940647874723a6d61709192a26f6bc3',
+  }.entries)
+    _WireFixture(entry.key, _bytes(entry.value)),
+  for (final entry in <int, List<int>>{
+    127: <int>[0x7f],
+    128: <int>[0xcc, 0x80],
+    255: <int>[0xcc, 0xff],
+    256: <int>[0xcd, 0x01, 0x00],
+    65535: <int>[0xcd, 0xff, 0xff],
+    65536: <int>[0xce, 0x00, 0x01, 0x00, 0x00],
+    4294967295: <int>[0xce, 0xff, 0xff, 0xff, 0xff],
+    4294967296: <int>[0xcf, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
+    -32: <int>[0xe0],
+    -33: <int>[0xd0, 0xdf],
+    -128: <int>[0xd0, 0x80],
+    -129: <int>[0xd1, 0xff, 0x7f],
+    -32768: <int>[0xd1, 0x80, 0x00],
+    -32769: <int>[0xd2, 0xff, 0xff, 0x7f, 0xff],
+    -2147483648: <int>[0xd2, 0x80, 0x00, 0x00, 0x00],
+    -2147483649: <int>[0xd3, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xff, 0xff],
+  }.entries)
+    _WireFixture('int_${entry.key}', Uint8List.fromList(entry.value)),
+  for (final length in <int>[31, 32, 255, 256, 65535, 65536])
+    _WireFixture(
+      'string_length_$length',
+      Uint8List.fromList(_messagePackStringBytes(length, 0x73)),
+    ),
+  for (final length in <int>[255, 256, 65535, 65536])
+    _WireFixture(
+      'bytes_length_$length',
+      Uint8List.fromList(<int>[
+        0x92,
+        ..._fixStringBytes('@dxtr:bytes'),
+        ..._messagePackBinaryBytes(length),
+      ]),
+    ),
+  for (final length in <int>[15, 16, 65535, 65536])
+    _WireFixture(
+      'list_length_$length',
+      Uint8List.fromList(<int>[
+        0x92,
+        ..._fixStringBytes('@dxtr:list'),
+        ..._messagePackArrayPrefix(length),
+        ...List<int>.filled(length, 0, growable: false),
+      ]),
+    ),
+];
+
 final _cases = <String, dynamic>{
   'flat_map_16': <String, dynamic>{
     for (var index = 0; index < 16; index++) 'field-$index': index,
@@ -71,6 +148,70 @@ final _cases = <String, dynamic>{
     ],
   },
 };
+
+final class _WireFixture {
+  const _WireFixture(this.name, this.bytes);
+
+  final String name;
+  final Uint8List bytes;
+}
+
+Uint8List _bytes(String hex) {
+  return Uint8List.fromList(<int>[
+    for (var offset = 0; offset < hex.length; offset += 2)
+      int.parse(hex.substring(offset, offset + 2), radix: 16),
+  ]);
+}
+
+List<int> _fixStringBytes(String value) {
+  final bytes = utf8.encode(value);
+  return <int>[0xa0 | bytes.length, ...bytes];
+}
+
+List<int> _messagePackStringBytes(int length, int byte) {
+  final prefix = switch (length) {
+    <= 31 => <int>[0xa0 | length],
+    <= 255 => <int>[0xd9, length],
+    <= 65535 => <int>[0xda, length >> 8, length & 0xff],
+    _ => <int>[
+        0xdb,
+        (length >> 24) & 0xff,
+        (length >> 16) & 0xff,
+        (length >> 8) & 0xff,
+        length & 0xff,
+      ],
+  };
+  return <int>[...prefix, ...List<int>.filled(length, byte, growable: false)];
+}
+
+List<int> _messagePackBinaryBytes(int length) {
+  final prefix = switch (length) {
+    <= 255 => <int>[0xc4, length],
+    <= 65535 => <int>[0xc5, length >> 8, length & 0xff],
+    _ => <int>[
+        0xc6,
+        (length >> 24) & 0xff,
+        (length >> 16) & 0xff,
+        (length >> 8) & 0xff,
+        length & 0xff,
+      ],
+  };
+  return <int>[...prefix, ...List<int>.filled(length, 0, growable: false)];
+}
+
+List<int> _messagePackArrayPrefix(int length) {
+  return switch (length) {
+    <= 15 => <int>[0x90 | length],
+    <= 65535 => <int>[0xdc, length >> 8, length & 0xff],
+    _ => <int>[
+        0xdd,
+        (length >> 24) & 0xff,
+        (length >> 16) & 0xff,
+        (length >> 8) & 0xff,
+        length & 0xff,
+      ],
+  };
+}
 
 void _measure({
   required String decoder,
