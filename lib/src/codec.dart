@@ -12,7 +12,11 @@ abstract final class BoxCodec {
   }
 
   static dynamic decode(List<int> bytes) {
-    final input = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+    final input = bytes is Uint8List &&
+            bytes.offsetInBytes == 0 &&
+            bytes.lengthInBytes == bytes.buffer.lengthInBytes
+        ? bytes
+        : Uint8List.fromList(bytes);
     final decoded = msgpack.deserialize(input);
     return _fromWire(decoded);
   }
