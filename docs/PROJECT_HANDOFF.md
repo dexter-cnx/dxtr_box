@@ -44,6 +44,7 @@ PR2 public API semantic regression inventory + compatibility tests       merged 
 PR3 release-candidate published-consumer / migration / upgrade evidence  merged (#62)
 PR4 final release audit, docs sync, version 1.0.0                         merged (#63)
 post-release handoff sync                                                  merged (#64)
+1.1 planning baseline                                                     merged (#65)
 ```
 
 See:
@@ -53,6 +54,7 @@ See:
 - `docs/RELEASE_CANDIDATE_EVIDENCE_10.md`
 - `docs/RELEASE_AUDIT_100.md`
 - `docs/ROADMAP_11.md`
+- `docs/POST_RELEASE_REGISTRY_VERIFICATION_11.md`
 
 ## Architecture
 
@@ -133,11 +135,13 @@ Do not turn post-1.0 maintenance into:
 - a fourth native profile;
 - broad Dart API redesign.
 
-## Next active work: post-1.0 verification / 1.1 planning
+## Next active work: 1.1 PR1 registry verification
 
-The first 1.1 step is external release verification, not a new runtime feature. Confirm the intended `1.0.0` artifact through the target package registry and build consumers from the registry-resolved package rather than a local/path payload before calling publication complete.
+The first 1.1 step is external release verification, not a new runtime feature. PR1 adds a manual five-platform `Registry Consumer Verification` workflow and `tool/validate_registry_consumer.dart` so the package can be resolved from the hosted registry at an exact version and compiled as an external consumer.
 
-After that, use `docs/ROADMAP_11.md` to select only evidence-backed work. Current candidate buckets are reliability/concurrency validation, Dart/native tree-shaking investigation, platform/tooling decisions, and migration/interoperability hardening. None is automatically committed scope.
+At PR preparation time, public pub.dev search did not return `dxtr_box`, so repository version `1.0.0` must not be described as registry-published yet. After publication, run the manual workflow for version `1.0.0`; all five platform jobs must resolve from hosted cache, compile representative stable APIs, build successfully, and retain JSON evidence before external publication verification is considered complete.
+
+After registry verification, use `docs/ROADMAP_11.md` to select only evidence-backed work. Current candidate buckets are reliability/concurrency validation, Dart/native tree-shaking investigation, platform/tooling decisions, and migration/interoperability hardening. None is automatically committed scope.
 
 ## Post-1.0 rule
 
