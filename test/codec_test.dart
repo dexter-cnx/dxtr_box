@@ -29,6 +29,25 @@ void main() {
     }
   });
 
+  test('decodes Uint8List views using only the visible byte range', () {
+    final value = <String, dynamic>{
+      'id': 7,
+      'name': 'view-safe',
+    };
+    final encoded = BoxCodec.encode(value);
+    final backing = Uint8List(encoded.length + 4)
+      ..fillRange(0, 2, 0xff)
+      ..setRange(2, 2 + encoded.length, encoded)
+      ..fillRange(2 + encoded.length, encoded.length + 4, 0xee);
+    final view = Uint8List.sublistView(
+      backing,
+      2,
+      2 + encoded.length,
+    );
+
+    expect(BoxCodec.decode(view), value);
+  });
+
   test('rejects non-string map keys', () {
     expect(
       () => DxtrCodec.encode(<dynamic, dynamic>{1: 'bad'}),
