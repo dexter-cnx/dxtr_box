@@ -100,7 +100,7 @@ final _boundaryFixtures = <_BoundaryFixture>[
   for (final length in <int>[31, 32, 255, 256, 65535, 65536])
     _BoundaryFixture(
       'string_length_$length',
-      's' * length,
+      _repeatAscii(length, 0x73),
       _messagePackStringBytes(length, 0x73),
     ),
   for (final length in <int>[255, 256, 65535, 65536])
@@ -155,6 +155,10 @@ Uint8List _bytes(String hex) {
     for (var offset = 0; offset < hex.length; offset += 2)
       int.parse(hex.substring(offset, offset + 2), radix: 16),
   ]);
+}
+
+String _repeatAscii(int length, int byte) {
+  return String.fromCharCodes(List<int>.filled(length, byte, growable: false));
 }
 
 List<int> _fixStringBytes(String value) {
