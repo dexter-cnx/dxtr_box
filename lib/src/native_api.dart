@@ -78,13 +78,10 @@ abstract interface class NativeIndexApi {
   Future<bool> dropIndex(String boxName, String name);
 }
 
-/// Optional maintenance capability for engines that can migrate plaintext
-/// storage into the encrypted dxtr_box format.
 abstract interface class NativeEncryptionMigrationApi {
   Future<void> encryptBox(String name, String encryptionKey);
 }
 
-/// Production adapter backed by generated flutter_rust_bridge bindings.
 final class FrbNativeBoxApi
     implements
         NativeBoxApi,
@@ -182,10 +179,11 @@ final class FrbNativeBoxApi
   @override
   Future<Uint8List?> get(String boxName, String key) {
     // BoxStore.init/openBox guarantee RustLib has completed initialization
-    // before point reads can be issued. Avoid adding an async state machine
-    // around the already-synchronous FRB get hot path.
-    return Future<Uint8List?>.value(
-      frb.get_(boxName: boxName, key: key),
+    // before point reads can be issued. Future.sync avoids an async state
+    // machine on successful reads while preserving Future error semantics
+    // when the synchronous FRB call throws.
+    return Future<Uint8List?>.sync(
+      () => frb.get_(boxName: boxName, key: key),
     );
   }
 
@@ -302,7 +300,6 @@ final class FrbNativeBoxApi
   }
 }
 
-/// Test/failure adapter retained so callers can explicitly disable native IO.
 final class UnavailableNativeBoxApi
     implements NativeBoxApi, NativeEncryptionMigrationApi {
   const UnavailableNativeBoxApi();
@@ -374,7 +371,6 @@ final class UnavailableNativeBoxApi
   Future<int> length(String boxName) async => _missing();
 }
 
-/// Legacy package-internal compatibility aliases. New code uses the Box names.
 @Deprecated('Use NativeBoxApi instead.')
 typedef NativeDxtrApi = NativeBoxApi;
 
