@@ -50,7 +50,8 @@ post-release handoff sync                                                 merged
 1.1 PR2 native concurrency + reopen evidence                             merged (#67)
 1.1 PR3 native-size / tree-shaking decision evidence                     merged (#68)
 1.1 PR4 Dart isolate / FRB concurrency evidence                          merged (#69)
-1.1 closure audit + docs + version 1.1.0                                 current
+1.1 closure audit + docs + version 1.1.0                                 merged (#70)
+1.2 planning baseline                                                    current
 ```
 
 See:
@@ -62,6 +63,7 @@ See:
 - `docs/NATIVE_SIZE_DECISION_11.md`
 - `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md`
 - `docs/RELEASE_AUDIT_110.md`
+- `docs/ROADMAP_12.md`
 
 ## Architecture
 
@@ -112,7 +114,7 @@ The stable line is guarded by executable evidence rather than documentation-only
 - package docs + pub dry-run;
 - benchmark correctness and diagnostic smoke.
 
-The durable format remains `dxtr_box/1`; 1.1 introduces no storage migration.
+The durable format remains `dxtr_box/1`; 1.1 introduced no storage migration.
 
 ## CI / local preflight
 
@@ -149,13 +151,13 @@ Do not turn post-1.1 maintenance into:
 - a fourth native profile;
 - broad Dart API redesign.
 
-## Next work after 1.1
+## Next active work: 1.2 evidence-driven planning
 
-Do not manufacture a 1.2 feature list merely to continue development. Start from an observed consumer, reliability, maintenance, or interoperability need and require executable evidence before changing runtime behavior.
+Do not manufacture a 1.2 feature list merely to continue development. `docs/ROADMAP_12.md` is the decision baseline: hosted 1.1.0 registry verification remains the first external release gate, while developer inspection tooling, migration/interoperability, recorded-use/native tree shaking, stronger isolate/watch/order semantics, and Web strategy remain conditional candidates.
+
+A candidate moves from investigation to implementation only when there is a concrete consumer/reliability/maintenance need, executable evidence, preserved compatibility, and a smaller/saner design than introducing parallel storage semantics.
 
 Registry publication remains an external release step and must not be inferred merely from repository version `1.1.0`. If/when the package is published, run the registry-resolved consumer verification against the actual hosted `1.1.0` package.
-
-Platform/dev tooling, migration/interoperability extensions, recorded-use/native tree shaking, stronger cross-isolate watch/order semantics, and Web strategy remain conditional decisions rather than committed scope.
 
 ## Compatibility rule
 
