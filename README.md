@@ -6,7 +6,7 @@
 
 `dxtr_box` is a Rust/redb-backed local database engine with a Flutter/Dart frontend and a first-class native Rust frontend. Both frontends share the same authoritative Rust storage/query core, `dxtr_box/1` durable format, ACID persistence, authenticated encryption, native queries, persisted indexes, and batch reads. No model code generation is required.
 
-> Status: **1.1.0 stable.** 1.1 is a compatibility-preserving post-1.0 evidence release: stronger native concurrency/reopen coverage, Dart isolate/FRB concurrency evidence, hosted-registry consumer verification infrastructure, and reproducible native-size decision evidence. The durable format remains `dxtr_box/1`; 1.1 introduces no storage migration or SDK-floor increase.
+> Status: **1.2.0 stable.** 1.2 adds a read-only Inspector CLI for existing `dxtr_box/1` databases, including deterministic text/JSON output, bounded key pagination, semantic BoxCodec-compatible record decoding, encrypted-record inspection through stdin-supplied key material, and raw persisted-byte inspection. The durable format, SDK floors, FRB/redb baselines, and three native profiles remain unchanged.
 
 ## Key features
 
@@ -19,6 +19,7 @@
 - Persisted plaintext equality/range indexes.
 - Encrypted equality indexes using domain-separated keyed BLAKE2b tokens under `full`.
 - Argon2 + ChaCha20Poly1305 authenticated encryption.
+- Read-only `dxtr-box-inspect` CLI for deterministic database inspection without a Flutter host.
 - Explicit plaintext-to-encrypted migration and optional Hive CE migration tooling.
 - Android, iOS, macOS, Linux, and Windows staged Flutter consumer validation.
 - Rust `rlib` consumer support with no Dart/FRB dependency direction.
@@ -29,7 +30,7 @@
 ## Compatibility
 
 ```text
-package version = 1.1.0
+package version = 1.2.0
 Dart >= 3.4.0 < 4.0.0
 Flutter >= 3.22.0
 flutter_rust_bridge = 2.8.0
@@ -91,6 +92,21 @@ assets.close()?;
 
 `DxtrBox`, `BoxHandle`, `Record`, `IndexDefinition`, and `DxtrBoxError` are native Rust-facing types. Query types are available under the `full` profile. The native frontend is synchronous today and does not impose a Tokio runtime.
 
+## Inspector CLI
+
+The Rust crate ships the read-only `dxtr-box-inspect` binary:
+
+```bash
+cargo install rust_lib_dxtr_box --version 1.2.0 --bin dxtr-box-inspect
+
+dxtr-box-inspect ./data boxes
+dxtr-box-inspect ./data keys settings --offset 0 --limit 100 --format json
+dxtr-box-inspect ./data get settings theme --format json
+printf %s 'secret' | dxtr-box-inspect ./data get secure token --key-stdin --format json
+```
+
+Semantic `get` is available in the default/full profile. `--raw` returns exact persisted record bytes: plaintext records contain persisted MessagePack, while encrypted records remain nonce + ChaCha20Poly1305 ciphertext/authentication data. Inspector operations use a temporary snapshot-copy seam so the original `.dxtr` file is not opened through the normal potentially mutating runtime open path.
+
 ## Fluent Dart queries
 
 ```dart
@@ -132,7 +148,7 @@ Exactly three Rust capability profiles are supported:
 | --- | --- | --- |
 | `minimal` | `--no-default-features` | CRUD + lifecycle + native watch |
 | `encryption` | `--no-default-features --features encryption` | minimal + encrypted create/open/read/write |
-| `full` | default | encryption + maintenance + query/index implementation |
+| `full` | default | encryption + maintenance + query/index implementation + semantic Inspector decode |
 
 Do not add a fourth profile merely for binary-size tuning.
 
@@ -149,7 +165,7 @@ FRB-adapter write -> close -> Rust-native read
 
 ## Concurrency evidence
 
-1.1 strengthens executable concurrency evidence at both frontend boundaries:
+1.1 strengthened executable concurrency evidence at both frontend boundaries:
 
 - Rust-native tests guarantee reader/writer overlap across independent handles and verify concurrent mutations remain durable after reopen.
 - Dart isolate tests require each isolate to initialize/open the same path independently, observe a committed peer write while both handles are active, close successfully, and only then allow the parent to reopen and verify all records.
@@ -225,6 +241,8 @@ bash tool/install_git_hooks.sh
 
 ## Documentation
 
+- `docs/INSPECTOR_CLI_12.md` — Inspector CLI command, output, encryption, pagination, and read-only contracts.
+- `docs/RELEASE_AUDIT_120.md` — 1.2 release boundary and publication checklist.
 - `docs/RELEASE_AUDIT_110.md` — 1.1 closure audit and compatibility boundary.
 - `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md` — Dart isolate / FRB evidence.
 - `docs/NATIVE_SIZE_DECISION_11.md` — native-size/tree-shaking decision evidence.
@@ -234,6 +252,6 @@ bash tool/install_git_hooks.sh
 - `docs/PROJECT_HANDOFF.md` — current project state and maintenance rules.
 - `docs/CODE_WALKTHROUGH.md` — current Dart/FRB/Rust execution paths.
 
-## Direction after 1.1
+## Direction after 1.2
 
-Treat public Dart semantics, Rust root API, package/native identities, native profiles, and `dxtr_box/1` as compatibility-sensitive contracts. Further runtime/tooling work should start from observed consumer or reliability needs with executable evidence. GPUI integration belongs in downstream consumer projects rather than the core package; speculative tree-shaking, Web support, migration extensions, or stronger cross-isolate semantics remain separate decisions rather than automatic scope.
+Treat public Dart semantics, Rust root API, package/native identities, native profiles, and `dxtr_box/1` as compatibility-sensitive contracts. Further runtime/tooling work should start from observed consumer or reliability needs with executable evidence. GPUI integration belongs in downstream consumer projects rather than the core package; speculative tree-shaking, Web support, migration extensions, stronger cross-isolate semantics, or Inspector mutation/TUI features remain separate decisions rather than automatic scope.
