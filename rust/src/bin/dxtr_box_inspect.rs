@@ -149,10 +149,7 @@ fn execute(command: Command, inspector: &Inspector) -> Result<(), (u8, String)> 
                 .get(&box_name, &key)
                 .map_err(map_inspector_error)?
             else {
-                return Err((
-                    4,
-                    format!("key '{key}' was not found in box '{box_name}'"),
-                ));
+                return Err((4, format!("key '{key}' was not found in box '{box_name}'")));
             };
             let hex = hex_encode(&record.value);
             if format == OutputFormat::Json {
@@ -169,9 +166,7 @@ fn execute(command: Command, inspector: &Inspector) -> Result<(), (u8, String)> 
         }
         Command::Indexes { box_name, format } => {
             require_box(inspector, &box_name)?;
-            let indexes = inspector
-                .indexes(&box_name)
-                .map_err(map_inspector_error)?;
+            let indexes = inspector.indexes(&box_name).map_err(map_inspector_error)?;
             if format == OutputFormat::Json {
                 let mut body = String::from("[");
                 for (position, index) in indexes.iter().enumerate() {
@@ -204,7 +199,10 @@ fn execute(command: Command, inspector: &Inspector) -> Result<(), (u8, String)> 
 }
 
 fn require_box(inspector: &Inspector, box_name: &str) -> Result<(), (u8, String)> {
-    if inspector.box_exists(box_name).map_err(map_inspector_error)? {
+    if inspector
+        .box_exists(box_name)
+        .map_err(map_inspector_error)?
+    {
         Ok(())
     } else {
         Err((4, format!("box '{box_name}' was not found")))
