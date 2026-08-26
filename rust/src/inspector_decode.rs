@@ -570,7 +570,7 @@ mod tests {
     fn malformed_messagepack_is_a_decode_failure() {
         let root = tempdir().expect("tempdir");
         let path = root.path().join("broken.dxtr");
-        create_plain_box(&path, "bad", &[0xc1]);
+        create_plain_box(&path, "bad", &[0xd9, 0x05, b'a']);
 
         let inspector = Inspector::open(root.path()).expect("inspector");
         assert!(matches!(
