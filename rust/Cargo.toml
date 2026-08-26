@@ -13,6 +13,10 @@ categories = ["database-implementations", "data-structures"]
 name = "rust_lib_dxtr_box"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
+[[bin]]
+name = "dxtr-box-inspect"
+path = "src/bin/dxtr_box_inspect.rs"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
 
