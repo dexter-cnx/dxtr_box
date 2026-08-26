@@ -15,6 +15,8 @@ mod index;
 #[cfg(feature = "full")]
 mod index_token;
 pub mod inspector;
+#[cfg(feature = "full")]
+pub mod inspector_decode;
 #[cfg(all(test, feature = "full"))]
 mod multi_frontend_bench;
 pub mod native;
