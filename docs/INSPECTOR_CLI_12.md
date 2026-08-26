@@ -59,7 +59,7 @@ The Inspector CLI must not expose any command that mutates user data in 1.2.
 
 Implementation must also avoid hidden mutations caused by inspection. Tests must prove that representative database files are byte-for-byte unchanged after inspection where the underlying storage engine permits stable byte comparison; otherwise tests must prove equivalent reopen-visible state and unchanged logical contents/metadata.
 
-The CLI must use the authoritative core/open path rather than directly decoding redb tables from a parallel implementation.
+The CLI must use the authoritative core/storage implementation rather than directly decoding redb tables from a parallel implementation. However, it must not call an ordinary open path that can initialize metadata, ensure tables, or otherwise commit writes as a side effect. The first PR that opens a database must therefore introduce or reuse a genuinely non-mutating inspection/open seam and must prove that invariant before any database-reading CLI command is accepted.
 
 ## Output and exit-code contract
 
@@ -91,12 +91,14 @@ Default and maximum limits will be pinned by tests once the core integration sha
 
 ## Delivery plan
 
-### PR1 — Contract + skeleton
+### PR1 — Contract + skeleton + read-only open seam
 
 - Pin command names and read-only contract.
 - Add CLI crate/bin structure using the existing Rust workspace/package topology.
 - Add `--help` and `--version`.
-- Implement database open and `boxes` if the authoritative core exposes the required enumeration cleanly; otherwise add the smallest core read-only inspection seam needed.
+- Before implementing any command that opens a database, add or reuse the smallest authoritative core inspection seam that is provably non-mutating; ordinary open paths with metadata/table initialization side effects are not acceptable for the Inspector CLI.
+- Implement `boxes` only through that non-mutating seam.
+- Add read-only invariant tests in this PR, covering the initial open/`boxes` path and proving unchanged files where stable byte comparison is valid, otherwise unchanged reopen-visible logical data and metadata.
 - Add smoke tests and CI wiring.
 
 ### PR2 — Record/index inspection
@@ -104,6 +106,7 @@ Default and maximum limits will be pinned by tests once the core integration sha
 - `keys` with deterministic pagination.
 - `get` by key.
 - `indexes` metadata.
+- Extend the PR1 read-only invariant tests to every new inspection command.
 - Text and JSON output contracts.
 - Stable not-found behavior and exit codes.
 
@@ -111,7 +114,7 @@ Default and maximum limits will be pinned by tests once the core integration sha
 
 - Encrypted database/key handling.
 - Large-box and malformed/corrupt input behavior.
-- Read-only invariant tests.
+- Extend read-only invariant coverage to encrypted, large-box, and failure paths.
 - Performance/regression evidence.
 - Cross-platform CLI build coverage where supported by the package topology.
 
@@ -133,7 +136,7 @@ The milestone does not weaken existing gates. New CLI work must additionally pas
 - Rust unit/integration tests;
 - CLI help/version smoke tests;
 - deterministic text/JSON golden or contract tests;
-- read-only invariant tests;
+- read-only invariant tests beginning in PR1 before the first database open path is accepted and extended with each later inspection command;
 - existing cross-frontend compatibility tests;
 - existing durable-format/API guards;
 - existing Flutter/Dart validation.
