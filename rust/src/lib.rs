@@ -14,6 +14,7 @@ mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. */
 mod index;
 #[cfg(feature = "full")]
 mod index_token;
+pub mod inspector;
 #[cfg(all(test, feature = "full"))]
 mod multi_frontend_bench;
 pub mod native;
