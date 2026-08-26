@@ -1,7 +1,9 @@
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use redb::{ReadOnlyDatabase, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Database, ReadableTable, TableDefinition};
 
 use crate::{db::DATA, DxtrBoxError};
 
@@ -10,6 +12,8 @@ const INDEX_DEFINITIONS: TableDefinition<&str, &str> = TableDefinition::new("ind
 
 /// Maximum number of keys returned by one bounded inspector request.
 pub const MAX_KEY_PAGE_SIZE: usize = 1000;
+
+static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Raw record returned by the read-only inspector.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +104,11 @@ impl Inspector {
         Ok(boxes)
     }
 
+    /// Returns whether the named box exists in this inspector directory.
+    pub fn box_exists(&self, box_name: &str) -> Result<bool, DxtrBoxError> {
+        Ok(self.boxes()?.iter().any(|name| name == box_name))
+    }
+
     /// Returns a deterministic bounded page of record keys.
     pub fn keys(
         &self,
@@ -113,8 +122,9 @@ impl Inspector {
             )));
         }
 
-        let db = self.open_box_read_only(box_name)?;
-        let read = db
+        let snapshot = self.open_box_snapshot(box_name)?;
+        let read = snapshot
+            .database()
             .begin_read()
             .map_err(|error| DxtrBoxError::engine(format!("begin inspector read: {error}")))?;
         let table = read
@@ -133,13 +143,10 @@ impl Inspector {
     }
 
     /// Reads one raw persisted record without mutating the database.
-    pub fn get(
-        &self,
-        box_name: &str,
-        key: &str,
-    ) -> Result<Option<InspectorRecord>, DxtrBoxError> {
-        let db = self.open_box_read_only(box_name)?;
-        let read = db
+    pub fn get(&self, box_name: &str, key: &str) -> Result<Option<InspectorRecord>, DxtrBoxError> {
+        let snapshot = self.open_box_snapshot(box_name)?;
+        let read = snapshot
+            .database()
             .begin_read()
             .map_err(|error| DxtrBoxError::engine(format!("begin inspector read: {error}")))?;
         let table = read
@@ -157,13 +164,20 @@ impl Inspector {
     /// Lists persisted index definitions in deterministic name order.
     #[cfg(feature = "full")]
     pub fn indexes(&self, box_name: &str) -> Result<Vec<InspectorIndex>, DxtrBoxError> {
-        let db = self.open_box_read_only(box_name)?;
-        let read = db
+        let snapshot = self.open_box_snapshot(box_name)?;
+        let read = snapshot
+            .database()
             .begin_read()
             .map_err(|error| DxtrBoxError::engine(format!("begin inspector read: {error}")))?;
-        let table = read.open_table(INDEX_DEFINITIONS).map_err(|error| {
-            DxtrBoxError::engine(format!("open index definitions table: {error}"))
-        })?;
+        let table = match read.open_table(INDEX_DEFINITIONS) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(DxtrBoxError::engine(format!(
+                    "open index definitions table: {error}"
+                )))
+            }
+        };
         let mut indexes = table
             .iter()
             .map_err(|error| DxtrBoxError::engine(format!("iterate index definitions: {error}")))?
@@ -188,17 +202,83 @@ impl Inspector {
         ))
     }
 
-    fn open_box_read_only(&self, box_name: &str) -> Result<ReadOnlyDatabase, DxtrBoxError> {
-        if !self.boxes()?.iter().any(|name| name == box_name) {
+    fn open_box_snapshot(&self, box_name: &str) -> Result<InspectorSnapshot, DxtrBoxError> {
+        if !self.box_exists(box_name)? {
             return Err(DxtrBoxError::invalid_input(format!(
                 "box '{box_name}' was not found"
             )));
         }
-        let path = self.base_path.join(format!("{box_name}.dxtr"));
-        ReadOnlyDatabase::open(&path).map_err(|error| {
-            DxtrBoxError::invalid_input(format!("open box {:?} read-only: {error}", path))
-        })
+
+        let source = self.base_path.join(format!("{box_name}.dxtr"));
+        let snapshot_path = create_snapshot_copy(&source)?;
+        match Database::open(&snapshot_path) {
+            Ok(database) => Ok(InspectorSnapshot {
+                database: Some(database),
+                path: snapshot_path,
+            }),
+            Err(error) => {
+                let _ = fs::remove_file(&snapshot_path);
+                Err(DxtrBoxError::invalid_input(format!(
+                    "open box {:?} inspection snapshot: {error}",
+                    source
+                )))
+            }
+        }
     }
+}
+
+struct InspectorSnapshot {
+    database: Option<Database>,
+    path: PathBuf,
+}
+
+impl InspectorSnapshot {
+    fn database(&self) -> &Database {
+        self.database.as_ref().expect("snapshot database is open")
+    }
+}
+
+impl Drop for InspectorSnapshot {
+    fn drop(&mut self) {
+        self.database.take();
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn create_snapshot_copy(source: &Path) -> Result<PathBuf, DxtrBoxError> {
+    let mut source_file = File::open(source).map_err(|error| {
+        DxtrBoxError::invalid_input(format!("open box {:?} for inspection: {error}", source))
+    })?;
+
+    for _ in 0..16 {
+        let nonce = SNAPSHOT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "dxtr-box-inspect-{}-{nonce}.dxtr",
+            std::process::id()
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut snapshot_file) => {
+                if let Err(error) = io::copy(&mut source_file, &mut snapshot_file) {
+                    let _ = fs::remove_file(&path);
+                    return Err(DxtrBoxError::engine(format!(
+                        "copy box {:?} into inspection snapshot: {error}",
+                        source
+                    )));
+                }
+                return Ok(path);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(DxtrBoxError::engine(format!(
+                    "create inspection snapshot: {error}"
+                )))
+            }
+        }
+    }
+
+    Err(DxtrBoxError::engine(
+        "could not allocate a unique inspection snapshot",
+    ))
 }
 
 #[cfg(test)]
@@ -243,15 +323,19 @@ mod tests {
     }
 
     #[test]
-    fn keys_and_get_use_read_only_database_without_changing_bytes() {
+    fn keys_and_get_use_snapshot_without_changing_source_bytes() {
         let root = tempdir().expect("tempdir");
         let path = root.path().join("records.dxtr");
         let db = Database::create(&path).expect("create database");
         let write = db.begin_write().expect("begin write");
         {
             let mut table = write.open_table(DATA).expect("open data");
-            table.insert("alpha", b"one".as_slice()).expect("insert alpha");
-            table.insert("zebra", b"two".as_slice()).expect("insert zebra");
+            table
+                .insert("alpha", b"one".as_slice())
+                .expect("insert alpha");
+            table
+                .insert("zebra", b"two".as_slice())
+                .expect("insert zebra");
         }
         write.commit().expect("commit");
         drop(db);
@@ -268,5 +352,22 @@ mod tests {
             .expect("record");
         assert_eq!(record.value, b"two");
         assert_eq!(fs::read(&path).expect("read after"), before);
+    }
+
+    #[cfg(feature = "full")]
+    #[test]
+    fn indexes_are_empty_when_index_table_has_not_been_created() {
+        let root = tempdir().expect("tempdir");
+        let path = root.path().join("records.dxtr");
+        let db = Database::create(&path).expect("create database");
+        let write = db.begin_write().expect("begin write");
+        {
+            write.open_table(DATA).expect("open data");
+        }
+        write.commit().expect("commit");
+        drop(db);
+
+        let inspector = Inspector::open(root.path()).expect("open inspector");
+        assert!(inspector.indexes("records").expect("indexes").is_empty());
     }
 }
