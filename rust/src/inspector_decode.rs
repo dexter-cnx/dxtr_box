@@ -3,7 +3,7 @@ use std::io::{self, Cursor};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, TableDefinition};
 use rmpv::Value as MessagePackValue;
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
@@ -21,14 +21,12 @@ const KEY_CHECK_PLAINTEXT: &[u8] = b"dxtr_box:key-check:v1";
 
 static SNAPSHOT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// A semantically decoded Inspector record rendered as deterministic JSON.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedInspectorRecord {
     pub key: String,
     pub value_json: String,
 }
 
-/// Stable failure classes for semantic Inspector decoding.
 #[derive(Debug, thiserror::Error)]
 pub enum InspectorDecodeError {
     #[error("{0}")]
@@ -41,11 +39,6 @@ pub enum InspectorDecodeError {
     Unsupported(String),
 }
 
-/// Decode a record from one coherent read-only snapshot.
-///
-/// `password` is supplied by the caller from a non-argv secret channel such
-/// as stdin. The original database file is never opened by redb and is never
-/// modified by this operation.
 pub fn decode_record(
     inspector: &Inspector,
     box_name: &str,
@@ -188,9 +181,12 @@ fn decode_tagged_bytes(payload: &MessagePackValue) -> Result<JsonValue, Inspecto
         MessagePackValue::Array(values) => values
             .iter()
             .map(|value| {
-                value.as_u64().and_then(|value| u8::try_from(value).ok()).ok_or_else(|| {
-                    InspectorDecodeError::Decode("invalid @dxtr:bytes payload".to_owned())
-                })
+                value
+                    .as_u64()
+                    .and_then(|value| u8::try_from(value).ok())
+                    .ok_or_else(|| {
+                        InspectorDecodeError::Decode("invalid @dxtr:bytes payload".to_owned())
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?,
         _ => {
@@ -451,10 +447,7 @@ mod tests {
         let wire = MessagePackValue::Array(vec![
             MessagePackValue::from("@dxtr:map"),
             MessagePackValue::Array(vec![
-                MessagePackValue::Array(vec![
-                    MessagePackValue::from("id"),
-                    MessagePackValue::from(7),
-                ]),
+                MessagePackValue::Array(vec![MessagePackValue::from("id"), MessagePackValue::from(7)]),
                 MessagePackValue::Array(vec![
                     MessagePackValue::from("items"),
                     MessagePackValue::Array(vec![
@@ -512,10 +505,8 @@ mod tests {
                 .expect("format version");
             meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_CHACHA20POLY1305)
                 .expect("mode");
-            meta.insert(META_ENCRYPTION_SALT, salt.as_slice())
-                .expect("salt");
-            meta.insert(META_KEY_CHECK, key_check.as_slice())
-                .expect("key check");
+            meta.insert(META_ENCRYPTION_SALT, salt.as_slice()).expect("salt");
+            meta.insert(META_KEY_CHECK, key_check.as_slice()).expect("key check");
         }
         write.commit().expect("commit");
         drop(database);
@@ -552,10 +543,8 @@ mod tests {
                 .expect("format version");
             meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_CHACHA20POLY1305)
                 .expect("mode");
-            meta.insert(META_ENCRYPTION_SALT, salt.as_slice())
-                .expect("salt");
-            meta.insert(META_KEY_CHECK, key_check.as_slice())
-                .expect("key check");
+            meta.insert(META_ENCRYPTION_SALT, salt.as_slice()).expect("salt");
+            meta.insert(META_KEY_CHECK, key_check.as_slice()).expect("key check");
         }
         write.commit().expect("commit");
         drop(database);
