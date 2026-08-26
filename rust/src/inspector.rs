@@ -3,7 +3,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableTable};
+#[cfg(feature = "full")]
+use redb::TableDefinition;
 
 use crate::{db::DATA, DxtrBoxError};
 
