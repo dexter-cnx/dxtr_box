@@ -35,7 +35,7 @@ dxtr-box-inspect ./data get settings theme --format json
 printf %s 'secret' | dxtr-box-inspect ./data get secure token --key-stdin --format json
 ```
 
-`get` performs semantic BoxCodec-compatible decoding in the default/full profile. Use `--raw` when persisted MessagePack bytes are required. `--key-stdin` consumes exact UTF-8 input; trailing newlines are significant.
+`get` performs semantic BoxCodec-compatible decoding in the default/full profile. `--raw` bypasses decoding and returns exact persisted record bytes: plaintext records contain persisted MessagePack, while encrypted records remain nonce + ChaCha20Poly1305 ciphertext/authentication data. `--key-stdin` consumes exact UTF-8 input; trailing newlines are significant.
 
 ## Compatibility
 
