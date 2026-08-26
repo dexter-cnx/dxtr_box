@@ -2,7 +2,10 @@ use std::env;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-use rust_lib_dxtr_box::{inspector::Inspector, DxtrBoxError};
+use rust_lib_dxtr_box::{
+    inspector::{Inspector, MAX_KEY_PAGE_SIZE},
+    DxtrBoxError,
+};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: usize = 100;
@@ -12,6 +15,25 @@ const HELP: &str = "Dxtr_Box read-only inspector\n\nUsage:\n  dxtr-box-inspect -
 enum OutputFormat {
     Text,
     Json,
+}
+
+enum Command {
+    Boxes {
+        format: OutputFormat,
+    },
+    Keys {
+        box_name: String,
+        options: KeyOptions,
+    },
+    Get {
+        box_name: String,
+        key: String,
+        format: OutputFormat,
+    },
+    Indexes {
+        box_name: String,
+        format: OutputFormat,
+    },
 }
 
 fn main() -> ExitCode {
@@ -39,13 +61,59 @@ fn run(args: Vec<String>) -> Result<(), (u8, String)> {
     if args.len() < 2 {
         return Err((2, HELP.to_owned()));
     }
-    let path = &args[0];
-    let command = &args[1];
-    let inspector = Inspector::open(path).map_err(map_inspector_error)?;
 
+    let path = &args[0];
+    let command = parse_command(&args[1..])?;
+    let inspector = Inspector::open(path).map_err(map_inspector_error)?;
+    execute(command, &inspector)
+}
+
+fn parse_command(args: &[String]) -> Result<Command, (u8, String)> {
+    let Some(command) = args.first() else {
+        return Err((2, HELP.to_owned()));
+    };
     match command.as_str() {
-        "boxes" => {
-            let format = parse_format(&args[2..])?;
+        "boxes" => Ok(Command::Boxes {
+            format: parse_format(&args[1..])?,
+        }),
+        "keys" => {
+            let box_name = args
+                .get(1)
+                .ok_or_else(|| (2, "keys requires <box>".to_owned()))?;
+            Ok(Command::Keys {
+                box_name: box_name.clone(),
+                options: parse_key_options(&args[2..])?,
+            })
+        }
+        "get" => {
+            let box_name = args
+                .get(1)
+                .ok_or_else(|| (2, "get requires <box> <key>".to_owned()))?;
+            let key = args
+                .get(2)
+                .ok_or_else(|| (2, "get requires <box> <key>".to_owned()))?;
+            Ok(Command::Get {
+                box_name: box_name.clone(),
+                key: key.clone(),
+                format: parse_format(&args[3..])?,
+            })
+        }
+        "indexes" => {
+            let box_name = args
+                .get(1)
+                .ok_or_else(|| (2, "indexes requires <box>".to_owned()))?;
+            Ok(Command::Indexes {
+                box_name: box_name.clone(),
+                format: parse_format(&args[2..])?,
+            })
+        }
+        _ => Err((2, format!("unknown command '{command}'\n\n{HELP}"))),
+    }
+}
+
+fn execute(command: Command, inspector: &Inspector) -> Result<(), (u8, String)> {
+    match command {
+        Command::Boxes { format } => {
             let boxes = inspector.boxes().map_err(map_inspector_error)?;
             if format == OutputFormat::Json {
                 write_stdout(format!("{{\"boxes\":{}}}\n", json_string_array(&boxes)).as_bytes())
@@ -53,19 +121,15 @@ fn run(args: Vec<String>) -> Result<(), (u8, String)> {
                 write_lines(boxes.iter().map(String::as_str))
             }
         }
-        "keys" => {
-            if args.len() < 3 {
-                return Err((2, "keys requires <box>".to_owned()));
-            }
-            let box_name = &args[2];
-            let options = parse_key_options(&args[3..])?;
+        Command::Keys { box_name, options } => {
+            require_box(inspector, &box_name)?;
             let keys = inspector
-                .keys(box_name, options.offset, options.limit)
+                .keys(&box_name, options.offset, options.limit)
                 .map_err(map_inspector_error)?;
             if options.format == OutputFormat::Json {
                 let output = format!(
                     "{{\"box\":{},\"offset\":{},\"limit\":{},\"keys\":{}}}\n",
-                    json_string(box_name),
+                    json_string(&box_name),
                     options.offset,
                     options.limit,
                     json_string_array(&keys)
@@ -75,21 +139,26 @@ fn run(args: Vec<String>) -> Result<(), (u8, String)> {
                 write_lines(keys.iter().map(String::as_str))
             }
         }
-        "get" => {
-            if args.len() < 4 {
-                return Err((2, "get requires <box> <key>".to_owned()));
-            }
-            let box_name = &args[2];
-            let key = &args[3];
-            let format = parse_format(&args[4..])?;
-            let Some(record) = inspector.get(box_name, key).map_err(map_inspector_error)? else {
-                return Err((4, format!("key '{key}' was not found in box '{box_name}'")));
+        Command::Get {
+            box_name,
+            key,
+            format,
+        } => {
+            require_box(inspector, &box_name)?;
+            let Some(record) = inspector
+                .get(&box_name, &key)
+                .map_err(map_inspector_error)?
+            else {
+                return Err((
+                    4,
+                    format!("key '{key}' was not found in box '{box_name}'"),
+                ));
             };
             let hex = hex_encode(&record.value);
             if format == OutputFormat::Json {
                 let output = format!(
                     "{{\"box\":{},\"key\":{},\"encoding\":\"messagepack-raw-hex\",\"value\":{}}}\n",
-                    json_string(box_name),
+                    json_string(&box_name),
                     json_string(&record.key),
                     json_string(&hex)
                 );
@@ -98,13 +167,11 @@ fn run(args: Vec<String>) -> Result<(), (u8, String)> {
                 write_stdout(format!("{}\t{hex}\n", record.key).as_bytes())
             }
         }
-        "indexes" => {
-            if args.len() < 3 {
-                return Err((2, "indexes requires <box>".to_owned()));
-            }
-            let box_name = &args[2];
-            let format = parse_format(&args[3..])?;
-            let indexes = inspector.indexes(box_name).map_err(map_inspector_error)?;
+        Command::Indexes { box_name, format } => {
+            require_box(inspector, &box_name)?;
+            let indexes = inspector
+                .indexes(&box_name)
+                .map_err(map_inspector_error)?;
             if format == OutputFormat::Json {
                 let mut body = String::from("[");
                 for (position, index) in indexes.iter().enumerate() {
@@ -119,8 +186,11 @@ fn run(args: Vec<String>) -> Result<(), (u8, String)> {
                 }
                 body.push(']');
                 write_stdout(
-                    format!("{{\"box\":{},\"indexes\":{body}}}\n", json_string(box_name))
-                        .as_bytes(),
+                    format!(
+                        "{{\"box\":{},\"indexes\":{body}}}\n",
+                        json_string(&box_name)
+                    )
+                    .as_bytes(),
                 )
             } else {
                 let lines = indexes
@@ -130,7 +200,14 @@ fn run(args: Vec<String>) -> Result<(), (u8, String)> {
                 write_lines(lines.iter().map(String::as_str))
             }
         }
-        _ => Err((2, format!("unknown command '{command}'\n\n{HELP}"))),
+    }
+}
+
+fn require_box(inspector: &Inspector, box_name: &str) -> Result<(), (u8, String)> {
+    if inspector.box_exists(box_name).map_err(map_inspector_error)? {
+        Ok(())
+    } else {
+        Err((4, format!("box '{box_name}' was not found")))
     }
 }
 
@@ -153,6 +230,12 @@ fn parse_key_options(args: &[String]) -> Result<KeyOptions, (u8, String)> {
             }
             "--limit" => {
                 limit = parse_usize_option(args, position, "--limit")?;
+                if limit == 0 || limit > MAX_KEY_PAGE_SIZE {
+                    return Err((
+                        2,
+                        format!("--limit must be between 1 and {MAX_KEY_PAGE_SIZE}"),
+                    ));
+                }
                 position += 2;
             }
             "--format" => {
