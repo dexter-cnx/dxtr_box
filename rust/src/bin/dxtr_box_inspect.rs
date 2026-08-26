@@ -2,16 +2,16 @@ use std::env;
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
+#[cfg(feature = "full")]
+use rust_lib_dxtr_box::inspector_decode::{decode_record, InspectorDecodeError};
 use rust_lib_dxtr_box::{
     inspector::{Inspector, MAX_KEY_PAGE_SIZE},
     DxtrBoxError,
 };
-#[cfg(feature = "full")]
-use rust_lib_dxtr_box::inspector_decode::{decode_record, InspectorDecodeError};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: usize = 100;
-const HELP: &str = "Dxtr_Box read-only inspector\n\nUsage:\n  dxtr-box-inspect --help\n  dxtr-box-inspect --version\n  dxtr-box-inspect <path> boxes [--format text|json]\n  dxtr-box-inspect <path> keys <box> [--offset N] [--limit N] [--format text|json]\n  dxtr-box-inspect <path> get <box> <key> [--raw] [--key-stdin] [--format text|json]\n  dxtr-box-inspect <path> indexes <box> [--format text|json]\n\nCommands:\n  boxes      List discovered .dxtr boxes in deterministic order\n  keys       List a bounded deterministic page of record keys\n  get        Decode one record; use --raw for persisted MessagePack bytes\n  indexes    List persisted index definitions\n\nSecrets:\n  --key-stdin reads encrypted-box key material from stdin and never accepts the raw secret in argv\n";
+const HELP: &str = "Dxtr_Box read-only inspector\n\nUsage:\n  dxtr-box-inspect --help\n  dxtr-box-inspect --version\n  dxtr-box-inspect <path> boxes [--format text|json]\n  dxtr-box-inspect <path> keys <box> [--offset N] [--limit N] [--format text|json]\n  dxtr-box-inspect <path> get <box> <key> [--raw] [--key-stdin] [--format text|json]\n  dxtr-box-inspect <path> indexes <box> [--format text|json]\n\nCommands:\n  boxes      List discovered .dxtr boxes in deterministic order\n  keys       List a bounded deterministic page of record keys\n  get        Decode one record; use --raw for persisted MessagePack bytes\n  indexes    List persisted index definitions\n\nSecrets:\n  --key-stdin reads the exact UTF-8 key material from stdin and never accepts the raw secret in argv\n  Use printf rather than echo when the key must not include a trailing newline\n";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -366,9 +366,6 @@ fn read_key_stdin() -> Result<String, (u8, String)> {
     io::stdin()
         .read_to_string(&mut value)
         .map_err(|error| (5, format!("read encryption key from stdin: {error}")))?;
-    while value.ends_with('\n') || value.ends_with('\r') {
-        value.pop();
-    }
     if value.is_empty() {
         return Err((5, "encryption key from stdin cannot be empty".to_owned()));
     }
