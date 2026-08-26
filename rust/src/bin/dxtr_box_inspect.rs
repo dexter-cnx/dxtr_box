@@ -226,7 +226,7 @@ fn execute_get(
             );
             return write_stdout(output.as_bytes());
         }
-        return write_stdout(format!("{}\t{}\n", record.key, record.value_json).as_bytes());
+        write_stdout(format!("{}\t{}\n", record.key, record.value_json).as_bytes())
     }
 
     #[cfg(not(feature = "full"))]
