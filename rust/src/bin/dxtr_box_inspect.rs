@@ -1,5 +1,7 @@
 use std::env;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
+#[cfg(feature = "full")]
+use std::io::Read;
 use std::process::ExitCode;
 
 #[cfg(feature = "full")]
@@ -231,6 +233,7 @@ fn execute_get(
 
     #[cfg(not(feature = "full"))]
     {
+        let _ = options.key_stdin;
         let _ = (inspector, box_name, key, options);
         Err((
             6,
@@ -361,6 +364,7 @@ fn parse_usize_option(args: &[String], position: usize, name: &str) -> Result<us
         .map_err(|_| (2, format!("{name} must be a non-negative integer")))
 }
 
+#[cfg(feature = "full")]
 fn read_key_stdin() -> Result<String, (u8, String)> {
     let mut value = String::new();
     io::stdin()
