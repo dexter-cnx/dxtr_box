@@ -197,13 +197,21 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Docs-only mandatory gate
         if: ${{ needs.change-detection.outputs.docs_only == 'true' }}
         shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          git diff --check HEAD^ HEAD
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --check "$PR_BASE_SHA" "$CURRENT_SHA"
+          else
+            git diff --check "$PUSH_BEFORE_SHA" "$CURRENT_SHA"
+          fi
       - uses: subosito/flutter-action@v2
         if: ${{ needs.change-detection.outputs.docs_only != 'true' }}
         with:
