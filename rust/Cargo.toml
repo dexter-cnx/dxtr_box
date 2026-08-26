@@ -1,6 +1,6 @@
 [package]
 name = "rust_lib_dxtr_box"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 description = "Rust-native frontend and shared storage engine for dxtr_box, backed by redb."
 license-file = "../LICENSE"
