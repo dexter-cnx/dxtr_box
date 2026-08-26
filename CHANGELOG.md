@@ -1,3 +1,14 @@
+## 1.2.0
+
+- Added the read-only `dxtr-box-inspect` CLI for existing `dxtr_box/1` databases, with deterministic text/JSON output, box listing, bounded key pagination, record inspection, and persisted index metadata.
+- Added semantic BoxCodec-compatible MessagePack decoding in the default/full Rust profile, including `@dxtr:map`, `@dxtr:list`, `@dxtr:bytes`, and `@dxtr:datetime` values.
+- Added encrypted record inspection using the existing Argon2 + ChaCha20Poly1305 core path and exact UTF-8 key material supplied only through `--key-stdin`; raw secrets are not accepted in argv.
+- Added `--raw` persisted-byte inspection. Plaintext records expose persisted MessagePack bytes, while encrypted records remain nonce + ChaCha20Poly1305 ciphertext/authentication data.
+- Added a non-mutating snapshot-copy inspection seam because redb 2.1.0 does not expose a suitable read-only database-open API; tests preserve source database bytes across representative plaintext and encrypted inspection paths.
+- Added stable Inspector exit-code classes for success, usage errors, path/open failures, missing box/key, decode/authentication failures, unsupported capabilities/profiles/formats, and unexpected internal failures.
+- Packaged the `dxtr-box-inspect` binary with `rust_lib_dxtr_box` and documented repository/crates.io installation paths.
+- Kept Dart >=3.4, Flutter >=3.22, flutter_rust_bridge 2.8.0, redb 2.1.0, exactly `minimal | encryption | full`, and durable format `dxtr_box/1` unchanged. No storage migration, TUI/editor, mutation command, SDK-floor increase, GPUI/Tokio dependency, ORM/codegen layer, sync layer, or fourth native profile was added.
+
 ## 1.1.0
 
 - Added hosted-registry external-consumer verification infrastructure so post-release validation can resolve an actual published package rather than only a staged repository payload.
