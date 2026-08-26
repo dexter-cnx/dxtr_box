@@ -101,7 +101,9 @@ fn decode_dxtr_wire_value(value: MessagePackValue) -> Result<JsonValue, Inspecto
         MessagePackValue::String(value) => value
             .as_str()
             .map(|value| JsonValue::String(value.to_owned()))
-            .ok_or_else(|| InspectorDecodeError::Decode("MessagePack string is not UTF-8".to_owned())),
+            .ok_or_else(|| {
+                InspectorDecodeError::Decode("MessagePack string is not UTF-8".to_owned())
+            }),
         MessagePackValue::Binary(bytes) => Ok(json!({
             "$dxtrType": "bytes",
             "data": bytes,
@@ -141,14 +143,14 @@ fn decode_dxtr_array(values: Vec<MessagePackValue>) -> Result<JsonValue, Inspect
 }
 
 fn decode_tagged_map(payload: &MessagePackValue) -> Result<JsonValue, InspectorDecodeError> {
-    let pairs = payload.as_array().ok_or_else(|| {
-        InspectorDecodeError::Decode("invalid @dxtr:map payload".to_owned())
-    })?;
+    let pairs = payload
+        .as_array()
+        .ok_or_else(|| InspectorDecodeError::Decode("invalid @dxtr:map payload".to_owned()))?;
     let mut map = JsonMap::new();
     for pair in pairs {
-        let pair = pair.as_array().ok_or_else(|| {
-            InspectorDecodeError::Decode("invalid @dxtr:map entry".to_owned())
-        })?;
+        let pair = pair
+            .as_array()
+            .ok_or_else(|| InspectorDecodeError::Decode("invalid @dxtr:map entry".to_owned()))?;
         if pair.len() != 2 {
             return Err(InspectorDecodeError::Decode(
                 "invalid @dxtr:map entry length".to_owned(),
@@ -163,9 +165,9 @@ fn decode_tagged_map(payload: &MessagePackValue) -> Result<JsonValue, InspectorD
 }
 
 fn decode_tagged_list(payload: &MessagePackValue) -> Result<JsonValue, InspectorDecodeError> {
-    let values = payload.as_array().ok_or_else(|| {
-        InspectorDecodeError::Decode("invalid @dxtr:list payload".to_owned())
-    })?;
+    let values = payload
+        .as_array()
+        .ok_or_else(|| InspectorDecodeError::Decode("invalid @dxtr:list payload".to_owned()))?;
     Ok(JsonValue::Array(
         values
             .iter()
@@ -202,9 +204,9 @@ fn decode_tagged_bytes(payload: &MessagePackValue) -> Result<JsonValue, Inspecto
 }
 
 fn decode_tagged_datetime(payload: &MessagePackValue) -> Result<JsonValue, InspectorDecodeError> {
-    let micros = payload.as_i64().ok_or_else(|| {
-        InspectorDecodeError::Decode("invalid @dxtr:datetime payload".to_owned())
-    })?;
+    let micros = payload
+        .as_i64()
+        .ok_or_else(|| InspectorDecodeError::Decode("invalid @dxtr:datetime payload".to_owned()))?;
     Ok(json!({
         "$dxtrType": "datetime",
         "microsecondsSinceEpoch": micros,
@@ -447,7 +449,10 @@ mod tests {
         let wire = MessagePackValue::Array(vec![
             MessagePackValue::from("@dxtr:map"),
             MessagePackValue::Array(vec![
-                MessagePackValue::Array(vec![MessagePackValue::from("id"), MessagePackValue::from(7)]),
+                MessagePackValue::Array(vec![
+                    MessagePackValue::from("id"),
+                    MessagePackValue::from(7),
+                ]),
                 MessagePackValue::Array(vec![
                     MessagePackValue::from("items"),
                     MessagePackValue::Array(vec![
@@ -505,8 +510,10 @@ mod tests {
                 .expect("format version");
             meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_CHACHA20POLY1305)
                 .expect("mode");
-            meta.insert(META_ENCRYPTION_SALT, salt.as_slice()).expect("salt");
-            meta.insert(META_KEY_CHECK, key_check.as_slice()).expect("key check");
+            meta.insert(META_ENCRYPTION_SALT, salt.as_slice())
+                .expect("salt");
+            meta.insert(META_KEY_CHECK, key_check.as_slice())
+                .expect("key check");
         }
         write.commit().expect("commit");
         drop(database);
@@ -543,16 +550,20 @@ mod tests {
                 .expect("format version");
             meta.insert(META_ENCRYPTION_MODE, ENCRYPTION_CHACHA20POLY1305)
                 .expect("mode");
-            meta.insert(META_ENCRYPTION_SALT, salt.as_slice()).expect("salt");
-            meta.insert(META_KEY_CHECK, key_check.as_slice()).expect("key check");
+            meta.insert(META_ENCRYPTION_SALT, salt.as_slice())
+                .expect("salt");
+            meta.insert(META_KEY_CHECK, key_check.as_slice())
+                .expect("key check");
         }
         write.commit().expect("commit");
         drop(database);
 
         let inspector = Inspector::open(root.path()).expect("inspector");
-        assert!(decode_record(&inspector, "secure", "alpha", Some("secret\n"))
-            .expect("decode")
-            .is_some());
+        assert!(
+            decode_record(&inspector, "secure", "alpha", Some("secret\n"))
+                .expect("decode")
+                .is_some()
+        );
     }
 
     #[test]
