@@ -1,7 +1,7 @@
 use std::env;
-use std::io::{self, Write};
 #[cfg(feature = "full")]
 use std::io::Read;
+use std::io::{self, Write};
 use std::process::ExitCode;
 
 #[cfg(feature = "full")]
