@@ -47,3 +47,89 @@ jobs:
           name: registry-consumer-${{ matrix.platform }}-${{ inputs.version }}
           path: build/registry-evidence/${{ matrix.platform }}.json
           if-no-files-found: error
+
+  rust-registry-consumer:
+    name: Registry consumer / rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DXTR_BOX_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Create fresh crates.io consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$DXTR_BOX_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Unsupported version format: $DXTR_BOX_VERSION" >&2
+            exit 1
+          fi
+
+          mkdir -p build/rust-registry-consumer/src build/registry-evidence
+          cat > build/rust-registry-consumer/Cargo.toml <<EOF
+          [package]
+          name = "dxtr_box_registry_consumer"
+          version = "0.0.0"
+          edition = "2021"
+          publish = false
+
+          [dependencies]
+          rust_lib_dxtr_box = "=$DXTR_BOX_VERSION"
+          EOF
+
+          cat > build/rust-registry-consumer/src/main.rs <<'EOF'
+          use rust_lib_dxtr_box::DxtrBox;
+
+          fn main() -> Result<(), Box<dyn std::error::Error>> {
+              let path = std::env::temp_dir().join(format!(
+                  "dxtr_box_registry_consumer_{}_{}.dxtr",
+                  std::process::id(),
+                  std::thread::current().name().unwrap_or("main")
+              ));
+
+              let db = DxtrBox::open(&path)?;
+              let box_handle = db.box_("registry_smoke")?;
+              box_handle.put("key", b"hosted-crate".to_vec())?;
+              assert_eq!(box_handle.get("key")?, Some(b"hosted-crate".to_vec()));
+              assert!(box_handle.contains_key("key")?);
+              box_handle.delete("key")?;
+              assert_eq!(box_handle.get("key")?, None);
+              box_handle.close()?;
+
+              let _ = std::fs::remove_file(path);
+              Ok(())
+          }
+          EOF
+
+      - name: Verify hosted Rust crate consumer
+        working-directory: build/rust-registry-consumer
+        run: |
+          set -euo pipefail
+          cargo run --locked 2>/dev/null || {
+            cargo generate-lockfile
+            cargo run --locked
+          }
+          cargo tree -p rust_lib_dxtr_box --depth 0
+
+      - name: Record Rust registry evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > build/registry-evidence/rust.json <<EOF
+          {
+            "registry": "crates.io",
+            "crate": "rust_lib_dxtr_box",
+            "version": "$DXTR_BOX_VERSION",
+            "consumer": "fresh-cargo-project",
+            "checks": ["resolve", "compile", "run-crud-smoke"]
+          }
+          EOF
+
+      - name: Upload Rust registry evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-consumer-rust-${{ inputs.version }}
+          path: build/registry-evidence/rust.json
+          if-no-files-found: error
