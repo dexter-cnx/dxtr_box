@@ -11,7 +11,7 @@
 ```text
 Flutter package/plugin: dxtr_box
 Rust crate/native lib:  rust_lib_dxtr_box
-Package version:         1.1.0
+Package version:         1.2.0
 Dart:                    >= 3.4.0 < 4.0.0
 Flutter:                 >= 3.22.0
 flutter_rust_bridge:     2.8.0 exactly
@@ -35,9 +35,10 @@ Completed:
 - 0.9 Conformance & Startup Maturity
 - 0.10 Real-world Workload Evidence
 - 1.0 Stabilization / Release Readiness
-- **1.1 Post-release Evidence / Reliability**
+- 1.1 Post-release Evidence / Reliability
+- **1.2 Inspector CLI / Release Closure**
 
-1.0 / 1.1 sequence:
+1.0–1.2 sequence:
 
 ```text
 1.0 PR1 contract-freeze audit + stronger guards                          merged (#57)
@@ -51,7 +52,7 @@ post-release handoff sync                                                 merged
 1.1 PR3 native-size / tree-shaking decision evidence                     merged (#68)
 1.1 PR4 Dart isolate / FRB concurrency evidence                          merged (#69)
 1.1 closure audit + docs + version 1.1.0                                 merged (#70)
-1.2 planning baseline                                                    current
+1.2 Inspector CLI + release audit + docs/version synchronization         complete
 ```
 
 See:
@@ -64,6 +65,9 @@ See:
 - `docs/DART_ISOLATE_CONCURRENCY_EVIDENCE_11.md`
 - `docs/RELEASE_AUDIT_110.md`
 - `docs/ROADMAP_12.md`
+- `docs/INSPECTOR_CLI_12.md`
+- `docs/RELEASE_AUDIT_120.md`
+- `docs/FLUENT_BOX_QUERY_SPEC.md`
 
 ## Architecture
 
@@ -89,13 +93,15 @@ Primary records are authoritative. Persisted indexes are derived state maintaine
 
 ## Public frontends
 
-Dart consumers use `Box`, `BoxStore`, `BoxQuery`, `BoxQueryBuilder`, and optional authoring metadata `BoxField<T>`. `DxtrBox` remains only as a deprecated source-compatibility shim where required.
+Dart consumers use `Box`, `BoxStore`, current query builders, and optional authoring metadata `BoxField<T>`. `DxtrBox` remains only as a deprecated source-compatibility shim where required.
 
 Native Rust consumers use `DxtrBox`, `BoxHandle`, `Record`, `IndexDefinition`, `DxtrBoxError`, and full-profile query types. The Rust API is synchronous and has no Tokio commitment.
 
 Both frontends converge onto the same canonical query representation, planner, redb storage path, encryption path, and persisted indexes.
 
-## 1.0 + 1.1 evidence
+The planned **Fluent Box Query API** must preserve that architecture: it is a primary Dart authoring surface over the existing canonical Rust query semantics, not a new Dart-side query engine.
+
+## Stable evidence baseline
 
 The stable line is guarded by executable evidence rather than documentation-only claims:
 
@@ -111,10 +117,32 @@ The stable line is guarded by executable evidence rather than documentation-only
 - native-size regression policy plus reproducible Linux/macOS evaluation evidence;
 - guaranteed native concurrent reader/writer overlap and durable reopen;
 - independent Dart isolate / FRB shared-storage visibility and close/reopen durability;
+- read-only Inspector CLI semantic/encrypted/raw inspection evidence;
 - package docs + pub dry-run;
-- benchmark correctness and diagnostic smoke.
+- benchmark correctness and diagnostic smoke;
+- startup/reopen, multi-frontend, and real-world workload diagnostics.
 
-The durable format remains `dxtr_box/1`; 1.1 introduced no storage migration.
+The durable format remains `dxtr_box/1`; 1.2 introduced no storage migration.
+
+## Current performance interpretation
+
+Current diagnostics indicate that very small Flutter/Dart point reads are dominated primarily by Dart async + FRB boundary cost rather than redb lookup cost.
+
+Representative controlled evidence has shown:
+
+- Rust-native point reads in the low-microsecond/sub-microsecond class on the benchmark runner;
+- substantially higher public Dart/FRB point-read latency because fixed boundary overhead dominates tiny operations;
+- much narrower gaps for `getAll` and indexed query/sort/limit workloads because more work is amortized per native call;
+- reopen p95 below 1 ms in the tested hosted Linux startup matrix.
+
+Performance policy:
+
+1. Preserve correctness and storage semantics before chasing microbenchmarks.
+2. Prefer batching and query pushdown over repeated Dart <-> Rust crossings.
+3. Keep builder composition local to Dart; execute only terminal operations across FRB.
+4. Do not introduce a whole-box Dart cache merely to win point-read benchmarks.
+5. Track future FRB improvements because lower boundary overhead should benefit the Dart frontend without requiring a storage-engine redesign.
+6. Further redb micro-optimization is lower priority unless profiling shows the Rust core has become dominant.
 
 ## CI / local preflight
 
@@ -132,57 +160,168 @@ bash tool/install_git_hooks.sh
 
 Full merge validation retains format/analyze/tests, minimum SDK, all three Rust profiles, native integration, migration/query/index/crash-reopen regression, FRB generation reproducibility, native-size policy, package/pub readiness, benchmark correctness, and staged Android/iOS/macOS/Linux/Windows consumers.
 
-1.1 additionally retains:
-
-- manual `Native Size Evaluation` evidence on Linux/macOS, retaining TSV, generated `rust/Cargo.lock`, and locked Cargo metadata;
-- dedicated `Dart Isolate Concurrency` CI through the real Dart -> FRB -> Rust path.
-
 ## Preserved non-goals
 
-Do not turn post-1.1 maintenance into:
+Do not turn post-1.2 work into:
 
 - GPUI integration inside core;
 - Tokio/runtime commitment;
 - ORM/schema/model code generation;
 - cloud sync/CRDT/network database functionality;
 - storage-format redesign without an explicit migration plan;
-- query-engine rewrite;
+- a second query engine in Dart;
 - encryption redesign;
 - a fourth native profile;
-- broad Dart API redesign.
+- full Firebase/Firestore compatibility;
+- full SQL compatibility merely for feature count.
 
-## Next active work: 1.2 evidence-driven planning
+## Planned primary query evolution: Fluent Box Query API
 
-Do not manufacture a 1.2 feature list merely to continue development. `docs/ROADMAP_12.md` is the decision baseline: hosted 1.1.0 registry verification remains the first external release gate, while developer inspection tooling, migration/interoperability, recorded-use/native tree shaking, stronger isolate/watch/order semantics, and Web strategy remain conditional candidates.
+Detailed design: `docs/FLUENT_BOX_QUERY_SPEC.md`.
 
-A candidate moves from investigation to implementation only when there is a concrete consumer/reliability/maintenance need, executable evidence, preserved compatibility, and a smaller/saner design than introducing parallel storage semantics.
+### Product direction
 
-Registry publication remains an external release step and must not be inferred merely from repository version `1.1.0`. If/when the package is published, run the registry-resolved consumer verification against the actual hosted `1.1.0` package.
+Make **Fluent Box Query API** the documented primary Dart query experience while keeping `dxtr_box` terminology and identity.
 
-## Immediate execution plan after PR #73
+Recommended naming:
 
-PR #73 is an isolated Flutter single-key read-path experiment and optimization. The diagnostic evidence showed that the main remaining point-read cost is on the Dart/FRB boundary rather than in the Rust/redb storage core. The production change remains intentionally narrow: remove the redundant adapter async state machine while preserving the existing `Future` contract and asynchronous error delivery.
+```text
+Box
+BoxQuery
+BoxCondition
+BoxGroup
+BoxField<T>
+BoxQueryResult<T>
+BoxRecord<T>
+BoxQueryPlan
+```
 
-Execution order after PR #73:
+Do not use Firebase or Firestore naming in the public API or product positioning.
 
-1. Close PR #73 only after the full merge gate is green, review threads are resolved, and the final diff contains only the intended optimization/evidence changes. Squash-merge and delete the experiment branch after merge.
-2. Finish Rust crate publication readiness for `rust_lib_dxtr_box`: verify package metadata/version alignment, run `cargo package`, and publish to crates.io only after the package is independently valid. Rust publication is separate from pub.dev publication.
-3. Continue evidence-driven read-boundary optimization for `Box.get`, `getAll`, and query paths. Preserve the public Future API and storage semantics; do not introduce a whole-box Dart cache merely to win benchmarks.
-4. Establish an authoritative boundary benchmark matrix covering direct Rust, generated FRB, Dart adapter, and public Dart API for single-key reads, batch reads, and indexed queries. Use normalized boundary overhead and same-run comparisons rather than treating hosted-runner absolute timings as stable.
-5. Perform release synchronization only after the optimization/publication work is stable: update changelog, README/handoff/code walkthrough as needed and issue a patch release rather than bumping versions for each internal optimization PR.
+Desired Dart experience:
 
-Current point-read evidence from the experiment:
+```dart
+final users = await box
+    .query()
+    .where('status', isEqualTo: 'active')
+    .where('profile.age', isGreaterThanOrEqualTo: 18)
+    .orderBy('lastSeenAt', descending: true)
+    .limit(50)
+    .get();
+```
 
-- pre-change public `Box.get`: approximately 22.1 us/op;
-- pre-change async native adapter: approximately 15.8 us/op;
-- raw synchronous FRB get: approximately 2.1 us/op;
-- synchronous FRB get + MessagePack decode: approximately 3.0 us/op;
-- optimized public `Box.get` diagnostic: approximately 20.8 us/op;
-- optimized native adapter diagnostic: approximately 12.2 us/op.
+This syntax is intentionally document-oriented, but the implementation remains native Rust query execution.
 
-Interpret these as evidence that the adapter optimization is worthwhile and that substantial boundary overhead remains. Do not claim a 7x production `Box.get` speedup: the ~7x figure measured the diagnostic gap between the public async path and the raw synchronous boundary, not the exact improvement delivered by PR #73 itself.
+### Architectural rule
 
-Priority after #73 is Rust crates.io publication readiness first, then a broader FRB read-boundary investigation. Further redb micro-optimization is lower priority unless profiling shows the Rust storage core has become the dominant cost.
+```text
+Dart Fluent Box Query ─┐
+Rust Query Builder ────┼─> Canonical Rust Query AST
+future SQL subset ─────┘
+                              ↓
+                         Query Planner
+                              ↓
+                  persisted index / scan
+                              ↓
+                             redb
+```
+
+No frontend gets a separate planner or storage semantics.
+
+### Phase A — primary fluent surface
+
+Implement only after the current 1.2 release line is stable and the work can be isolated behind compatibility tests.
+
+Scope:
+
+- `query()` entry point;
+- immutable Dart `BoxQuery` builder;
+- nested dotted field paths;
+- `==`, `!=`, `<`, `<=`, `>`, `>=`;
+- `whereIn` / `whereNotIn`;
+- explicit AND/OR grouping without ambiguous precedence;
+- deterministic `orderBy` with record-key tie-breaking;
+- `limit` / `offset`;
+- terminal `get`, `firstOrNull`, `count`, `exists`;
+- optional `BoxField<T>` integration;
+- one-call FRB terminal execution;
+- canonical Rust planner reuse;
+- semantic parity tests against the current query path;
+- benchmark checks proving builder composition adds no extra FRB crossings.
+
+Compatibility rule for Phase A:
+
+```text
+existing query API + BoxQuery API
+```
+
+Do not delete or immediately deprecate the current public query API.
+
+### Phase B — production query ergonomics
+
+After Phase A semantics are stable:
+
+- cursor pagination: `startAt`, `startAfter`, `endAt`, `endBefore`;
+- `requireIndex()` for applications that want to reject accidental full scans;
+- `explain()` returning structured planner/index diagnostics;
+- Inspector CLI reuse of planner explain information where practical;
+- same-run scan-vs-index and Dart/FRB-vs-native benchmark evidence.
+
+### Phase C — conditional extensions
+
+Only with concrete consumer demand and executable evidence:
+
+- array operators;
+- projection/field selection when the persisted encoding can actually avoid unnecessary decode/transfer cost;
+- reactive query watching with explicit invalidation/order/isolate semantics;
+- aggregates beyond `count`;
+- SQL subset frontend.
+
+### Future SQL subset policy
+
+SQL is potentially useful as a convenience frontend, not as a replacement identity or second database engine.
+
+Candidate initial subset:
+
+```text
+SELECT
+FROM
+WHERE
+AND / OR
+= != < <= > >=
+IN
+ORDER BY
+LIMIT
+OFFSET
+COUNT(*)
+```
+
+If implemented, SQL must parse/compile into the same canonical Rust query representation used by Dart and Rust fluent APIs.
+
+Do not initially implement JOINs, CTEs, window functions, broad DDL, or full relational semantics.
+
+## Query performance rules
+
+The Fluent Box Query work is partly a developer-experience improvement and partly a boundary-efficiency strategy.
+
+Required rules:
+
+1. `.where()`, `.orderBy()`, `.limit()`, grouping, and cursor construction happen entirely in Dart memory.
+2. One terminal operation normally equals one native execution request.
+3. Filtering, sorting, index selection, `count`, and `exists` execute in Rust.
+4. `count()` must not fetch every matching value into Dart just to call `.length`.
+5. `exists()` should stop at the first authoritative match.
+6. Indexes remain planner optimizations; result semantics must remain correct without them unless `.requireIndex()` is requested.
+7. Encrypted equality/range behavior must reuse existing encryption/index contracts rather than inventing special query syntax.
+
+## Immediate post-1.2 priority order
+
+1. Keep 1.2 publication/registry verification and existing reliability gates authoritative.
+2. Continue evidence-driven FRB read-boundary investigation when changes in FRB/toolchain or consumer workloads justify it.
+3. Evaluate Fluent Box Query Phase A as the next substantial query DX change, starting with API/AST compatibility tests before implementation.
+4. Do not mix Fluent Box Query implementation with redb major-version migration, SQL syntax, reactive queries, or storage-format changes in one PR series.
+5. Evaluate newer redb releases separately with compatibility + durability + benchmark evidence before any dependency-major upgrade.
+6. Keep README, code walkthrough, handoff, and benchmark interpretation synchronized whenever the primary query API changes.
 
 ## Compatibility rule
 
