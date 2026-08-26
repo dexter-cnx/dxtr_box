@@ -1,15 +1,17 @@
 use std::env;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
 use rust_lib_dxtr_box::{
     inspector::{Inspector, MAX_KEY_PAGE_SIZE},
     DxtrBoxError,
 };
+#[cfg(feature = "full")]
+use rust_lib_dxtr_box::inspector_decode::{decode_record, InspectorDecodeError};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: usize = 100;
-const HELP: &str = "Dxtr_Box read-only inspector\n\nUsage:\n  dxtr-box-inspect --help\n  dxtr-box-inspect --version\n  dxtr-box-inspect <path> boxes [--format text|json]\n  dxtr-box-inspect <path> keys <box> [--offset N] [--limit N] [--format text|json]\n  dxtr-box-inspect <path> get <box> <key> [--format text|json]\n  dxtr-box-inspect <path> indexes <box> [--format text|json]\n\nCommands:\n  boxes      List discovered .dxtr boxes in deterministic order\n  keys       List a bounded deterministic page of record keys\n  get        Inspect one raw persisted record payload\n  indexes    List persisted index definitions\n";
+const HELP: &str = "Dxtr_Box read-only inspector\n\nUsage:\n  dxtr-box-inspect --help\n  dxtr-box-inspect --version\n  dxtr-box-inspect <path> boxes [--format text|json]\n  dxtr-box-inspect <path> keys <box> [--offset N] [--limit N] [--format text|json]\n  dxtr-box-inspect <path> get <box> <key> [--raw] [--key-stdin] [--format text|json]\n  dxtr-box-inspect <path> indexes <box> [--format text|json]\n\nCommands:\n  boxes      List discovered .dxtr boxes in deterministic order\n  keys       List a bounded deterministic page of record keys\n  get        Decode one record; use --raw for persisted MessagePack bytes\n  indexes    List persisted index definitions\n\nSecrets:\n  --key-stdin reads encrypted-box key material from stdin and never accepts the raw secret in argv\n";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -28,7 +30,7 @@ enum Command {
     Get {
         box_name: String,
         key: String,
-        format: OutputFormat,
+        options: GetOptions,
     },
     Indexes {
         box_name: String,
@@ -95,7 +97,7 @@ fn parse_command(args: &[String]) -> Result<Command, (u8, String)> {
             Ok(Command::Get {
                 box_name: box_name.clone(),
                 key: key.clone(),
-                format: parse_format(&args[3..])?,
+                options: parse_get_options(&args[3..])?,
             })
         }
         "indexes" => {
@@ -142,28 +144,8 @@ fn execute(command: Command, inspector: &Inspector) -> Result<(), (u8, String)> 
         Command::Get {
             box_name,
             key,
-            format,
-        } => {
-            require_box(inspector, &box_name)?;
-            let Some(record) = inspector
-                .get(&box_name, &key)
-                .map_err(map_inspector_error)?
-            else {
-                return Err((4, format!("key '{key}' was not found in box '{box_name}'")));
-            };
-            let hex = hex_encode(&record.value);
-            if format == OutputFormat::Json {
-                let output = format!(
-                    "{{\"box\":{},\"key\":{},\"encoding\":\"messagepack-raw-hex\",\"value\":{}}}\n",
-                    json_string(&box_name),
-                    json_string(&record.key),
-                    json_string(&hex)
-                );
-                write_stdout(output.as_bytes())
-            } else {
-                write_stdout(format!("{}\t{hex}\n", record.key).as_bytes())
-            }
-        }
+            options,
+        } => execute_get(inspector, &box_name, &key, options),
         Command::Indexes { box_name, format } => {
             require_box(inspector, &box_name)?;
             let indexes = inspector.indexes(&box_name).map_err(map_inspector_error)?;
@@ -198,6 +180,66 @@ fn execute(command: Command, inspector: &Inspector) -> Result<(), (u8, String)> 
     }
 }
 
+fn execute_get(
+    inspector: &Inspector,
+    box_name: &str,
+    key: &str,
+    options: GetOptions,
+) -> Result<(), (u8, String)> {
+    require_box(inspector, box_name)?;
+
+    if options.raw {
+        let Some(record) = inspector.get(box_name, key).map_err(map_inspector_error)? else {
+            return Err((4, format!("key '{key}' was not found in box '{box_name}'")));
+        };
+        let hex = hex_encode(&record.value);
+        if options.format == OutputFormat::Json {
+            let output = format!(
+                "{{\"box\":{},\"key\":{},\"encoding\":\"messagepack-raw-hex\",\"value\":{}}}\n",
+                json_string(box_name),
+                json_string(&record.key),
+                json_string(&hex)
+            );
+            return write_stdout(output.as_bytes());
+        }
+        return write_stdout(format!("{}\t{hex}\n", record.key).as_bytes());
+    }
+
+    #[cfg(feature = "full")]
+    {
+        let password = if options.key_stdin {
+            Some(read_key_stdin()?)
+        } else {
+            None
+        };
+        let Some(record) = decode_record(inspector, box_name, key, password.as_deref())
+            .map_err(map_decode_error)?
+        else {
+            return Err((4, format!("key '{key}' was not found in box '{box_name}'")));
+        };
+        if options.format == OutputFormat::Json {
+            let output = format!(
+                "{{\"box\":{},\"key\":{},\"encoding\":\"messagepack-json\",\"value\":{}}}\n",
+                json_string(box_name),
+                json_string(&record.key),
+                record.value_json
+            );
+            return write_stdout(output.as_bytes());
+        }
+        return write_stdout(format!("{}\t{}\n", record.key, record.value_json).as_bytes());
+    }
+
+    #[cfg(not(feature = "full"))]
+    {
+        let _ = (inspector, box_name, key, options);
+        Err((
+            6,
+            "semantic record decoding requires the full native profile; use --raw for persisted bytes"
+                .to_owned(),
+        ))
+    }
+}
+
 fn require_box(inspector: &Inspector, box_name: &str) -> Result<(), (u8, String)> {
     if inspector
         .box_exists(box_name)
@@ -213,6 +255,12 @@ struct KeyOptions {
     offset: usize,
     limit: usize,
     format: OutputFormat,
+}
+
+struct GetOptions {
+    format: OutputFormat,
+    raw: bool,
+    key_stdin: bool,
 }
 
 fn parse_key_options(args: &[String]) -> Result<KeyOptions, (u8, String)> {
@@ -250,6 +298,42 @@ fn parse_key_options(args: &[String]) -> Result<KeyOptions, (u8, String)> {
     })
 }
 
+fn parse_get_options(args: &[String]) -> Result<GetOptions, (u8, String)> {
+    let mut format = OutputFormat::Text;
+    let mut raw = false;
+    let mut key_stdin = false;
+    let mut position = 0;
+    while position < args.len() {
+        match args[position].as_str() {
+            "--raw" => {
+                raw = true;
+                position += 1;
+            }
+            "--key-stdin" => {
+                key_stdin = true;
+                position += 1;
+            }
+            "--format" => {
+                format = parse_format_value(args.get(position + 1))?;
+                position += 2;
+            }
+            option => return Err((2, format!("unexpected option '{option}'"))),
+        }
+    }
+    if raw && key_stdin {
+        return Err((
+            2,
+            "--key-stdin cannot be combined with --raw because raw inspection does not decrypt"
+                .to_owned(),
+        ));
+    }
+    Ok(GetOptions {
+        format,
+        raw,
+        key_stdin,
+    })
+}
+
 fn parse_format(args: &[String]) -> Result<OutputFormat, (u8, String)> {
     if args.is_empty() {
         return Ok(OutputFormat::Text);
@@ -277,6 +361,20 @@ fn parse_usize_option(args: &[String], position: usize, name: &str) -> Result<us
         .map_err(|_| (2, format!("{name} must be a non-negative integer")))
 }
 
+fn read_key_stdin() -> Result<String, (u8, String)> {
+    let mut value = String::new();
+    io::stdin()
+        .read_to_string(&mut value)
+        .map_err(|error| (5, format!("read encryption key from stdin: {error}")))?;
+    while value.ends_with('\n') || value.ends_with('\r') {
+        value.pop();
+    }
+    if value.is_empty() {
+        return Err((5, "encryption key from stdin cannot be empty".to_owned()));
+    }
+    Ok(value)
+}
+
 fn map_inspector_error(error: DxtrBoxError) -> (u8, String) {
     let code = match error {
         DxtrBoxError::InvalidInput { .. } => 3,
@@ -284,6 +382,17 @@ fn map_inspector_error(error: DxtrBoxError) -> (u8, String) {
         DxtrBoxError::Engine { .. } => 1,
     };
     (code, error.to_string())
+}
+
+#[cfg(feature = "full")]
+fn map_decode_error(error: InspectorDecodeError) -> (u8, String) {
+    match error {
+        InspectorDecodeError::Storage(error) => map_inspector_error(error),
+        InspectorDecodeError::Authentication(message) | InspectorDecodeError::Decode(message) => {
+            (5, message)
+        }
+        InspectorDecodeError::Unsupported(message) => (6, message),
+    }
 }
 
 fn write_lines<'a>(lines: impl Iterator<Item = &'a str>) -> Result<(), (u8, String)> {
