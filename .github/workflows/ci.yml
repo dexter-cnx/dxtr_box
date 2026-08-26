@@ -42,6 +42,7 @@ jobs:
       linux: ${{ steps.filter.outputs.linux }}
       windows: ${{ steps.filter.outputs.windows }}
       full_validation: ${{ steps.mode.outputs.full_validation }}
+      docs_only: ${{ steps.mode.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -154,12 +155,39 @@ jobs:
       - name: Resolve validation mode
         id: mode
         shell: bash
+        env:
+          DOCS: ${{ steps.filter.outputs.docs }}
+          DART_CORE: ${{ steps.filter.outputs.dart_core }}
+          RUST_CORE: ${{ steps.filter.outputs.rust_core }}
+          ENCRYPTION: ${{ steps.filter.outputs.encryption }}
+          FFI: ${{ steps.filter.outputs.ffi }}
+          DURABLE_STORAGE: ${{ steps.filter.outputs.durable_storage }}
+          PACKAGING: ${{ steps.filter.outputs.packaging }}
+          PLATFORM: ${{ steps.filter.outputs.platform }}
+          NATIVE_SIZE: ${{ steps.filter.outputs.native_size }}
+          BENCHMARK: ${{ steps.filter.outputs.benchmark }}
+          CI_CHANGE: ${{ steps.filter.outputs.ci }}
+          PUBLIC_API: ${{ steps.filter.outputs.public_api }}
+          ANDROID: ${{ steps.filter.outputs.android }}
+          IOS: ${{ steps.filter.outputs.ios }}
+          MACOS: ${{ steps.filter.outputs.macos }}
+          LINUX: ${{ steps.filter.outputs.linux }}
+          WINDOWS: ${{ steps.filter.outputs.windows }}
         run: |
-          if [[ "${{ github.event_name }}" != "pull_request" || "${{ github.event.pull_request.draft }}" == "false" ]]; then
-            echo 'full_validation=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'full_validation=false' >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+
+          full_validation=false
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" || "$CI_CHANGE" == "true" ]]; then
+            full_validation=true
           fi
+
+          docs_only=false
+          if [[ "$DOCS" == "true" && "$DART_CORE" != "true" && "$RUST_CORE" != "true" && "$ENCRYPTION" != "true" && "$FFI" != "true" && "$DURABLE_STORAGE" != "true" && "$PACKAGING" != "true" && "$PLATFORM" != "true" && "$NATIVE_SIZE" != "true" && "$BENCHMARK" != "true" && "$CI_CHANGE" != "true" && "$PUBLIC_API" != "true" && "$ANDROID" != "true" && "$IOS" != "true" && "$MACOS" != "true" && "$LINUX" != "true" && "$WINDOWS" != "true" ]]; then
+            docs_only=true
+          fi
+
+          echo "full_validation=$full_validation" >> "$GITHUB_OUTPUT"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
 
   fast-ci:
     name: Fast CI
@@ -168,17 +196,36 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Docs-only mandatory gate
+        if: ${{ needs.change-detection.outputs.docs_only == 'true' }}
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --check "$PR_BASE_SHA" "$CURRENT_SHA"
+          else
+            git diff --check "$PUSH_BEFORE_SHA" "$CURRENT_SHA"
+          fi
       - uses: subosito/flutter-action@v2
+        if: ${{ needs.change-detection.outputs.docs_only != 'true' }}
         with:
           channel: stable
           cache: true
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        if: ${{ needs.change-detection.outputs.docs_only != 'true' }}
         with:
           toolchain: stable
           components: rustfmt, clippy
           cache: true
           cache-workspaces: rust
       - name: Fast mandatory gate
+        if: ${{ needs.change-detection.outputs.docs_only != 'true' }}
         run: make ci-fast
 
   minimum-sdk:
