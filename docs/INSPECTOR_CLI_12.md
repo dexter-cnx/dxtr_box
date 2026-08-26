@@ -43,7 +43,7 @@ In the default/full profile, `get` semantically decodes persisted MessagePack us
 - `@dxtr:bytes` -> `{ "$dxtrType": "bytes", "data": [...] }`;
 - `@dxtr:datetime` -> `{ "$dxtrType": "datetime", "microsecondsSinceEpoch": ..., "isUtc": true }`.
 
-`--raw` returns persisted MessagePack bytes instead of semantic decoding.
+`--raw` bypasses semantic decoding and returns the exact persisted record bytes. For plaintext boxes those bytes are the persisted MessagePack payload. For encrypted boxes they remain the stored nonce + ChaCha20Poly1305 ciphertext/authentication data and are **not** MessagePack until successfully decrypted through normal semantic `get` with `--key-stdin`.
 
 ## Encryption and key input
 
