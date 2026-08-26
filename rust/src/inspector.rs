@@ -29,9 +29,12 @@ impl Inspector {
         }
 
         let base_path = fs::canonicalize(requested).map_err(|error| {
+            DxtrBoxError::invalid_input(format!("resolve inspector path {:?}: {error}", requested))
+        })?;
+        fs::read_dir(&base_path).map_err(|error| {
             DxtrBoxError::invalid_input(format!(
-                "resolve inspector path {:?}: {error}",
-                requested
+                "inspector path {:?} is not readable: {error}",
+                base_path
             ))
         })?;
         Ok(Self { base_path })
@@ -47,16 +50,21 @@ impl Inspector {
     /// that need database contents must use a separately tested non-mutating
     /// inspection seam rather than the runtime `db::open` path.
     pub fn boxes(&self) -> Result<Vec<String>, DxtrBoxError> {
-        let entries = fs::read_dir(&self.base_path)
-            .map_err(|error| DxtrBoxError::engine(format!("read inspector path: {error}")))?;
+        let entries = fs::read_dir(&self.base_path).map_err(|error| {
+            DxtrBoxError::invalid_input(format!(
+                "inspector path {:?} is not readable: {error}",
+                self.base_path
+            ))
+        })?;
 
         let mut boxes = Vec::new();
         for entry in entries {
-            let entry = entry
-                .map_err(|error| DxtrBoxError::engine(format!("read directory entry: {error}")))?;
-            let file_type = entry
-                .file_type()
-                .map_err(|error| DxtrBoxError::engine(format!("read file type: {error}")))?;
+            let entry = entry.map_err(|error| {
+                DxtrBoxError::invalid_input(format!("read inspector directory entry: {error}"))
+            })?;
+            let file_type = entry.file_type().map_err(|error| {
+                DxtrBoxError::invalid_input(format!("read inspector file type: {error}"))
+            })?;
             if !file_type.is_file() {
                 continue;
             }
@@ -105,7 +113,10 @@ mod tests {
         let before_zebra = fs::read(&zebra).expect("read zebra before");
 
         let inspector = Inspector::open(root.path()).expect("open inspector");
-        assert_eq!(inspector.boxes().expect("list boxes"), vec!["alpha", "zebra"]);
+        assert_eq!(
+            inspector.boxes().expect("list boxes"),
+            vec!["alpha", "zebra"]
+        );
 
         assert_eq!(fs::read(&alpha).expect("read alpha after"), before_alpha);
         assert_eq!(fs::read(&zebra).expect("read zebra after"), before_zebra);
