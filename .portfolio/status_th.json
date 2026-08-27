@@ -4,17 +4,17 @@
     "title": "dxtr_box",
     "tagline": "เลเยอร์ข้อมูลแบบ local-first สำหรับ Flutter ที่ใช้ Rust เป็นแกนหลัก",
     "status": "active",
-    "version": null
+    "version": "1.2.0"
   },
   "summary": {
     "short": "dxtr_box เป็นเลเยอร์ข้อมูลภายในเครื่องที่เน้นการเข้าถึงจาก Flutter อย่างรวดเร็ว ใช้ Rust เป็นแกนจัดเก็บข้อมูล และมี API ที่เป็นมิตรกับ Flutter",
-    "long": "งานปัจจุบันเน้นการปรับปรุง performance, การทดสอบข้าม frontend, เก็บ benchmark evidence และวาง roadmap สำหรับ fluent query API แบบ Firestore-like โดยให้ core ไม่ผูกกับ frontend ใด frontend หนึ่ง"
+    "long": "งานปัจจุบันเน้นการปรับปรุง performance, การทดสอบข้าม frontend, เก็บ benchmark evidence และวาง roadmap สำหรับ Fluent Box Query API โดยให้ core ไม่ผูกกับ frontend ใด frontend หนึ่ง"
   },
   "highlights": [
     "Rust-backed storage core",
     "Flutter-friendly local data API",
     "Performance และ benchmark validation",
-    "Fluent query API roadmap"
+    "Roadmap ของ Fluent Box Query API"
   ],
   "tech": ["Dart", "Flutter", "Rust"],
   "links": {
