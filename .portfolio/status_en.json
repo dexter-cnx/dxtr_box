@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "title": "dxtr_box",
+    "tagline": "A local-first data layer for Flutter with a Rust-backed core.",
+    "status": "active",
+    "version": null
+  },
+  "summary": {
+    "short": "dxtr_box is a custom local data layer focused on fast Flutter access, a Rust-backed storage core, and a Flutter-friendly API.",
+    "long": "Current work includes performance hardening, cross-frontend validation, benchmark evidence, and a roadmap toward a Firestore-like fluent query API while keeping the core frontend-neutral."
+  },
+  "highlights": [
+    "Rust-backed storage core",
+    "Flutter-friendly local data API",
+    "Performance and benchmark validation",
+    "Fluent query API roadmap"
+  ],
+  "tech": ["Dart", "Flutter", "Rust"],
+  "links": {
+    "repository": "https://github.com/dexter-cnx/dxtr_box",
+    "homepage": null,
+    "package": null,
+    "docs": null,
+    "demo": null
+  },
+  "updatedAt": "2026-08-27T00:00:00Z"
+}
