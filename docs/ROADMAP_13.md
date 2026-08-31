@@ -20,11 +20,29 @@ Required invariants:
 - one terminal query operation normally maps to one native execution request;
 - SQL syntax, reactive queries, and a redb major-version migration are not bundled into 1.3.
 
+## Compatibility-safe Dart entry point
+
+`Box` already exposes the stable execution API:
+
+```dart
+Future<List<MapEntry<String, dynamic>>> query(BoxQuery query)
+```
+
+Dart does not support overloading that method with a zero-argument `query()` returning a builder. Therefore 1.3 must not introduce a conflicting `query()` signature.
+
+The compatibility-safe fluent entry point for 1.3 is:
+
+```dart
+box.queryBuilder()
+```
+
+The existing `box.query(BoxQuery)` execution API remains valid and source-compatible. A future breaking major release may reconsider the naming only through an explicit migration/versioning decision; 1.3 does not do so.
+
 ## Phase A — Primary Fluent Surface
 
 Deliver the primary `BoxQuery` authoring surface:
 
-- `box.query()` entry point;
+- `box.queryBuilder()` entry point;
 - immutable `BoxQuery` builder;
 - dotted nested field paths;
 - `==`, `!=`, `<`, `<=`, `>`, `>=`;
@@ -43,7 +61,7 @@ Desired Dart surface:
 
 ```dart
 final users = await box
-    .query()
+    .queryBuilder()
     .where('status', isEqualTo: 'active')
     .where('profile.age', isGreaterThanOrEqualTo: 18)
     .orderBy('lastSeenAt', descending: true)
@@ -81,8 +99,8 @@ Phase B does not remove the previous query API. Deprecation, if ever justified, 
 
 Before 1.3 release closure:
 
-- existing query semantic regression tests remain green;
-- new `BoxQuery` and current query APIs produce equivalent canonical query semantics where capabilities overlap;
+- existing `query(BoxQuery)` source and semantic regression tests remain green;
+- new `queryBuilder()` and current query APIs produce equivalent canonical query semantics where capabilities overlap;
 - minimum Flutter/Dart compatibility remains validated;
 - all `minimal | encryption | full` Rust profile gates remain green;
 - encrypted/plaintext query/index behavior remains covered;
@@ -90,7 +108,7 @@ Before 1.3 release closure:
 - FRB generated binding reproducibility remains green;
 - package/pub and Rust crate package readiness remain green;
 - Android/iOS/macOS/Linux/Windows staged consumers remain green;
-- docs, README, code walkthrough, and handoff reflect `BoxQuery` as the primary Dart query API only after implementation is complete.
+- docs, README, code walkthrough, and handoff reflect Fluent Box Query as the primary Dart authoring API only after implementation is complete.
 
 ## PR sequence
 
