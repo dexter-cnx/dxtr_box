@@ -8,6 +8,7 @@ const _expectedExports = <String>{
   "export 'src/query.dart';",
   "export 'src/query_builder.dart';",
   "export 'src/query_field.dart';",
+  "export 'src/query_start.dart';",
 };
 
 const _expectedRustRootExports = <String>{
