@@ -1,4 +1,5 @@
 import 'package:dxtr_box/dxtr_box.dart';
+import 'package:dxtr_box/src/native_api.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
