@@ -231,7 +231,11 @@ void _validateSingleMode({
 List<Object?> _validatedSetValues(Iterable<Object?> values, String name) {
   final snapshot = List<Object?>.unmodifiable(values);
   if (snapshot.isEmpty) {
-    throw ArgumentError.value(values, name, '$name requires at least one value');
+    throw ArgumentError.value(
+      values,
+      name,
+      '$name requires at least one value',
+    );
   }
   return snapshot;
 }
