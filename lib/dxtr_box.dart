@@ -12,3 +12,4 @@ export 'src/hive_ce_migration.dart';
 export 'src/query.dart';
 export 'src/query_builder.dart';
 export 'src/query_field.dart';
+export 'src/query_start.dart';
