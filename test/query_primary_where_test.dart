@@ -39,10 +39,13 @@ void main() {
     });
 
     test('whereIn desugars to an OR equality group', () {
-      final query = _box().queryBuilder().where(
+      final query = _box()
+          .queryBuilder()
+          .where(
             'status',
             whereIn: const <Object?>['active', 'pending'],
-          ).build();
+          )
+          .build();
 
       final root = query.where as QueryGroup;
       expect(root.operator, QueryLogicalOperator.or);
@@ -73,10 +76,13 @@ void main() {
     });
 
     test('whereNotIn desugars to an AND inequality group', () {
-      final query = _box().queryBuilder().where(
+      final query = _box()
+          .queryBuilder()
+          .where(
             'status',
             whereNotIn: const <Object?>['deleted', 'blocked'],
-          ).build();
+          )
+          .build();
 
       final root = query.where as QueryGroup;
       expect(root.operator, QueryLogicalOperator.and);
